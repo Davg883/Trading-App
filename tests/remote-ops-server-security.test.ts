@@ -3,7 +3,8 @@ import {readFileSync} from 'node:fs';
 vi.mock('server-only',()=>({}));
 const authMock=vi.hoisted(()=>vi.fn());
 vi.mock('@clerk/nextjs/server',()=>({auth:authMock}));
-import {getResearchStagingCursor,runScheduledOperations,submitResearchStaging} from '../lib/remote-ops/server';
+import {getResearchStagingCursor,runScheduledOperations,submitResearchStaging,updateOperationsSettings} from '../lib/remote-ops/server';
+import {vaultConfigured} from '../lib/brokers/vault';
 
 const STAGING_TOKEN='staging-machine-token-0123456789abcdef0123456789';
 const SCHEDULER_SECRET='scheduler-secret-token-0123456789abcdef0123456789';
@@ -161,5 +162,36 @@ describe('Phase 003 server route security & least-privilege isolation',()=>{
    const src=readFileSync(f,'utf8');
    expect(src).not.toMatch(/BROKER_VAULT_KEY_B64|CONVEX_BROKER_ADMIN_KEY|trading212-orders|equity\/orders|submitOrder/);
   }
+ });
+
+ it('enforces CSRF origin checks (403), Clerk authentication (401), and Preview environment isolation (503)',async()=>{
+  vi.stubEnv('RESEARCH_APP_ORIGIN','https://trading-app-theta-two.vercel.app');
+  vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY','pk_test_mock');
+  vi.stubEnv('CLERK_SECRET_KEY','sk_test_mock');
+
+  const crossOrigin=await updateOperationsSettings(new Request('https://trading-app-theta-two.vercel.app/api/operations/settings',{
+   method:'POST',
+   headers:{'Content-Type':'application/json',Origin:'https://evil.example.com'},
+   body:JSON.stringify({action:'set_job_enabled',jobKey:'sec_filings_collect',enabled:true}),
+  }));
+  expect(crossOrigin.status).toBe(403);
+  expect(await crossOrigin.json()).toMatchObject({error:{code:'forbidden_origin'}});
+
+  authMock.mockResolvedValueOnce({userId:null,getToken:vi.fn()});
+  const unauth=await updateOperationsSettings(new Request('https://trading-app-theta-two.vercel.app/api/operations/settings',{
+   method:'POST',
+   headers:{'Content-Type':'application/json',Origin:'https://trading-app-theta-two.vercel.app'},
+   body:JSON.stringify({action:'set_job_enabled',jobKey:'sec_filings_collect',enabled:true}),
+  }));
+  expect(unauth.status).toBe(401);
+  expect(await unauth.json()).toMatchObject({error:{code:'sign_in_required'}});
+
+  vi.stubEnv('VERCEL_ENV','preview');
+  const previewStaging=await getResearchStagingCursor(new Request('https://preview.vercel.app/api/research/staging',{
+   method:'GET',
+   headers:{Authorization:`Bearer ${STAGING_TOKEN}`},
+  }));
+  expect(previewStaging.status).toBe(503);
+  expect(vaultConfigured({VERCEL_ENV:'preview',BROKER_VAULT_KEY_VERSION:'v1'})).toBe(false);
  });
 });

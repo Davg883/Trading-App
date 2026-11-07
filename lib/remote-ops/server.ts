@@ -83,6 +83,9 @@ function constantTimeBearerMatch(headerValue:string|null,secret:string|undefined
 }
 
 function stagingConvexClient(){
+ if(process.env.VERCEL_ENV==='preview'&&process.env.ALLOW_PREVIEW_STAGING!=='true'){
+  throw new RemoteOpsError('not_configured',503);
+ }
  const url=process.env.NEXT_PUBLIC_CONVEX_URL;
  const deployKey=process.env.CONVEX_STAGING_DEPLOY_KEY||process.env.CONVEX_IMPORT_ADMIN_KEY;
  if(!url||!deployKey)throw new RemoteOpsError('not_configured',503);
@@ -95,6 +98,9 @@ function stagingConvexClient(){
 }
 
 function userConvexClient(token:string){
+ if(process.env.VERCEL_ENV==='preview'&&process.env.ALLOW_PREVIEW_STAGING!=='true'){
+  throw new RemoteOpsError('not_configured',503);
+ }
  const url=process.env.NEXT_PUBLIC_CONVEX_URL;
  if(!url)throw new RemoteOpsError('not_configured',503);
  const c=new ConvexHttpClient(url,{
@@ -145,6 +151,15 @@ function jsonSuccess(data:unknown,status=200){
 function jsonFailure(error:unknown){
  if(error instanceof RemoteOpsError){
   return Response.json({error:{code:error.code,message:ERROR_MESSAGES[error.code]}},{status:error.status,headers});
+ }
+ if(error&&typeof error==='object'&&'code' in error){
+  const code=(error as {code:unknown}).code;
+  if(code==='forbidden_origin'){
+   return Response.json({error:{code:'forbidden_origin',message:ERROR_MESSAGES.forbidden_origin}},{status:403,headers});
+  }
+  if(code==='not_configured'){
+   return Response.json({error:{code:'not_configured',message:ERROR_MESSAGES.not_configured}},{status:503,headers});
+  }
  }
  if(error instanceof z.ZodError){
   return Response.json({error:{code:'invalid_request',message:ERROR_MESSAGES.invalid_request}},{status:400,headers});
