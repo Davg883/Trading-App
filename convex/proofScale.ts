@@ -1,4 +1,4 @@
-import {researcher,reviewer} from './authz';
+import {researcher,reviewer,signedIn} from './authz';
 import { v } from 'convex/values';
 import type { GenericId } from 'convex/values';
 import type { GenericMutationCtx,GenericQueryCtx } from 'convex/server';
@@ -8,7 +8,7 @@ import { evidenceRecordSchema,gateRecordSchema,scopeSchema,evaluateGate,evaluate
 
 const VERSION='proof-001.2-v1';
 type Ctx=GenericMutationCtx<DataModel>|GenericQueryCtx<DataModel>;
-async function identity(ctx:Ctx){const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return user;}
+async function identity(ctx:Ctx){return await signedIn(ctx);}
 // actorType must be a signed identity-provider claim, never a browser argument.
 /** Research authoring: any signed-in human researcher. Stage decisions: explicit reviewer grant (convex/authz.ts). */
 async function human(ctx:Ctx){return await researcher(ctx);}

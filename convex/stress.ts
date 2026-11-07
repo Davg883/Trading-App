@@ -1,3 +1,4 @@
+import { signedIn } from './authz';
 import { v } from 'convex/values';
 import { query, mutation, internalMutation } from './server';
 import { importMarketData, STRESS_VERSION } from '../lib/market-data';
@@ -20,15 +21,15 @@ export const importDataset=internalMutation({args:{owner:v.string(),externalId:v
   if(previous){if(previous.datasetJson!==datasetJson||previous.financialsJson!==financialsJson||canonical(previous.earningsEventIds)!==canonical(earningsEventIds))throw new Error('Immutable import ID conflicts; append a new version');return previous._id;}
   return ctx.db.insert('stressImports',{owner:args.owner,externalId:args.externalId,datasetJson,financialsJson,earningsEventIds,ingestedAt:now,version:STRESS_VERSION});
 }});
-export const listImports=query({args:{},handler:async(ctx)=>{const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');const rows=await ctx.db.query('stressImports').withIndex('by_owner',q=>q.eq('owner',user.tokenIdentifier)).take(100);return rows.map(({_id,externalId,ingestedAt,version})=>({_id,externalId,ingestedAt,version}));}});
+export const listImports=query({args:{},handler:async(ctx)=>{const user=await signedIn(ctx);const rows=await ctx.db.query('stressImports').withIndex('by_owner',q=>q.eq('owner',user.tokenIdentifier)).take(100);return rows.map(({_id,externalId,ingestedAt,version})=>({_id,externalId,ingestedAt,version}));}});
 export const detail=query({args:{datasetId:v.id('stressImports')},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');const record=await ctx.db.get(args.datasetId);if(!record||record.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
+  const user=await signedIn(ctx);const record=await ctx.db.get(args.datasetId);if(!record||record.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   const outcomes=await ctx.db.query('stressOutcomes').withIndex('by_dataset',q=>q.eq('owner',user.tokenIdentifier).eq('datasetId',record._id)).take(100);
   const results=await Promise.all(outcomes.map(o=>ctx.db.query('stressResults').withIndex('by_outcome',q=>q.eq('owner',user.tokenIdentifier).eq('outcomeId',o._id)).first()));
   return {record,dataset:JSON.parse(record.datasetJson),financials:JSON.parse(record.financialsJson),outcomes:outcomes.map((o,i)=>({...o,registration:JSON.parse(o.registrationJson),result:results[i]?JSON.parse(results[i]!.resultJson):null}))};
 }});
 export const registerWindow=mutation({args:{datasetId:v.id('stressImports'),registrationJson:v.string()},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');const dataset=await ctx.db.get(args.datasetId);if(!dataset||dataset.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
+  const user=await signedIn(ctx);const dataset=await ctx.db.get(args.datasetId);if(!dataset||dataset.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   if(args.registrationJson.length>250000)throw new Error('Calendar exceeds pilot limit');
   const now=Date.now(),requested=outcomeRegistrationSchema.parse(JSON.parse(args.registrationJson));
   const registration=registerOutcome({...requested,registeredAt:now});

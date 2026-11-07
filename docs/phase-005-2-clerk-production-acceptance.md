@@ -121,7 +121,24 @@ Upon navigating to `https://capital.aiguides.co.uk/` and opening the Sign-In mod
 - **Android Chrome Mobile (Pixel 7 `412×915`):**
   - `pkPrefix`: `"pk_live_"`, `fapi`: `"clerk.capital.aiguides.co.uk"`, `instanceType`: `"production"`, `showDevWarning`: `false`, `devBadgeCount`: `0`, `modalVisible`: `true`, `overflowPx`: `0`.
 
-### 4.3 Brokerage & Trading Safety Controls
+### 4.3 Audit Items 7 & 8 — Bounded Session-Activation Guard & Strict Dual OIDC / Custom JWT Application Binding
+- **Item 7 (`window.__internal_onBeforeSetActive` / `window.__internal_onAfterSetActive` Guard in [`app/layout.tsx`](../app/layout.tsx) & [`lib/clerk-convex-auth.ts`](../lib/clerk-convex-auth.ts))**:
+  - Replaced the raw `Promise.race` wrapper with `installBoundedSetActiveGuard`:
+    1. **Zero Timer Leaks**: Calls `clearTimeout(timerId)` immediately when `next(intent)` resolves or rejects (`diag.activeTimers === 0`).
+    2. **Late Failure Isolation**: Tracks `settled = true` so any late settlement or rejection arriving after the 2500 ms deadline is ignored (`diag.lateSettlementIgnored = true`) without triggering `unhandledrejection` or mutating state mid-flight.
+    3. **Eliminating False Success**: If `invalidateCacheAction()` times out or rejects (`diag.lastOutcome === "timeout" | "error"`), sets `diag.needsHardReloadAfterSetActive = true` and hooks `window.__internal_onAfterSetActive` so that once Clerk finishes persisting the new `__session` / `__client_uat` cookies, the browser executes `window.location.reload()` to guarantee fresh server-rendered RSC state rather than a stale RSC cache.
+- **Item 8 (Dual OIDC / `customJwt` Issuer, Audience & Authorized-Party `azp` Binding in [`convex/authz.ts`](../convex/authz.ts) & [`lib/clerk-convex-auth.ts`](../lib/clerk-convex-auth.ts))**:
+  - Routed all authenticated Convex queries/mutations across `convex/*.ts` through `signedIn(ctx)` → `verifyIdentityClaims(user)` in [`convex/authz.ts`](../convex/authz.ts), and added `validateClerkConvexJwtClaims(token)` in [`lib/clerk-convex-auth.ts`](../lib/clerk-convex-auth.ts).
+  - Enforces:
+    1. `issuer` (`iss`) matches `CLERK_JWT_ISSUER_DOMAIN` (`https://clerk.capital.aiguides.co.uk`).
+    2. `aud` (when present) is `"convex"` or an authorised application origin.
+    3. `azp` (Authorized Party on Clerk default RS256 session tokens) matches an authorised application origin (`https://capital.aiguides.co.uk`, `https://trading-app-theta-two.vercel.app`, or `http://localhost:3000`). Any token with a foreign `iss`, `aud`, or `azp` is rejected.
+
+### 4.4 Clerk Plan Upgrade & First Production Sign-Up / Sign-In Resolution (`422` & `403 Reference: CZiRpJw9`)
+- **Why `422` (`POST /v1/client/sign_ins`) occurred:** Clerk Production instances (`ins_3LmpoQvdoIwHQTiSi7QsZu1cKRt`) start with **0 users** (Development users from `harmless-akita-9211.clerk.accounts.dev` are never copied to Production). Signing in before creating the account in Production returns `422` (`form_identifier_not_found: Couldn't find your account`).
+- **Why `403` (`Reference: CZiRpJw9`) occurred & was resolved:** Before the Clerk plan upgrade, Clerk Protect (`specter.protect.clerk.com` / `fraud_action_blocked`) blocked the Sign-Up attempt with HTTP `403`. Following the Clerk plan upgrade, live verification against `https://capital.aiguides.co.uk` confirmed that `POST https://clerk.capital.aiguides.co.uk/v1/client/sign_ups` (`200 OK`, `missing_fields: []`) and `POST .../prepare_verification` (`200 OK`, `email_code`) now succeed without any `403` block.
+
+### 4.5 Brokerage & Trading Safety Controls
 - **Production Broker Vault:** Remains unconfigured and isolated (`Secure broker storage is not configured`).
 - **Live & Demo Execution:** Both `LIVE_TRADING_ENABLED` and `DEMO_TRADING_ENABLED` remain `false`, and the emergency Live kill switch remains engaged by default.
-- **Unit & Security Regression Suite:** `47 passed (47)` test files, `442 passed (442)` tests (`npm test`).
+- **Unit & Security Regression Suite:** `47 passed (47)` test files, `444 passed (444)` tests (`npm test`).

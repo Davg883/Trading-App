@@ -1,3 +1,4 @@
+import {signedIn} from './authz';
 import {v,type GenericId} from 'convex/values';
 import type {GenericQueryCtx,GenericMutationCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel,type TableName} from './server';
@@ -15,7 +16,7 @@ const bytes=(s:string)=>new TextEncoder().encode(s).byteLength;
 function required(value:string,label:string,max=500){if(!value.trim()||value.length>max)throw new Error(`${label} is required and must fit the research limit`);}
 function instant(value:number,label:string){if(!Number.isSafeInteger(value)||value<0||value>8.64e15)throw new Error(`${label} must be a valid timestamp`);}
 function nonfuture(value:number,label:string,now:number){instant(value,label);if(value>now)throw new Error(`${label} cannot be in the future`);}
-async function identity(ctx:Context){const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return user;}
+async function identity(ctx:Context){return await signedIn(ctx);}
 async function owned<T extends TableName>(ctx:Context,id:GenericId<T>,owner:string){const row=await ctx.db.get(id);if(!row||row.owner!==owner)throw new Error('Record unavailable');return row;}
 function assertReceived(value:unknown,now:number):void{if(Array.isArray(value)){value.forEach(x=>assertReceived(x,now));return;}if(value!==null&&typeof value==='object')for(const [k,x] of Object.entries(value)){if((k==='receivedAt'||k==='publishedAt'||k==='capturedAt')&&typeof x==='number'&&x>now)throw new Error('Future receipt or publication cannot be imported as already known');assertReceived(x,now);}}
 function metadata(row:DataModel['policyRiskCases']['document']){return {caseId:row._id,externalId:row.externalId,name:row.name,mode:row.mode,ingestedAt:row.ingestedAt,version:row.version};}

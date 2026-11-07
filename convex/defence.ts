@@ -1,4 +1,4 @@
-import {reviewer} from './authz';
+import {reviewer,signedIn} from './authz';
 import {v,type GenericId} from 'convex/values';
 import type {GenericQueryCtx,GenericMutationCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel,type TableName} from './server';
@@ -8,7 +8,7 @@ import {parseDefenceCase,freezeDefenceCase} from '../lib/portfolio-defence';
 const VERSION='defence-001.3-v1' as const;
 type Context=GenericQueryCtx<DataModel>|GenericMutationCtx<DataModel>;
 function canonical(value:unknown):string{if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`;if(value!==null&&typeof value==='object')return `{${Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;return JSON.stringify(value);}
-async function identity(ctx:Context){const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return user;}
+async function identity(ctx:Context){return await signedIn(ctx);}
 /** Consequential decisions require an explicit, server-stored reviewer grant (see convex/authz.ts). */
 async function human(ctx:Context){return await reviewer(ctx);}
 async function owned<T extends TableName>(ctx:Context,id:GenericId<T>,owner:string){const row=await ctx.db.get(id);if(!row||row.owner!==owner)throw new Error('Record unavailable');return row;}

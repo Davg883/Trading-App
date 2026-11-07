@@ -1,3 +1,4 @@
+import {signedIn} from './authz';
 import {v,type GenericId} from 'convex/values';
 import {internalQueryGeneric,type QueryBuilder,type GenericMutationCtx,type GenericQueryCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel} from './server';
@@ -11,7 +12,7 @@ type Connection=DataModel['brokerConnections']['document'];
 const COOLDOWN_MS=60_000,LEASE_MS=90_000;
 function validOwner(owner:string){if(!owner.trim()||owner.length>1000)throw new Error('Owner required');}
 function metadata(row:Connection){return {connectionId:row._id,provider:row.provider,environment:row.environment,maskedKey:row.maskedKey,status:row.status,readOnly:true as const,createdAt:row.createdAt,updatedAt:row.updatedAt,lastSuccessfulSyncAt:row.lastSuccessfulSyncAt,lastVerifiedAt:row.lastVerifiedAt,lastAttemptAt:row.lastAttemptAt,lastErrorCode:row.lastErrorCode,nextAllowedAt:row.nextAllowedAt,rateLimits:parseRateLimits(row.rateLimitJson)};}
-async function authenticatedOwner(ctx:Ctx){const identity=await ctx.auth.getUserIdentity();if(!identity)throw new Error('Sign in required');return identity.tokenIdentifier;}
+async function authenticatedOwner(ctx:Ctx){const identity=await signedIn(ctx);return identity.tokenIdentifier;}
 async function owned(ctx:Ctx,connectionId:GenericId<'brokerConnections'>,owner:string,environment?:'demo'|'live'){validOwner(owner);const row=await ctx.db.get(connectionId);if(!row||row.owner!==owner||environment!==undefined&&row.environment!==environment)throw new Error('Connection unavailable');return row;}
 function validEncryptedPayload(value:string){
   if(value.length>20_000)throw new Error('Invalid encrypted credential envelope');
@@ -107,7 +108,7 @@ const MIN_INTERVAL=5,MAX_INTERVAL=1440,CLAIM_MS=120_000,MAX_BACKOFF_MS=6*3600_00
 const PAUSE_ON=new Set(['invalid_credentials','credentials_revoked','environment_mismatch','missing_permissions','invalid_configuration']);
 type Schedule=DataModel['brokerSyncSchedules']['document'];
 function scheduleView(s:Schedule){return {environment:s.environment,enabled:s.enabled,intervalMinutes:s.intervalMinutes,optedInAt:s.optedInAt,nextRunAt:s.nextRunAt,lastRunAt:s.lastRunAt,lastOutcome:s.lastOutcome,consecutiveFailures:s.consecutiveFailures,pausedReason:s.pausedReason};}
-async function humanOwner(ctx:Ctx){const identity=await ctx.auth.getUserIdentity();if(!identity)throw new Error('Sign in required');if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('Only the account owner can change automatic synchronisation');return identity.tokenIdentifier;}
+async function humanOwner(ctx:Ctx){const identity=await signedIn(ctx);if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('Only the account owner can change automatic synchronisation');return identity.tokenIdentifier;}
 
 export const schedules=query({args:{},handler:async ctx=>{const owner=await authenticatedOwner(ctx);return (await ctx.db.query('brokerSyncSchedules').withIndex('by_owner_env',q=>q.eq('owner',owner)).collect()).map(scheduleView);}});
 

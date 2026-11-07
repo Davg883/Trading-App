@@ -1,4 +1,4 @@
-import {reviewer} from './authz';
+import {reviewer,signedIn} from './authz';
 import { query, mutation, internalMutation } from './server';
 import { v } from 'convex/values';
 import { brier, checkRisk, paperFill } from '../lib/research';
@@ -8,7 +8,7 @@ import type { GenericId } from 'convex/values';
 import type { GenericQueryCtx, GenericMutationCtx } from 'convex/server';
 import type { DataModel, TableName } from './server';
 type Ctx=GenericQueryCtx<DataModel>|GenericMutationCtx<DataModel>;
-async function owner(ctx:Ctx){const identity=await ctx.auth.getUserIdentity();if(!identity)throw new Error('Sign in required');return identity.tokenIdentifier;}
+async function owner(ctx:Ctx){const identity=await signedIn(ctx);return identity.tokenIdentifier;}
 async function owned<T extends TableName>(ctx:Ctx,id:GenericId<T>,who:string){const doc=await ctx.db.get(id);if(!doc||doc.owner!==who)throw new Error('Record unavailable');return doc;}
 const finite=(values:number[])=>{if(values.some(n=>!Number.isFinite(n)))throw new Error('Finite numbers required');};
 export const dashboard=query({args:{},handler:async(ctx)=>{const who=await owner(ctx);const read=async(table:'experiments'|'forecasts'|'portfolios'|'proposals'|'evidence'|'audit'|'fills')=>ctx.db.query(table).withIndex('by_owner',q=>q.eq('owner',who)).take(500);return {experiments:await read('experiments'),forecasts:await read('forecasts'),portfolios:await read('portfolios'),proposals:await read('proposals'),evidence:await read('evidence'),audit:await read('audit'),fills:await read('fills')};}});

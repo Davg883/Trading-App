@@ -1,4 +1,4 @@
-import {reviewer} from './authz';
+import {reviewer,signedIn} from './authz';
 import {v,type GenericId} from 'convex/values';
 import type {GenericQueryCtx,GenericMutationCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel,type TableName} from './server';
@@ -9,7 +9,7 @@ function canonical(value:unknown):string{if(Array.isArray(value))return `[${valu
 function required(value:string,label:string,maximum=4000){if(!value.trim()||value.length>maximum)throw new Error(`${label} is required and must fit the research limit`);}
 function instant(value:number,label:string){if(!Number.isSafeInteger(value)||value<0||value>8.64e15)throw new Error(`${label} must be a valid timestamp`);}
 function nonfuture(value:number,label:string,now:number){instant(value,label);if(value>now)throw new Error(`${label} cannot be in the future`);}
-async function identity(ctx:Context){const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return user;}
+async function identity(ctx:Context){return await signedIn(ctx);}
 /** Consequential decisions require an explicit, server-stored reviewer grant (see convex/authz.ts). */
 async function human(ctx:Context){return await reviewer(ctx);}
 async function owned<T extends TableName>(ctx:Context,id:GenericId<T>,owner:string){const row=await ctx.db.get(id);if(!row||row.owner!==owner)throw new Error('Record unavailable');return row;}

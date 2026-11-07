@@ -1,3 +1,4 @@
+import { signedIn } from './authz';
 import { v } from 'convex/values';
 import { query, mutation, internalMutation } from './server';
 import { metricRecord, sourceRecord } from './earningsValidators';
@@ -30,13 +31,13 @@ export const appendMetrics=internalMutation({args:{owner:v.string(),eventId:v.id
   }
   return ids;
 }});
-export const listEvents=query({args:{},handler:async(ctx)=>{const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return ctx.db.query('earningsEvents').withIndex('by_owner',q=>q.eq('owner',user.tokenIdentifier)).take(100);}});
+export const listEvents=query({args:{},handler:async(ctx)=>{const user=await signedIn(ctx);return ctx.db.query('earningsEvents').withIndex('by_owner',q=>q.eq('owner',user.tokenIdentifier)).take(100);}});
 export const eventDetail=query({args:{eventId:v.id('earningsEvents')},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');const event=await ctx.db.get(args.eventId);if(!event||event.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
+  const user=await signedIn(ctx);const event=await ctx.db.get(args.eventId);if(!event||event.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   return {event,metrics:await ctx.db.query('earningsMetrics').withIndex('by_event',q=>q.eq('owner',user.tokenIdentifier).eq('eventId',args.eventId)).take(1000),snapshots:await ctx.db.query('earningsSnapshots').withIndex('by_event',q=>q.eq('owner',user.tokenIdentifier).eq('eventId',args.eventId)).take(100)};
 }});
 export const freezeSnapshot=mutation({args:{eventId:v.id('earningsEvents'),phase:v.union(v.literal('pre'),v.literal('post')),cutoff:v.number()},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');const event=await ctx.db.get(args.eventId);if(!event||event.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
+  const user=await signedIn(ctx);const event=await ctx.db.get(args.eventId);if(!event||event.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   if(!Number.isFinite(args.cutoff)||args.cutoff>Date.now())throw new Error('Future cutoff forbidden');
   const rows=await ctx.db.query('earningsMetrics').withIndex('by_event',q=>q.eq('owner',user.tokenIdentifier).eq('eventId',args.eventId)).take(1001);if(rows.length>1000)throw new Error('Evidence exceeds pilot snapshot limit');
   // Server ingestion time is also required: imported historical receipts cannot backdate this workspace's knowledge.
@@ -63,12 +64,12 @@ export const importInterpretationCase=internalMutation({args:{owner:v.string(),e
 }});
 
 export const listInterpretationCases=query({args:{},handler:async(ctx)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');
+  const user=await signedIn(ctx);
   return (await ctx.db.query('earningsInterpretationCases').withIndex('by_owner',q=>q.eq('owner',user.tokenIdentifier)).take(100)).map(row=>({caseId:row._id,eventId:row.eventId,externalId:row.externalId,name:row.name,ingestedAt:row.ingestedAt,version:row.version,mode:'retrospective' as const}));
 }});
 
 export const interpretationCaseDetail=query({args:{caseId:v.id('earningsInterpretationCases')},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');
+  const user=await signedIn(ctx);
   const row=await ctx.db.get(args.caseId);if(!row||row.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   const experiments=await ctx.db.query('earningsInterpretationExperiments').withIndex('by_case',q=>q.eq('owner',user.tokenIdentifier).eq('caseId',args.caseId)).take(100);
   const registered=await Promise.all(experiments.map(async experiment=>{
@@ -80,7 +81,7 @@ export const interpretationCaseDetail=query({args:{caseId:v.id('earningsInterpre
 
 /** Interpretation is not a financial/market forecast and cannot mutate the paper or broker domains. */
 export const registerInterpretationExperiment=mutation({args:{caseId:v.id('earningsInterpretationCases'),name:v.string(),cutoff:v.number(),models:v.array(v.object({provider:v.string(),modelVersion:v.string()}))},handler:async(ctx,args)=>{
-  const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');
+  const user=await signedIn(ctx);
   const row=await ctx.db.get(args.caseId);if(!row||row.owner!==user.tokenIdentifier)throw new Error('Record unavailable');
   const now=Date.now();
   if(!args.name.trim()||args.name.length>500||!Number.isSafeInteger(args.cutoff)||args.cutoff<0||args.cutoff>now)throw new Error('Name and finite nonfuture evidence cutoff required');

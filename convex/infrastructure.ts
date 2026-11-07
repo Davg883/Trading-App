@@ -1,3 +1,4 @@
+import {signedIn} from './authz';
 import {v,type GenericId} from 'convex/values';
 import type {GenericQueryCtx,GenericMutationCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel,type TableName} from './server';
@@ -6,7 +7,7 @@ import {parseInfrastructureCase,freezeInfrastructureCase} from '../lib/infrastru
 const VERSION='infrastructure-001.2-v1';
 type Context=GenericQueryCtx<DataModel>|GenericMutationCtx<DataModel>;
 function canonical(value:unknown):string{if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`;if(value!==null&&typeof value==='object')return `{${Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;return JSON.stringify(value);}
-async function identity(ctx:Context){const user=await ctx.auth.getUserIdentity();if(!user)throw new Error('Sign in required');return user.tokenIdentifier;}
+async function identity(ctx:Context){const user=await signedIn(ctx);return user.tokenIdentifier;}
 async function owned<T extends TableName>(ctx:Context,id:GenericId<T>,owner:string){const row=await ctx.db.get(id);if(!row||row.owner!==owner)throw new Error('Record unavailable');return row;}
 const inputLinks={linkedEvidenceIds:v.optional(v.array(v.id('evidence'))),linkedEarningsEventIds:v.optional(v.array(v.id('earningsEvents'))),linkedProofEvidenceIds:v.optional(v.array(v.id('proofEvidence')))};
 function metadata(row:DataModel['infrastructureCases']['document']){return {caseId:row._id,externalId:row.externalId,name:row.name,mode:row.mode,version:row.version,ingestedAt:row.ingestedAt,linkedEvidenceIds:row.linkedEvidenceIds,linkedEarningsEventIds:row.linkedEarningsEventIds,linkedProofEvidenceIds:row.linkedProofEvidenceIds};}
