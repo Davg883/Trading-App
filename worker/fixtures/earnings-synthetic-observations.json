@@ -1,0 +1,62 @@
+{
+  "eventId": "SYNTHETIC-GOOGL-Q4",
+  "evaluatedAt": "2026-01-06T00:00:00Z",
+  "quotes": [
+    {
+      "symbol": "GOOGL",
+      "observedAt": "2026-01-05T14:30:00Z",
+      "receivedAt": "2026-01-05T14:30:00Z",
+      "price": 100,
+      "kind": "price_observation",
+      "verification": "verified",
+      "source": "synthetic licensed-feed fixture",
+      "currency": "USD",
+      "session": "regular",
+      "priceBasis": "unadjusted",
+      "synthetic": true,
+      "delaySeconds": 0
+    },
+    {
+      "symbol": "GOOGL",
+      "observedAt": "2026-01-05T21:00:00Z",
+      "receivedAt": "2026-01-05T21:00:00Z",
+      "price": 90,
+      "kind": "price_observation",
+      "verification": "verified",
+      "source": "synthetic licensed-feed fixture",
+      "currency": "USD",
+      "session": "regular",
+      "priceBasis": "unadjusted",
+      "synthetic": true,
+      "delaySeconds": 0
+    },
+    {
+      "symbol": "QQQ",
+      "observedAt": "2026-01-05T14:30:00Z",
+      "receivedAt": "2026-01-05T14:30:00Z",
+      "price": 100,
+      "kind": "price_observation",
+      "verification": "verified",
+      "source": "synthetic licensed-feed fixture",
+      "currency": "USD",
+      "session": "regular",
+      "priceBasis": "unadjusted",
+      "synthetic": true,
+      "delaySeconds": 0
+    },
+    {
+      "symbol": "QQQ",
+      "observedAt": "2026-01-05T21:00:00Z",
+      "receivedAt": "2026-01-05T21:00:00Z",
+      "price": 98,
+      "kind": "price_observation",
+      "verification": "verified",
+      "source": "synthetic licensed-feed fixture",
+      "currency": "USD",
+      "session": "regular",
+      "priceBasis": "unadjusted",
+      "synthetic": true,
+      "delaySeconds": 0
+    }
+  ]
+}

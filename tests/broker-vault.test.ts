@@ -1,0 +1,14 @@
+import {describe,it,expect,vi} from 'vitest';
+vi.mock('server-only',()=>({}));
+import {encryptCredentials,decryptCredentials,maskApiKey,vaultConfigured} from '../lib/brokers/vault';
+
+const key=Buffer.alloc(32,7).toString('base64'),env={BROKER_VAULT_KEY_B64:key,BROKER_VAULT_KEY_VERSION:'test-v1'},credentials={apiKey:'mock-key-not-real',apiSecret:'mock-secret-not-real'};
+describe('server-side broker credential encryption',()=>{
+  it('encrypts at rest with a unique nonce and decrypts only for the bound owner/environment',()=>{const a=encryptCredentials(credentials,'owner-a','demo',env),b=encryptCredentials(credentials,'owner-a','demo',env);expect(a.iv).not.toBe(b.iv);expect(a.ciphertext).not.toBe(b.ciphertext);expect(JSON.stringify(a)).not.toContain(credentials.apiSecret);expect(JSON.stringify(a)).not.toContain(credentials.apiKey);expect(decryptCredentials(a,'owner-a','demo',env)).toEqual(credentials);expect(()=>decryptCredentials(a,'owner-b','demo',env)).toThrow();expect(()=>decryptCredentials(a,'owner-a','live',env)).toThrow();});
+  it('detects ciphertext, authentication tag, nonce and key-version tampering',()=>{const stored=encryptCredentials(credentials,'owner','demo',env);for(const changed of [{ciphertext:stored.ciphertext.slice(0,-4)+'AAAA'},{ciphertext:stored.ciphertext+'!'},{tag:Buffer.alloc(16).toString('base64')},{iv:Buffer.alloc(12).toString('base64')},{keyVersion:'different-key'}])expect(()=>decryptCredentials({...stored,...changed},'owner','demo',env)).toThrow();});
+  it('requires a separate valid 256-bit key and fails closed when configuration changes',()=>{expect(vaultConfigured(env)).toBe(true);for(const settings of [{},{BROKER_VAULT_KEY_B64:'invalid',BROKER_VAULT_KEY_VERSION:'v1'},{BROKER_VAULT_KEY_B64:Buffer.alloc(16).toString('base64'),BROKER_VAULT_KEY_VERSION:'v1'},{BROKER_VAULT_KEY_B64:key}]){expect(vaultConfigured(settings)).toBe(false);expect(()=>encryptCredentials(credentials,'owner','demo',settings)).toThrow();}const stored=encryptCredentials(credentials,'owner','demo',env);expect(()=>decryptCredentials(stored,'owner','demo',{...env,BROKER_VAULT_KEY_B64:Buffer.alloc(32,8).toString('base64')})).toThrow();});
+  it('never includes raw credentials or key material in errors',()=>{const stored=encryptCredentials(credentials,'owner','demo',env);const error=(()=>{try{decryptCredentials({...stored,tag:'invalid'},'owner','demo',env);}catch(e){return e;}})();for(const secret of [credentials.apiSecret,credentials.apiKey,key])expect(String(error)).not.toContain(secret);});
+  it('masks short keys completely and never reveals a saved secret',()=>{expect(maskApiKey('abc')).toBe('••••');expect(maskApiKey('abcdefg')).toBe('••••');expect(maskApiKey('abcdefgh')).toBe('••••efgh');expect(maskApiKey(credentials.apiKey)).not.toBe(credentials.apiKey);});
+});
+
+it('fully masks provider key suffixes that cannot be safely stored as identifiers',()=>{expect(maskApiKey('mock-key-tail+/==')).toBe('••••');});

@@ -1,0 +1,441 @@
+{
+  "version": "infrastructure-001.2-v1",
+  "id": "NSCALE_FINANCING_OCT2026",
+  "name": "NVIDIA\u2013Nscale\u2013Anthropic financing and Loughton customer termination",
+  "mode": "historical",
+  "sources": [
+    {
+      "id": "nscale-s1-sep18",
+      "title": "Nscale S-1 \u00b7 September 2026",
+      "url": "https://www.sec.gov/Archives/edgar/data/2110365/000119312526395475/ck0002110365-20260918.htm",
+      "kind": "filing",
+      "publishedAt": 1789760657000,
+      "receivedAt": 1793452739000,
+      "verification": "verified",
+      "mode": "historical",
+      "role": "evidence",
+      "supports": [
+        {
+          "eventId": "anthropic-monarch-services",
+          "status": "signed",
+          "binding": true
+        },
+        {
+          "eventId": "texas-lease-guarantee",
+          "status": "signed",
+          "binding": true
+        },
+        {
+          "eventId": "nvidia-convertible-commitment",
+          "status": "signed",
+          "binding": true
+        }
+      ]
+    },
+    {
+      "id": "reuters-credit-oct30",
+      "title": "Reuters \u00b7 unsigned credit-support discussions",
+      "url": "https://new.streetinsider.com/Reuters/Nvidia%2Bin%2Btalks%2Bto%2Bgive%2Bcredit%2Bsupport%2Bfor%2BNscale%27s%2Bdeal%2Bwith%2BAnthropic%2C%2BThe%2BInformation%2Breports/27259701.html",
+      "kind": "news",
+      "publishedAt": 1793323560000,
+      "receivedAt": 1793452739000,
+      "verification": "corroborated",
+      "mode": "historical",
+      "role": "evidence",
+      "supports": [
+        {
+          "eventId": "monarch-credit-talks",
+          "status": "reported_discussion",
+          "binding": false
+        }
+      ]
+    },
+    {
+      "id": "nscale-loughton-sep2025",
+      "title": "Nscale \u00b7 Loughton commitment announcement",
+      "url": "https://www.nscale.com/press-releases/nscale-uk-ai-infrastructure-announcement",
+      "kind": "company",
+      "publishedAt": 1758058200000,
+      "receivedAt": 1793452739000,
+      "verification": "verified",
+      "mode": "historical",
+      "role": "evidence",
+      "supports": [
+        {
+          "eventId": "microsoft-loughton-customer",
+          "status": "announced",
+          "binding": false
+        }
+      ]
+    },
+    {
+      "id": "reuters-loughton-oct19",
+      "title": "Reuters \u00b7 Loughton customer termination",
+      "url": "https://uk.marketscreener.com/news/microsoft-pulls-out-of-uk-data-center-deal-with-nscale-telegraph-reports-ce785cdad18bf425",
+      "kind": "news",
+      "publishedAt": 1792417980000,
+      "receivedAt": 1793452739000,
+      "verification": "corroborated",
+      "mode": "historical",
+      "role": "evidence",
+      "supports": [
+        {
+          "eventId": "microsoft-loughton-customer",
+          "status": "cancelled",
+          "binding": false
+        }
+      ]
+    },
+    {
+      "id": "nscale-financing-sep25",
+      "title": "Nscale \u00b7 convertible financing announcement",
+      "url": "https://www.nscale.com/press-releases/pre-ipo-convertible-financing",
+      "kind": "company",
+      "publishedAt": 1790380800000,
+      "receivedAt": 1793452739000,
+      "verification": "verified",
+      "mode": "historical",
+      "role": "evidence",
+      "supports": [
+        {
+          "eventId": "nscale-convertible-round",
+          "status": "announced",
+          "binding": false
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "monarch-services-r1",
+      "eventId": "anthropic-monarch-services",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "Nscale",
+      "borrower": null,
+      "guarantor": null,
+      "customer": "Anthropic",
+      "projectId": "monarch-west-virginia",
+      "type": "commercial_contract",
+      "principal": 44600000000,
+      "currency": "USD",
+      "maturityAt": null,
+      "status": "signed",
+      "claimType": "fact",
+      "publishedAt": 1789760657000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "mode": "historical",
+      "economicGroupId": "monarch-anthropic-service-payments"
+    },
+    {
+      "id": "monarch-credit-r1",
+      "eventId": "monarch-credit-talks",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "NVIDIA",
+      "borrower": "Nscale",
+      "guarantor": "NVIDIA",
+      "customer": "Anthropic",
+      "projectId": "monarch-west-virginia",
+      "type": "guarantee",
+      "principal": null,
+      "currency": null,
+      "maturityAt": null,
+      "status": "reported_discussion",
+      "claimType": "discussion",
+      "publishedAt": 1793323560000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "reuters-credit-oct30"
+      ],
+      "mode": "historical",
+      "economicGroupId": "monarch-project-financing"
+    },
+    {
+      "id": "loughton-customer-r1",
+      "eventId": "microsoft-loughton-customer",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "Nscale",
+      "borrower": null,
+      "guarantor": null,
+      "customer": "Microsoft",
+      "projectId": "loughton-essex",
+      "type": "commercial_contract",
+      "principal": null,
+      "currency": null,
+      "maturityAt": null,
+      "status": "announced",
+      "claimType": "fact",
+      "publishedAt": 1758058200000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "nscale-loughton-sep2025"
+      ],
+      "mode": "historical",
+      "economicGroupId": "loughton-microsoft-service-payments"
+    },
+    {
+      "id": "loughton-customer-r2",
+      "eventId": "microsoft-loughton-customer",
+      "revision": 2,
+      "supersedes": "loughton-customer-r1",
+      "issuer": "Nscale",
+      "borrower": null,
+      "guarantor": null,
+      "customer": "Microsoft",
+      "projectId": "loughton-essex",
+      "type": "commercial_contract",
+      "principal": null,
+      "currency": null,
+      "maturityAt": null,
+      "status": "cancelled",
+      "claimType": "fact",
+      "publishedAt": 1792417980000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "reuters-loughton-oct19"
+      ],
+      "mode": "historical",
+      "economicGroupId": "loughton-microsoft-service-payments"
+    },
+    {
+      "id": "texas-guarantee-r1",
+      "eventId": "texas-lease-guarantee",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "NVIDIA",
+      "borrower": "Nscale",
+      "guarantor": "NVIDIA",
+      "customer": null,
+      "projectId": "ward-county-texas",
+      "type": "guarantee",
+      "principal": 860300000,
+      "currency": "USD",
+      "maturityAt": null,
+      "status": "signed",
+      "claimType": "contingent",
+      "publishedAt": 1789760657000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "mode": "historical",
+      "economicGroupId": "ward-county-facility-lease"
+    },
+    {
+      "id": "nvidia-convertible-r1",
+      "eventId": "nvidia-convertible-commitment",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "Nscale",
+      "borrower": "Nscale",
+      "guarantor": null,
+      "customer": null,
+      "projectId": "corporate-financing",
+      "type": "borrowing",
+      "principal": 1000000000,
+      "currency": "USD",
+      "maturityAt": null,
+      "status": "signed",
+      "claimType": "fact",
+      "publishedAt": 1789760657000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "mode": "historical",
+      "economicGroupId": "nscale-september-convertible-round",
+      "financier": "NVIDIA"
+    },
+    {
+      "id": "convertible-round-r1",
+      "eventId": "nscale-convertible-round",
+      "revision": 1,
+      "supersedes": null,
+      "issuer": "Nscale",
+      "borrower": "Nscale",
+      "guarantor": null,
+      "customer": null,
+      "projectId": "corporate-financing",
+      "type": "borrowing",
+      "principal": 3360000000,
+      "currency": "USD",
+      "maturityAt": null,
+      "status": "announced",
+      "claimType": "fact",
+      "publishedAt": 1790380800000,
+      "receivedAt": 1793452739000,
+      "sourceIds": [
+        "nscale-financing-sep25"
+      ],
+      "mode": "historical",
+      "economicGroupId": "nscale-september-convertible-round"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "anthropic-services-link",
+      "from": "Anthropic",
+      "to": "Nscale",
+      "type": "commercial_contract",
+      "projectId": "monarch-west-virginia",
+      "eventIds": [
+        "anthropic-monarch-services"
+      ],
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "certainty": "verified_contract",
+      "economicGroupId": "monarch-anthropic-service-payments"
+    },
+    {
+      "id": "proposed-monarch-support",
+      "from": "NVIDIA",
+      "to": "Nscale",
+      "type": "guarantee",
+      "projectId": "monarch-west-virginia",
+      "eventIds": [
+        "monarch-credit-talks"
+      ],
+      "sourceIds": [
+        "reuters-credit-oct30"
+      ],
+      "certainty": "reported",
+      "economicGroupId": "monarch-project-financing"
+    },
+    {
+      "id": "texas-guarantee-link",
+      "from": "NVIDIA",
+      "to": "Nscale",
+      "type": "guarantee",
+      "projectId": "ward-county-texas",
+      "eventIds": [
+        "texas-lease-guarantee"
+      ],
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "certainty": "verified_contract",
+      "economicGroupId": "ward-county-facility-lease"
+    },
+    {
+      "id": "convertible-link",
+      "from": "NVIDIA",
+      "to": "Nscale",
+      "type": "borrowing",
+      "projectId": "corporate-financing",
+      "eventIds": [
+        "nvidia-convertible-commitment"
+      ],
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "certainty": "verified_contract",
+      "economicGroupId": "nscale-september-convertible-round"
+    },
+    {
+      "id": "loughton-terminated-link",
+      "from": "Microsoft",
+      "to": "Nscale",
+      "type": "commercial_contract",
+      "projectId": "loughton-essex",
+      "eventIds": [
+        "microsoft-loughton-customer"
+      ],
+      "sourceIds": [
+        "nscale-loughton-sep2025",
+        "reuters-loughton-oct19"
+      ],
+      "certainty": "reported",
+      "economicGroupId": "loughton-microsoft-service-payments"
+    },
+    {
+      "id": "gpu-architecture-context",
+      "from": "NVIDIA",
+      "to": "Nscale",
+      "type": "gpu_supply",
+      "projectId": "monarch-west-virginia",
+      "eventIds": [],
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "certainty": "inferred",
+      "economicGroupId": null
+    }
+  ],
+  "metrics": [
+    {
+      "id": "nscale-tcv-aug31",
+      "entity": "Nscale",
+      "projectId": null,
+      "metric": "contracted_backlog",
+      "value": 103400000000,
+      "unit": "currency",
+      "currency": "USD",
+      "period": {
+        "start": 1788134400000,
+        "end": 1788134400000,
+        "label": "2026-08-31"
+      },
+      "basis": "TCV active and contracted",
+      "definition": "Multi-year active and contracted take-or-pay value; not earned revenue.",
+      "kind": "reported",
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "eventIds": [],
+      "counterparty": null,
+      "mode": "historical"
+    },
+    {
+      "id": "nscale-revenue-h1-2026",
+      "entity": "Nscale",
+      "projectId": null,
+      "metric": "recognised_revenue",
+      "value": 140600000,
+      "unit": "currency",
+      "currency": "USD",
+      "period": {
+        "start": 1767225600000,
+        "end": 1782863999000,
+        "label": "H1 2026"
+      },
+      "basis": "US GAAP consolidated",
+      "definition": "Recognised consolidated service revenue.",
+      "kind": "reported",
+      "sourceIds": [
+        "nscale-s1-sep18"
+      ],
+      "eventIds": [],
+      "counterparty": null,
+      "mode": "historical"
+    },
+    {
+      "id": "loughton-planned-power",
+      "entity": "Nscale",
+      "projectId": "loughton-essex",
+      "metric": "planned_power_mw",
+      "value": 50,
+      "unit": "MW",
+      "currency": null,
+      "period": {
+        "start": 1798761600000,
+        "end": 1806537599000,
+        "label": "Q1 2027 plan"
+      },
+      "basis": "Announced planned site capacity",
+      "definition": "Planned power allocation, not energised GPU or available capacity.",
+      "kind": "forecast",
+      "sourceIds": [
+        "nscale-loughton-sep2025"
+      ],
+      "eventIds": [],
+      "counterparty": null,
+      "mode": "historical"
+    }
+  ]
+}

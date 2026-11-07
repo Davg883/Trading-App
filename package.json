@@ -1,0 +1,52 @@
+{
+  "name": "ai-capital-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname localhost",
+    "build": "next build",
+    "start": "next start --hostname localhost",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:python": "python -m unittest discover -s worker -p test_*.py",
+    "lint": "eslint .",
+    "test:browser": "node scripts/browser-check.mjs",
+    "test:browser:earnings": "node scripts/earnings-browser-check.mjs",
+    "test:browser:stress": "node scripts/stress-browser-check.mjs",
+    "test:browser:proof": "node scripts/proof-browser-check.mjs",
+    "test:browser:brokers": "node scripts/broker-browser-check.mjs",
+    "test:browser:infrastructure": "node scripts/infrastructure-browser-check.mjs",
+    "test:browser:defence": "node scripts/defence-browser-check.mjs",
+    "test:browser:amazon": "node scripts/amazon-browser-check.mjs",
+    "test:browser:consensus": "node scripts/consensus-browser-check.mjs",
+    "test:browser:recovery": "node scripts/recovery-browser-check.mjs",
+    "test:browser:policy": "node scripts/policy-risk-browser-check.mjs",
+    "test:browser:trading": "node scripts/trading-browser-check.mjs",
+    "test:browser:command-centre": "node scripts/command-centre-browser-check.mjs",
+    "test:browser:command-centre:signed-in": "node scripts/command-centre-signed-in-check.mjs"
+  },
+  "dependencies": {
+    "@clerk/nextjs": "7.9.22",
+    "convex": "1.48.0",
+    "lucide-react": "1.62.0",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "server-only": "0.0.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "convex-test": "0.0.66",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.3",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.2.15"
+  }
+}

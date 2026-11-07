@@ -1,0 +1,280 @@
+{
+  "version": "analyst-consensus-001-v1",
+  "case": {
+    "version": "analyst-consensus-001-v1",
+    "id": "CONSENSUS_2026_11_03_V1",
+    "name": "Analyst consensus validation 001 — 3 November 2026 retrospective",
+    "mode": "retrospective",
+    "providers": [],
+    "recommendations": [],
+    "headlines": [],
+    "webClaims": [
+      {
+        "id": "melius-nvda-target-cut-media",
+        "symbol": "NVDA",
+        "description": "Corroborated media reports Ben Reitzes at Melius maintained Buy on 2 November while cutting the NVIDIA target from USD420 to USD315 (-25%). Original note and licensed feed are not imported. Excluded from consensus aggregates and predictive evidence.",
+        "sourceUrl": "https://www.benzinga.com/analyst-stock-ratings/price-target/26/11/62779418/nvidia-amd-marvell-ai-stocks-big-tech-raise-cash",
+        "publishedAt": null,
+        "receivedAt": 1793744707000,
+        "kind": "target",
+        "verification": "unverified",
+        "mode": "retrospective"
+      }
+    ],
+    "contextRecords": [
+      {
+        "id": "company-context-NVDA-nvda-fy27-q2",
+        "symbol": "NVDA",
+        "kind": "fundamentals",
+        "sourceUrl": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027",
+        "publishedAt": null,
+        "publicationDate": "2026-08-26",
+        "receivedAt": 1793744707000,
+        "recordJson": "{\"symbol\":\"NVDA\",\"name\":\"NVIDIA\",\"currency\":\"USD\",\"periodLabel\":\"FY2027 Q2 (13 weeks ended 26 July 2026)\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-07-26\",\"companyRevenueMillions\":96221,\"operatingIncomeMillions\":63734,\"netIncomeMillions\":59688,\"ocf\":{\"value\":24077,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-07-26\",\"label\":\"FY2027 Q2\"},\"cashCapex\":{\"value\":2677,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-07-26\",\"label\":\"FY2027 Q2\",\"definition\":\"Purchases related to property and equipment and intangible assets; positive cash outflow magnitude\"},\"freeCashFlow\":{\"value\":21341,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-07-26\",\"label\":\"FY2027 Q2\",\"definition\":\"Company FCF: operating cash flow minus purchases related to property and equipment/intangibles and minus 59 million principal payments on those assets\",\"kind\":\"reported\"},\"dilutedEps\":{\"value\":2.46,\"currency\":\"USD\",\"periodLabel\":\"FY2027 Q2\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-07-26\",\"basis\":\"GAAP diluted EPS; quarterly, not TTM or forward consensus\"},\"bookEquity\":{\"valueMillions\":228984,\"asOf\":\"2026-07-26\",\"basis\":\"Reported consolidated shareholders equity\",\"sourceIds\":[\"nvda-fy27-q2\"]},\"cloudMetrics\":[{\"name\":\"Data Center revenue\",\"valueMillions\":89000,\"precision\":\"Rounded to 0.1 billion in company narrative\",\"periodLabel\":\"FY2027 Q2\",\"operatingIncomeMillions\":null,\"definition\":\"Data Center end-market revenue, not cloud-provider segment revenue\",\"sourceIds\":[\"nvda-fy27-q2\"]}],\"valuation\":null,\"valuationReason\":\"No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation\",\"news\":[{\"sourceId\":\"nvda-fy27-q2\",\"summary\":\"Q3 FY2027 revenue outlook is 108 billion USD plus or minus 2%; China Data Center compute revenue is excluded from the outlook.\",\"kind\":\"management_guidance\"},{\"sourceId\":\"nvda-fy27-q2\",\"summary\":\"Company announced third-party compute financing partnerships targeting more than 500 billion USD over time, subject to definitive agreements; this is not recognised revenue or funded cash.\",\"kind\":\"announcement\"}],\"sourceIds\":[\"nvda-fy27-q2\"],\"comparabilityWarnings\":[\"Quarter ends in July, not September.\",\"Reported free cash flow also subtracts principal payments of 59 million; OCF minus 2677 million purchases alone would use a different definition.\",\"Data Center is not directly equivalent to Azure, Microsoft Cloud or Apple Services.\"]}",
+        "mode": "retrospective"
+      },
+      {
+        "id": "company-context-MSFT-msft-fy27-q1",
+        "symbol": "MSFT",
+        "kind": "fundamentals",
+        "sourceUrl": "https://www.microsoft.com/en-us/Investor/earnings/FY-2027-Q1/press-release-webcast",
+        "publishedAt": null,
+        "publicationDate": "2026-10-28",
+        "receivedAt": 1793744707000,
+        "recordJson": "{\"symbol\":\"MSFT\",\"name\":\"Microsoft\",\"currency\":\"USD\",\"periodLabel\":\"FY2027 Q1 (three months ended 30 September 2026)\",\"periodStart\":\"2026-07-01\",\"periodEnd\":\"2026-09-30\",\"companyRevenueMillions\":92279,\"operatingIncomeMillions\":45915,\"netIncomeMillions\":36629,\"ocf\":{\"value\":58000,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-07-01\",\"periodEnd\":\"2026-09-30\",\"label\":\"FY2027 Q1\"},\"cashCapex\":{\"value\":39367,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-07-01\",\"periodEnd\":\"2026-09-30\",\"label\":\"FY2027 Q1\",\"definition\":\"Cash additions to property and equipment; positive outflow; not a capex figure including finance lease additions\"},\"freeCashFlow\":{\"value\":18633,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2026-07-01\",\"periodEnd\":\"2026-09-30\",\"label\":\"FY2027 Q1\",\"definition\":\"Derived operating cash flow less cash additions to property and equipment; 58000 - 39367\",\"kind\":\"derived\"},\"dilutedEps\":{\"value\":4.92,\"currency\":\"USD\",\"periodLabel\":\"FY2027 Q1\",\"periodStart\":\"2026-07-01\",\"periodEnd\":\"2026-09-30\",\"basis\":\"GAAP diluted EPS; includes 0.03 per share impact of OpenAI investment gains; quarterly, not TTM\"},\"bookEquity\":{\"valueMillions\":470509,\"asOf\":\"2026-09-30\",\"basis\":\"Reported total stockholders equity\",\"sourceIds\":[\"msft-fy27-q1\"]},\"cloudMetrics\":[{\"name\":\"Azure revenue\",\"valueMillions\":33165,\"precision\":\"USD millions\",\"periodLabel\":\"FY2027 Q1\",\"operatingIncomeMillions\":null,\"definition\":\"Product and service offering revenue; Azure operating income is not separately disclosed here\",\"sourceIds\":[\"msft-fy27-q1\"]},{\"name\":\"Microsoft Cloud revenue\",\"valueMillions\":63900,\"precision\":\"Rounded to 0.1 billion in company narrative\",\"periodLabel\":\"FY2027 Q1\",\"operatingIncomeMillions\":null,\"definition\":\"Company Cloud KPI, not a standalone segment with disclosed operating income\",\"sourceIds\":[\"msft-fy27-q1\"]},{\"name\":\"Agents and Infra segment\",\"valueMillions\":76795,\"precision\":\"USD millions\",\"periodLabel\":\"FY2027 Q1\",\"operatingIncomeMillions\":40558,\"definition\":\"Broader recast segment including several product lines; not Azure-only or Cloud-only profit\",\"sourceIds\":[\"msft-fy27-q1\"]}],\"valuation\":null,\"valuationReason\":\"No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation\",\"news\":[{\"sourceId\":\"msft-fy27-q1\",\"summary\":\"Azure revenue grew 48% year over year; Microsoft Cloud revenue was 63.9 billion USD and grew 30% on a reported basis.\",\"kind\":\"reported\"},{\"sourceId\":\"msft-fy27-q1\",\"summary\":\"FY2027 segment presentation changed to Agents and Infra and Devices and Consumer; prior periods were recast in the release.\",\"kind\":\"reported\"}],\"sourceIds\":[\"msft-fy27-q1\"],\"comparabilityWarnings\":[\"Three-month reporting period ends in September, unlike NVIDIA July quarter.\",\"Cash capex excludes finance lease additions; no broader capex guidance is represented as observed cash outflow.\",\"Agents and Infra profit must not be attributed entirely to Azure or AI.\"]}",
+        "mode": "retrospective"
+      },
+      {
+        "id": "company-context-AAPL-aapl-fy26-q4-release",
+        "symbol": "AAPL",
+        "kind": "fundamentals",
+        "sourceUrl": "https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/",
+        "publishedAt": null,
+        "publicationDate": "2026-11-02",
+        "receivedAt": 1793744707000,
+        "recordJson": "{\"symbol\":\"AAPL\",\"name\":\"Apple\",\"currency\":\"USD\",\"periodLabel\":\"FY2026 Q4 (13 weeks ended 26 September 2026)\",\"periodStart\":\"2026-06-28\",\"periodEnd\":\"2026-09-26\",\"companyRevenueMillions\":114477,\"operatingIncomeMillions\":35631,\"netIncomeMillions\":30711,\"ocf\":{\"value\":145097,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\"},\"cashCapex\":{\"value\":9041,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\",\"definition\":\"Payments for acquisition of property, plant and equipment; positive cash outflow magnitude\"},\"freeCashFlow\":{\"value\":136056,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\",\"definition\":\"Derived annual operating cash flow less payments for acquisition of PP&E; 145097 - 9041\",\"kind\":\"derived\"},\"dilutedEps\":{\"value\":2.1,\"currency\":\"USD\",\"periodLabel\":\"FY2026 Q4\",\"periodStart\":\"2026-06-28\",\"periodEnd\":\"2026-09-26\",\"basis\":\"GAAP diluted EPS; includes 0.05 per share favourable tariff refund impact; quarterly, not TTM\"},\"bookEquity\":{\"valueMillions\":112093,\"asOf\":\"2026-09-26\",\"basis\":\"Reported total shareholders equity\",\"sourceIds\":[\"aapl-fy26-q4-statements\"]},\"cloudMetrics\":[{\"name\":\"Services revenue\",\"valueMillions\":31573,\"precision\":\"USD millions\",\"periodLabel\":\"FY2026 Q4\",\"operatingIncomeMillions\":null,\"definition\":\"Apple Services category; not a disclosed cloud infrastructure segment\",\"sourceIds\":[\"aapl-fy26-q4-statements\"]}],\"valuation\":null,\"valuationReason\":\"No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation\",\"news\":[{\"sourceId\":\"aapl-fy26-q4-release\",\"summary\":\"Q4 results were published on November 2; EPS and gross margin included favourable tariff refund effects.\",\"kind\":\"reported\"},{\"sourceId\":\"aapl-fy26-q4-release\",\"summary\":\"Board declared a 0.27 USD cash dividend payable November 16 to holders of record November 12; declaration is not a realised investment return.\",\"kind\":\"announcement\"}],\"sourceIds\":[\"aapl-fy26-q4-release\",\"aapl-fy26-q4-statements\"],\"comparabilityWarnings\":[\"Company revenue and profit shown are quarterly; cash flows are full-year and must not be divided by quarterly sales.\",\"Annual diluted EPS was 8.98 for FY2026; quarterly diluted EPS 2.10 must not be treated as TTM EPS.\",\"Apple Services is not directly comparable to Azure or NVIDIA Data Center.\"]}",
+        "mode": "retrospective"
+      },
+      {
+        "id": "company-context-AAPL-aapl-fy26-q4-statements",
+        "symbol": "AAPL",
+        "kind": "fundamentals",
+        "sourceUrl": "https://www.apple.com/newsroom/pdfs/fy2026q4/FY26_Q4_Consolidated_Financial_Statements.pdf",
+        "publishedAt": null,
+        "publicationDate": "2026-11-02",
+        "receivedAt": 1793744707000,
+        "recordJson": "{\"symbol\":\"AAPL\",\"name\":\"Apple\",\"currency\":\"USD\",\"periodLabel\":\"FY2026 Q4 (13 weeks ended 26 September 2026)\",\"periodStart\":\"2026-06-28\",\"periodEnd\":\"2026-09-26\",\"companyRevenueMillions\":114477,\"operatingIncomeMillions\":35631,\"netIncomeMillions\":30711,\"ocf\":{\"value\":145097,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\"},\"cashCapex\":{\"value\":9041,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\",\"definition\":\"Payments for acquisition of property, plant and equipment; positive cash outflow magnitude\"},\"freeCashFlow\":{\"value\":136056,\"currency\":\"USD\",\"unit\":\"millions\",\"periodStart\":\"2025-09-28\",\"periodEnd\":\"2026-09-26\",\"label\":\"FY2026 full year; not quarterly\",\"definition\":\"Derived annual operating cash flow less payments for acquisition of PP&E; 145097 - 9041\",\"kind\":\"derived\"},\"dilutedEps\":{\"value\":2.1,\"currency\":\"USD\",\"periodLabel\":\"FY2026 Q4\",\"periodStart\":\"2026-06-28\",\"periodEnd\":\"2026-09-26\",\"basis\":\"GAAP diluted EPS; includes 0.05 per share favourable tariff refund impact; quarterly, not TTM\"},\"bookEquity\":{\"valueMillions\":112093,\"asOf\":\"2026-09-26\",\"basis\":\"Reported total shareholders equity\",\"sourceIds\":[\"aapl-fy26-q4-statements\"]},\"cloudMetrics\":[{\"name\":\"Services revenue\",\"valueMillions\":31573,\"precision\":\"USD millions\",\"periodLabel\":\"FY2026 Q4\",\"operatingIncomeMillions\":null,\"definition\":\"Apple Services category; not a disclosed cloud infrastructure segment\",\"sourceIds\":[\"aapl-fy26-q4-statements\"]}],\"valuation\":null,\"valuationReason\":\"No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation\",\"news\":[{\"sourceId\":\"aapl-fy26-q4-release\",\"summary\":\"Q4 results were published on November 2; EPS and gross margin included favourable tariff refund effects.\",\"kind\":\"reported\"},{\"sourceId\":\"aapl-fy26-q4-release\",\"summary\":\"Board declared a 0.27 USD cash dividend payable November 16 to holders of record November 12; declaration is not a realised investment return.\",\"kind\":\"announcement\"}],\"sourceIds\":[\"aapl-fy26-q4-release\",\"aapl-fy26-q4-statements\"],\"comparabilityWarnings\":[\"Company revenue and profit shown are quarterly; cash flows are full-year and must not be divided by quarterly sales.\",\"Annual diluted EPS was 8.98 for FY2026; quarterly diluted EPS 2.10 must not be treated as TTM EPS.\",\"Apple Services is not directly comparable to Azure or NVIDIA Data Center.\"]}",
+        "mode": "retrospective"
+      }
+    ],
+    "instruments": [
+      {
+        "id": "NVDA",
+        "name": "NVIDIA",
+        "symbol": "NVDA",
+        "product": "equity",
+        "currency": "USD",
+        "sourceUrl": "https://investor.nvidia.com/",
+        "globalDiversificationVerified": false,
+        "leverageFactor": 1,
+        "researchApproved": true,
+        "publishedAt": 1793744868000,
+        "receivedAt": 1793744868000,
+        "mode": "retrospective"
+      },
+      {
+        "id": "MSFT",
+        "name": "Microsoft",
+        "symbol": "MSFT",
+        "product": "equity",
+        "currency": "USD",
+        "sourceUrl": "https://www.microsoft.com/en-us/Investor/",
+        "globalDiversificationVerified": false,
+        "leverageFactor": 1,
+        "researchApproved": true,
+        "publishedAt": 1793744868000,
+        "receivedAt": 1793744868000,
+        "mode": "retrospective"
+      },
+      {
+        "id": "AAPL",
+        "name": "Apple",
+        "symbol": "AAPL",
+        "product": "equity",
+        "currency": "USD",
+        "sourceUrl": "https://investor.apple.com/",
+        "globalDiversificationVerified": false,
+        "leverageFactor": 1,
+        "researchApproved": true,
+        "publishedAt": 1793744868000,
+        "receivedAt": 1793744868000,
+        "mode": "retrospective"
+      },
+      {
+        "id": "VT",
+        "name": "Vanguard Total World Stock ETF",
+        "symbol": "VT",
+        "product": "etf",
+        "currency": "USD",
+        "sourceUrl": "https://investor.vanguard.com/investment-products/etfs/profile/vt",
+        "globalDiversificationVerified": true,
+        "leverageFactor": 1,
+        "researchApproved": true,
+        "publishedAt": 1793744868000,
+        "receivedAt": 1793744868000,
+        "mode": "retrospective"
+      },
+      {
+        "id": "CASH_GBP",
+        "name": "Uninvested GBP cash research reserve",
+        "symbol": "CASH_GBP",
+        "product": "cash",
+        "currency": "GBP",
+        "sourceUrl": "https://www.bankofengland.co.uk/",
+        "globalDiversificationVerified": false,
+        "leverageFactor": 1,
+        "researchApproved": true,
+        "publishedAt": 1793744868000,
+        "receivedAt": 1793744868000,
+        "mode": "retrospective"
+      }
+    ],
+    "portfolios": [
+      {
+        "initialCapitalGbp": 500,
+        "entryCostsGbp": null,
+        "exitCostsGbp": null,
+        "annualFeesBps": null,
+        "cashAnnualRate": null,
+        "costAssumptionsNote": "Not configured. Declare all-in entry/exit fees, spread, slippage, FX charges, any additional ongoing fees and cash-rate assumptions before computing net results. These research plans are unfilled and do not authorise an order.",
+        "mode": "retrospective",
+        "id": "ai-equity-500",
+        "name": "£500 AI equity basket",
+        "planType": "ai_equal",
+        "allocations": [
+          {
+            "instrumentId": "NVDA",
+            "weight": 0.3333333333333333
+          },
+          {
+            "instrumentId": "MSFT",
+            "weight": 0.3333333333333333
+          },
+          {
+            "instrumentId": "AAPL",
+            "weight": 0.3333333333333333
+          }
+        ]
+      },
+      {
+        "initialCapitalGbp": 500,
+        "entryCostsGbp": null,
+        "exitCostsGbp": null,
+        "annualFeesBps": null,
+        "cashAnnualRate": null,
+        "costAssumptionsNote": "Not configured. Declare all-in entry/exit fees, spread, slippage, FX charges, any additional ongoing fees and cash-rate assumptions before computing net results. These research plans are unfilled and do not authorise an order.",
+        "mode": "retrospective",
+        "id": "diversified-500",
+        "name": "£500 global equity and cash comparison",
+        "planType": "diversified",
+        "allocations": [
+          {
+            "instrumentId": "VT",
+            "weight": 0.5
+          },
+          {
+            "instrumentId": "CASH_GBP",
+            "weight": 0.5
+          }
+        ]
+      }
+    ],
+    "calendar": {
+      "id": "NYSE-Arca-US-equities-regular-2026-2027",
+      "sourceUrl": "https://www.nyse.com/markets/hours-calendars",
+      "verified": true,
+      "publishedAt": 1793744868000,
+      "receivedAt": 1793744868000,
+      "session": "regular",
+      "sessionCloses": [
+        1793739600000,
+        1793826000000,
+        1793912400000,
+        1793998800000,
+        1794258000000,
+        1794344400000,
+        1794430800000,
+        1794517200000,
+        1794603600000,
+        1794862800000,
+        1794949200000,
+        1795035600000,
+        1795122000000,
+        1795208400000,
+        1795467600000,
+        1795554000000,
+        1795640400000,
+        1795802400000,
+        1796072400000,
+        1796158800000,
+        1796245200000,
+        1796331600000,
+        1796418000000,
+        1796677200000,
+        1796763600000,
+        1796850000000,
+        1796936400000,
+        1797022800000,
+        1797282000000,
+        1797368400000,
+        1797454800000,
+        1797541200000,
+        1797627600000,
+        1797886800000,
+        1797973200000,
+        1798059600000,
+        1798135200000,
+        1798491600000,
+        1798578000000,
+        1798664400000,
+        1798750800000,
+        1799096400000,
+        1799182800000,
+        1799269200000,
+        1799355600000,
+        1799442000000,
+        1799701200000,
+        1799787600000,
+        1799874000000,
+        1799960400000,
+        1800046800000,
+        1800392400000,
+        1800478800000,
+        1800565200000,
+        1800651600000,
+        1800910800000,
+        1800997200000,
+        1801083600000,
+        1801170000000,
+        1801256400000,
+        1801515600000,
+        1801602000000,
+        1801688400000
+      ],
+      "mode": "retrospective"
+    },
+    "prices": [],
+    "fx": [],
+    "ablations": []
+  },
+  "studyOptions": {
+    "name": "Consensus Validation 001 — 3 November 2026 local retrospective registration",
+    "cutoff": 1793744868000,
+    "startAt": 1793739600000,
+    "registeredAt": 1793745720687,
+    "benchmarkInstrumentId": "VT",
+    "priceBasis": "total-return",
+    "adjustmentVersion": "provider-total-return-v1"
+  },
+  "asOf": 1793745720687
+}

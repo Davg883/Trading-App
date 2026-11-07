@@ -1,0 +1,8 @@
+{
+  "forecasts": [{"probabilities":{"up":0.6,"down":0.2,"neutral":0.2},"expectedReturn":0.01,"actualReturn":0.008,"interval":[-0.01,0.02]}],
+  "equity":[10000,10100,9950,10200],
+  "benchmark":[10000,10050,9980,10150],
+  "researchCost":25,
+  "usage":{"input":1000,"cachedInput":200,"output":400},
+  "rates":{"input":2,"cachedInput":0.5,"output":8}
+}

@@ -1,0 +1,376 @@
+{
+  "asOfDate": "2026-11-03",
+  "receivedAt": "2026-11-03T22:25:07Z",
+  "mode": "historical",
+  "purpose": "Sourced retrospective company context; no licensed analyst feed, market price, consensus aggregate or order authority",
+  "sources": [
+    {
+      "id": "nvda-fy27-q2",
+      "title": "NVIDIA FY2027 Q2 official financial results",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027",
+      "publishedAt": null,
+      "publicationDate": "2026-08-26",
+      "pubBasis": "official_date_only",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    },
+    {
+      "id": "msft-fy27-q1",
+      "title": "Microsoft FY2027 Q1 official financial results",
+      "url": "https://www.microsoft.com/en-us/Investor/earnings/FY-2027-Q1/press-release-webcast",
+      "publishedAt": null,
+      "publicationDate": "2026-10-28",
+      "pubBasis": "official_date_only",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    },
+    {
+      "id": "aapl-fy26-q4-release",
+      "title": "Apple FY2026 Q4 official earnings release",
+      "url": "https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/",
+      "publishedAt": null,
+      "publicationDate": "2026-11-02",
+      "pubBasis": "official_date_only",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    },
+    {
+      "id": "aapl-fy26-q4-statements",
+      "title": "Apple FY2026 Q4 official consolidated financial statements",
+      "url": "https://www.apple.com/newsroom/pdfs/fy2026q4/FY26_Q4_Consolidated_Financial_Statements.pdf",
+      "publishedAt": null,
+      "publicationDate": "2026-11-02",
+      "pubBasis": "official_date_only",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    },
+    {
+      "id": "melius-benzinga-report",
+      "title": "Benzinga report: Melius cuts NVIDIA target while retaining Buy",
+      "url": "https://www.benzinga.com/analyst-stock-ratings/price-target/26/11/62779418/nvidia-amd-marvell-ai-stocks-big-tech-raise-cash",
+      "publishedAt": null,
+      "publicationDate": "2026-11-02",
+      "pubBasis": "media_report_date_only_unlicensed",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    },
+    {
+      "id": "melius-benzinga-provider-row",
+      "title": "Benzinga public NVIDIA analyst table: Ben Reitzes, Melius, November 2 target revision",
+      "url": "https://www.benzinga.com/quote/NVDA",
+      "publishedAt": null,
+      "publicationDate": "2026-11-03",
+      "pubBasis": "dynamic_provider_page_retrieved_current_date_unlicensed",
+      "receivedAt": "2026-11-03T22:25:07Z"
+    }
+  ],
+  "companies": [
+    {
+      "symbol": "NVDA",
+      "name": "NVIDIA",
+      "currency": "USD",
+      "periodLabel": "FY2027 Q2 (13 weeks ended 26 July 2026)",
+      "periodStart": "2026-04-27",
+      "periodEnd": "2026-07-26",
+      "companyRevenueMillions": 96221,
+      "operatingIncomeMillions": 63734,
+      "netIncomeMillions": 59688,
+      "ocf": {
+        "value": 24077,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-04-27",
+        "periodEnd": "2026-07-26",
+        "label": "FY2027 Q2"
+      },
+      "cashCapex": {
+        "value": 2677,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-04-27",
+        "periodEnd": "2026-07-26",
+        "label": "FY2027 Q2",
+        "definition": "Purchases related to property and equipment and intangible assets; positive cash outflow magnitude"
+      },
+      "freeCashFlow": {
+        "value": 21341,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-04-27",
+        "periodEnd": "2026-07-26",
+        "label": "FY2027 Q2",
+        "definition": "Company FCF: operating cash flow minus purchases related to property and equipment/intangibles and minus 59 million principal payments on those assets",
+        "kind": "reported"
+      },
+      "dilutedEps": {
+        "value": 2.46,
+        "currency": "USD",
+        "periodLabel": "FY2027 Q2",
+        "periodStart": "2026-04-27",
+        "periodEnd": "2026-07-26",
+        "basis": "GAAP diluted EPS; quarterly, not TTM or forward consensus"
+      },
+      "bookEquity": {
+        "valueMillions": 228984,
+        "asOf": "2026-07-26",
+        "basis": "Reported consolidated shareholders equity",
+        "sourceIds": [
+          "nvda-fy27-q2"
+        ]
+      },
+      "cloudMetrics": [
+        {
+          "name": "Data Center revenue",
+          "valueMillions": 89000,
+          "precision": "Rounded to 0.1 billion in company narrative",
+          "periodLabel": "FY2027 Q2",
+          "operatingIncomeMillions": null,
+          "definition": "Data Center end-market revenue, not cloud-provider segment revenue",
+          "sourceIds": [
+            "nvda-fy27-q2"
+          ]
+        }
+      ],
+      "valuation": null,
+      "valuationReason": "No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation",
+      "news": [
+        {
+          "sourceId": "nvda-fy27-q2",
+          "summary": "Q3 FY2027 revenue outlook is 108 billion USD plus or minus 2%; China Data Center compute revenue is excluded from the outlook.",
+          "kind": "management_guidance"
+        },
+        {
+          "sourceId": "nvda-fy27-q2",
+          "summary": "Company announced third-party compute financing partnerships targeting more than 500 billion USD over time, subject to definitive agreements; this is not recognised revenue or funded cash.",
+          "kind": "announcement"
+        }
+      ],
+      "sourceIds": [
+        "nvda-fy27-q2"
+      ],
+      "comparabilityWarnings": [
+        "Quarter ends in July, not September.",
+        "Reported free cash flow also subtracts principal payments of 59 million; OCF minus 2677 million purchases alone would use a different definition.",
+        "Data Center is not directly equivalent to Azure, Microsoft Cloud or Apple Services."
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "name": "Microsoft",
+      "currency": "USD",
+      "periodLabel": "FY2027 Q1 (three months ended 30 September 2026)",
+      "periodStart": "2026-07-01",
+      "periodEnd": "2026-09-30",
+      "companyRevenueMillions": 92279,
+      "operatingIncomeMillions": 45915,
+      "netIncomeMillions": 36629,
+      "ocf": {
+        "value": 58000,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-07-01",
+        "periodEnd": "2026-09-30",
+        "label": "FY2027 Q1"
+      },
+      "cashCapex": {
+        "value": 39367,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-07-01",
+        "periodEnd": "2026-09-30",
+        "label": "FY2027 Q1",
+        "definition": "Cash additions to property and equipment; positive outflow; not a capex figure including finance lease additions"
+      },
+      "freeCashFlow": {
+        "value": 18633,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2026-07-01",
+        "periodEnd": "2026-09-30",
+        "label": "FY2027 Q1",
+        "definition": "Derived operating cash flow less cash additions to property and equipment; 58000 - 39367",
+        "kind": "derived"
+      },
+      "dilutedEps": {
+        "value": 4.92,
+        "currency": "USD",
+        "periodLabel": "FY2027 Q1",
+        "periodStart": "2026-07-01",
+        "periodEnd": "2026-09-30",
+        "basis": "GAAP diluted EPS; includes 0.03 per share impact of OpenAI investment gains; quarterly, not TTM"
+      },
+      "bookEquity": {
+        "valueMillions": 470509,
+        "asOf": "2026-09-30",
+        "basis": "Reported total stockholders equity",
+        "sourceIds": [
+          "msft-fy27-q1"
+        ]
+      },
+      "cloudMetrics": [
+        {
+          "name": "Azure revenue",
+          "valueMillions": 33165,
+          "precision": "USD millions",
+          "periodLabel": "FY2027 Q1",
+          "operatingIncomeMillions": null,
+          "definition": "Product and service offering revenue; Azure operating income is not separately disclosed here",
+          "sourceIds": [
+            "msft-fy27-q1"
+          ]
+        },
+        {
+          "name": "Microsoft Cloud revenue",
+          "valueMillions": 63900,
+          "precision": "Rounded to 0.1 billion in company narrative",
+          "periodLabel": "FY2027 Q1",
+          "operatingIncomeMillions": null,
+          "definition": "Company Cloud KPI, not a standalone segment with disclosed operating income",
+          "sourceIds": [
+            "msft-fy27-q1"
+          ]
+        },
+        {
+          "name": "Agents and Infra segment",
+          "valueMillions": 76795,
+          "precision": "USD millions",
+          "periodLabel": "FY2027 Q1",
+          "operatingIncomeMillions": 40558,
+          "definition": "Broader recast segment including several product lines; not Azure-only or Cloud-only profit",
+          "sourceIds": [
+            "msft-fy27-q1"
+          ]
+        }
+      ],
+      "valuation": null,
+      "valuationReason": "No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation",
+      "news": [
+        {
+          "sourceId": "msft-fy27-q1",
+          "summary": "Azure revenue grew 48% year over year; Microsoft Cloud revenue was 63.9 billion USD and grew 30% on a reported basis.",
+          "kind": "reported"
+        },
+        {
+          "sourceId": "msft-fy27-q1",
+          "summary": "FY2027 segment presentation changed to Agents and Infra and Devices and Consumer; prior periods were recast in the release.",
+          "kind": "reported"
+        }
+      ],
+      "sourceIds": [
+        "msft-fy27-q1"
+      ],
+      "comparabilityWarnings": [
+        "Three-month reporting period ends in September, unlike NVIDIA July quarter.",
+        "Cash capex excludes finance lease additions; no broader capex guidance is represented as observed cash outflow.",
+        "Agents and Infra profit must not be attributed entirely to Azure or AI."
+      ]
+    },
+    {
+      "symbol": "AAPL",
+      "name": "Apple",
+      "currency": "USD",
+      "periodLabel": "FY2026 Q4 (13 weeks ended 26 September 2026)",
+      "periodStart": "2026-06-28",
+      "periodEnd": "2026-09-26",
+      "companyRevenueMillions": 114477,
+      "operatingIncomeMillions": 35631,
+      "netIncomeMillions": 30711,
+      "ocf": {
+        "value": 145097,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2025-09-28",
+        "periodEnd": "2026-09-26",
+        "label": "FY2026 full year; not quarterly"
+      },
+      "cashCapex": {
+        "value": 9041,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2025-09-28",
+        "periodEnd": "2026-09-26",
+        "label": "FY2026 full year; not quarterly",
+        "definition": "Payments for acquisition of property, plant and equipment; positive cash outflow magnitude"
+      },
+      "freeCashFlow": {
+        "value": 136056,
+        "currency": "USD",
+        "unit": "millions",
+        "periodStart": "2025-09-28",
+        "periodEnd": "2026-09-26",
+        "label": "FY2026 full year; not quarterly",
+        "definition": "Derived annual operating cash flow less payments for acquisition of PP&E; 145097 - 9041",
+        "kind": "derived"
+      },
+      "dilutedEps": {
+        "value": 2.1,
+        "currency": "USD",
+        "periodLabel": "FY2026 Q4",
+        "periodStart": "2026-06-28",
+        "periodEnd": "2026-09-26",
+        "basis": "GAAP diluted EPS; includes 0.05 per share favourable tariff refund impact; quarterly, not TTM"
+      },
+      "bookEquity": {
+        "valueMillions": 112093,
+        "asOf": "2026-09-26",
+        "basis": "Reported total shareholders equity",
+        "sourceIds": [
+          "aapl-fy26-q4-statements"
+        ]
+      },
+      "cloudMetrics": [
+        {
+          "name": "Services revenue",
+          "valueMillions": 31573,
+          "precision": "USD millions",
+          "periodLabel": "FY2026 Q4",
+          "operatingIncomeMillions": null,
+          "definition": "Apple Services category; not a disclosed cloud infrastructure segment",
+          "sourceIds": [
+            "aapl-fy26-q4-statements"
+          ]
+        }
+      ],
+      "valuation": null,
+      "valuationReason": "No licensed compatible timestamped market price or forward consensus imported; quarterly EPS is not annualised into a valuation",
+      "news": [
+        {
+          "sourceId": "aapl-fy26-q4-release",
+          "summary": "Q4 results were published on November 2; EPS and gross margin included favourable tariff refund effects.",
+          "kind": "reported"
+        },
+        {
+          "sourceId": "aapl-fy26-q4-release",
+          "summary": "Board declared a 0.27 USD cash dividend payable November 16 to holders of record November 12; declaration is not a realised investment return.",
+          "kind": "announcement"
+        }
+      ],
+      "sourceIds": [
+        "aapl-fy26-q4-release",
+        "aapl-fy26-q4-statements"
+      ],
+      "comparabilityWarnings": [
+        "Company revenue and profit shown are quarterly; cash flows are full-year and must not be divided by quarterly sales.",
+        "Annual diluted EPS was 8.98 for FY2026; quarterly diluted EPS 2.10 must not be treated as TTM EPS.",
+        "Apple Services is not directly comparable to Azure or NVIDIA Data Center."
+      ]
+    }
+  ],
+  "meliusFlag": {
+    "analyst": "Ben Reitzes",
+    "institution": "Melius Research",
+    "symbol": "NVDA",
+    "publicationDate": "2026-11-02",
+    "rating": "Buy",
+    "previousRating": "Buy",
+    "target": 315,
+    "previousTarget": 420,
+    "currency": "USD",
+    "sourceIds": [
+      "melius-benzinga-report",
+      "melius-benzinga-provider-row"
+    ],
+    "verification": "corroborated_media",
+    "licensedFeedImported": false,
+    "originalResearchNoteRetrieved": false,
+    "consensusEligible": false,
+    "limitation": "Public secondary report and provider row only; original Melius note and licensed revision feed were not retrieved. This is a target cut with Buy maintained, not a rating downgrade."
+  },
+  "comparabilityPolicy": "Preserve each fiscal period and cash-flow definition. No cross-company rank or same-window performance assertion. Missing licensed valuation data stays null.",
+  "executionAuthority": "none"
+}

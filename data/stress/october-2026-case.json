@@ -1,0 +1,35 @@
+{
+  "id": "OCT2026_TECH_STRESS_REVIEW",
+  "version": "stress-001.1-v1",
+  "mode": "retrospective_study",
+  "title": "October 2026 technology-sector stress review",
+  "universe": ["GOOGL", "AMZN", "MSFT", "NVDA", "INTC", "CRWV"],
+  "benchmark": "QQQ",
+  "marketDataStatus": "No licensed market observations bundled",
+  "consensusStatus": "No authoritative forward consensus snapshots bundled",
+  "classification": "Insufficient evidence",
+  "sources": [
+    {
+      "id": "alphabet-q3-sec",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000080/googexhibit991q32026.htm",
+      "publishedAt": "2026-10-28T20:01:33Z",
+      "receivedAt": "2026-10-29T17:15:23Z",
+      "kind": "company_filing",
+      "status": "Reviewed financial extraction retained in existing earnings case",
+      "scope": "Alphabet company financials only; not a six-company market-price feed"
+    }
+  ],
+  "questions": [
+    "Did price multiples contract while compatible forward estimates remained stable?",
+    "Did cash conversion, operating margins or guidance deteriorate?",
+    "How did each instrument perform relative to QQQ over the same sourced sessions?",
+    "Are debt maturities and financing commitments sufficiently documented?"
+  ],
+  "limitations": [
+    "The sector sell-off is the research premise supplied in the development brief; no magnitude or causal attribution is asserted without sourced prices.",
+    "QQQ is a Nasdaq-100 ETF benchmark, not the Nasdaq Composite index or a risk-free comparator.",
+    "Synthetic demonstration bars are separate from this observed-data record.",
+    "A share-price decline alone does not establish an opportunity or authorize a paper trade.",
+    "Retrospective research cannot establish an authentic forecast recorded before the event."
+  ]
+}

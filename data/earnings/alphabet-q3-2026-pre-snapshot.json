@@ -1,0 +1,187 @@
+{
+  "protocolVersion": "earnings-001-v1",
+  "status": "blocked",
+  "mode": "retrospective",
+  "createdAt": "2026-10-29T17:22:43.852812+00:00",
+  "bundle": {
+    "symbol": "GOOGL",
+    "horizon": "1d",
+    "neutralBand": 0.002,
+    "cutoff": "2026-10-28T20:01:32.999000Z",
+    "eventId": "GOOGL_Q3_2026",
+    "phase": "pre-earnings",
+    "earningsPublishedAt": "2026-10-28T20:01:33Z",
+    "earningsTarget": {
+      "returnType": "excess",
+      "benchmarkSymbol": "QQQ",
+      "anchorAt": "2026-10-29T13:30:00Z",
+      "endAt": "2026-10-29T20:00:00Z",
+      "session": "regular",
+      "calendar": "manual-user-window-unverified",
+      "priceBasis": "unadjusted"
+    },
+    "rulesBaseline": "neutral-abstention-v1",
+    "experimentMode": "retrospective",
+    "synthetic": false,
+    "evidence": []
+  },
+  "evidenceSha256": "b83bea7e79c38d0cec227c2e564431ade9b4b4bd6272b90d049082846da6ee84",
+  "excluded": [
+    {
+      "id": "goog-2026q3-revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-cloud_revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-search_revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-operating_income-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-operating_cash_flow-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-capital_expenditure-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-free_cash_flow-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-cloud_operating_income-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2026q3-diluted_eps-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-cloud_revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-search_revenue-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-operating_cash_flow-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-capital_expenditure-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "goog-2025q3-cloud_operating_income-v1",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "media-consensus-revenue-v1",
+      "reasons": [
+        "Source verification is incomplete",
+        "publishedAt is unknown",
+        "receivedAt is after the frozen cutoff",
+        "Article contains subsequent market reaction"
+      ]
+    },
+    {
+      "id": "media-consensus-free_cash_flow-v1",
+      "reasons": [
+        "Source verification is incomplete",
+        "publishedAt is unknown",
+        "receivedAt is after the frozen cutoff",
+        "Article contains subsequent market reaction"
+      ]
+    },
+    {
+      "id": "factset-media-revenue-v1",
+      "reasons": [
+        "Source verification is incomplete",
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff",
+        "Article contains subsequent market reaction"
+      ]
+    },
+    {
+      "id": "cash-bridge",
+      "reasons": [
+        "publishedAt is after the frozen cutoff",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "search-risk",
+      "reasons": [
+        "Source verification is incomplete",
+        "publishedAt is unknown",
+        "receivedAt is after the frozen cutoff"
+      ]
+    },
+    {
+      "id": "market-cause",
+      "reasons": [
+        "Source verification is incomplete",
+        "publishedAt is unknown",
+        "receivedAt is after the frozen cutoff"
+      ]
+    }
+  ],
+  "warning": "Historical replay cannot establish a forecast made before the event; later model training knowledge may contaminate conclusions."
+}

@@ -1,0 +1,48 @@
+{
+  "eventId": "SYNTHETIC-GOOGL-Q4",
+  "symbol": "GOOGL",
+  "horizon": "1d",
+  "neutralBand": 0.002,
+  "phase": "post-earnings",
+  "cutoff": "2026-01-02T21:10:00Z",
+  "earningsPublishedAt": "2026-01-02T21:00:00Z",
+  "earningsTarget": {
+    "returnType": "excess",
+    "benchmarkSymbol": "QQQ",
+    "anchorAt": "2026-01-05T14:30:00Z",
+    "endAt": "2026-01-05T21:00:00Z",
+    "session": "regular",
+    "calendar": "synthetic-XNAS-v1",
+    "priceBasis": "unadjusted"
+  },
+  "synthetic": true,
+  "claims": [
+    {
+      "id": "release-revenue",
+      "kind": "company_fact",
+      "verification": "verified",
+      "source": "synthetic release",
+      "publishedAt": "2026-01-02T21:00:00Z",
+      "receivedAt": "2026-01-02T21:01:00Z",
+      "value": 100
+    },
+    {
+      "id": "later-article",
+      "kind": "analyst_opinion",
+      "verification": "sourced",
+      "source": "synthetic article",
+      "publishedAt": "2026-01-03T09:00:00Z",
+      "receivedAt": "2026-01-03T09:01:00Z",
+      "text": "Commentary"
+    },
+    {
+      "id": "reaction",
+      "kind": "market_outcome",
+      "verification": "verified",
+      "source": "synthetic quote",
+      "publishedAt": "2026-01-02T21:02:00Z",
+      "receivedAt": "2026-01-02T21:03:00Z",
+      "value": -0.12
+    }
+  ]
+}

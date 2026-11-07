@@ -1,0 +1,4 @@
+import {z} from 'zod';
+const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/),value=z.number().finite();
+const cash=z.object({value:value.nullable(),periodStart:date,periodEnd:date,label:z.string(),definition:z.string().optional(),kind:z.string().optional()}).passthrough();
+export const consensusCompanyContextSchema=z.object({symbol:z.enum(['NVDA','MSFT','AAPL']),name:z.string(),periodLabel:z.string(),periodStart:date,periodEnd:date,companyRevenueMillions:value.nullable(),operatingIncomeMillions:value.nullable(),netIncomeMillions:value.nullable(),ocf:cash,cashCapex:cash,freeCashFlow:cash,dilutedEps:z.object({value:value.nullable(),periodLabel:z.string(),basis:z.string()}).passthrough(),valuation:z.null().or(z.record(z.string(),z.unknown())),valuationReason:z.string(),news:z.array(z.object({sourceId:z.string(),summary:z.string(),kind:z.string()}).strict()),sourceIds:z.array(z.string()),comparabilityWarnings:z.array(z.string())}).passthrough();

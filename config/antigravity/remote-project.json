@@ -1,0 +1,52 @@
+{
+  "name": "ai-capital-intelligence-remote-research",
+  "description": "Least-privilege Antigravity Remote Project for unattended AI Capital Intelligence research staging.",
+  "repository": {
+    "provider": "github",
+    "visibility": "private",
+    "branch": "main",
+    "excludedPaths": [
+      ".env*",
+      ".convex/**",
+      ".tmp/**",
+      "tmp/tickets/**",
+      "**/*secret*",
+      "**/*credential*"
+    ]
+  },
+  "environment": {
+    "RESEARCH_SCHEDULER_ENV": "remote",
+    "EXECUTION_AUTHORITY": "none",
+    "LIVE_TRADING_ENABLED": "false",
+    "DEMO_TRADING_ENABLED": "false"
+  },
+  "requiredSecrets": [
+    "RESEARCH_STAGING_TOKEN",
+    "OPERATIONS_SCHEDULER_SECRET",
+    "RESEARCH_OWNER_ID",
+    "SEC_USER_AGENT",
+    "FRED_API_KEY",
+    "GEMINI_API_KEY"
+  ],
+  "forbiddenSecrets": [
+    "TRADING212_API_KEY",
+    "TRADING212_API_SECRET",
+    "BROKER_VAULT_KEY_B64",
+    "CONVEX_BROKER_ADMIN_KEY",
+    "CLERK_SECRET_KEY"
+  ],
+  "agent_permissions": {
+    "workspace_uris": [
+      "file:///c%3A/GPT%205%20CODEX/Trading%20app"
+    ],
+    "access_grants": [
+      "command(python -m worker.remote_research)",
+      "command(python -m unittest discover -s worker -p test_*.py)",
+      "command(npx vitest run)",
+      "read_url(data.sec.gov)",
+      "read_url(www.sec.gov)",
+      "read_url(fred.stlouisfed.org)",
+      "read_url(www.bankofengland.co.uk)"
+    ]
+  }
+}

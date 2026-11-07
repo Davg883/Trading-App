@@ -1,0 +1,20 @@
+/* Broker connection and synchronisation status (settings page and dashboard). */
+.bs-panel{margin-top:24px}.bs-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:14px}
+.bs-card{border:1px solid #dfe6d7;border-radius:8px;padding:16px;background:#fff;min-width:0}.bs-card h3{margin:0 0 10px;font-size:15px}
+.bs-status dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}
+.bs-status dt{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:#4b5563;font-weight:700}
+.bs-status dd{margin:2px 0 0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.bs-detail{display:block;font-size:11px;color:#4b5563;margin-top:3px;line-height:1.45}
+.bs-env{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;border:1px solid}
+.bs-env-live{background:#fdecea;border-color:#d9897c;color:#7a2416}.bs-env-demo{background:#e8eefb;border-color:#8ea6d9;color:#20386e}
+.bs-pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.bs-ok{background:#e3f1e8;color:#1f5f43}.bs-warn{background:#fdf0dc;color:#7a4b0c}.bs-alert{background:#fbe3dd;color:#8a2e17}.bs-info{background:#eceff3;color:#374151}
+.bs-stale{color:#8a3a12;font-weight:700}
+.bs-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}.bs-auto{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+.bs-auto select{padding:5px 6px;border:1px solid #dfe6d7;border-radius:4px;background:#fff}
+.bs-message{font-size:12px;margin:8px 0 0;color:#374151}
+.bs-warning{background:#fdf0dc;border:1px solid #e3b56b;border-left:4px solid #c47a1d;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.5;color:#5c3a07}
+.cc-sync{background:#fff;border:1px solid var(--line,#e8ebef);border-radius:8px;padding:12px 16px}.cc-sync>summary{cursor:pointer;font-weight:700;font-size:13px;margin-bottom:8px}
+.bs-compact dl{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:900px){.bs-grid{grid-template-columns:minmax(0,1fr)}.bs-compact dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.bs-status dl,.bs-compact dl{grid-template-columns:minmax(0,1fr)}}

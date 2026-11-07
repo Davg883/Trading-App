@@ -1,0 +1,1456 @@
+{
+  "version": "amazon-cash-2026-v1",
+  "id": "AMZN_Q3_2026_CASH_V1",
+  "name": "Amazon Q3 2026 cash conversion \u2014 retrospective interpretation",
+  "mode": "retrospective",
+  "sources": [
+    {
+      "id": "amazon-sec-ex991",
+      "title": "Amazon Q3 2026 SEC Exhibit 99.1",
+      "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000038/amzn-20260930xex991.htm",
+      "kind": "sec",
+      "publishedAt": 1793304327000,
+      "publicationDate": "2026-10-29",
+      "publicationBasis": "sec_acceptance_proxy",
+      "receivedAt": 1793471503000,
+      "verified": true
+    },
+    {
+      "id": "amazon-ir-release",
+      "title": "Amazon investor relations Q3 2026 release",
+      "url": "https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Third-Quarter-Results/default.aspx",
+      "kind": "company",
+      "publishedAt": null,
+      "publicationDate": "2026-10-29",
+      "publicationBasis": "date_only",
+      "receivedAt": 1793471503000,
+      "verified": true
+    }
+  ],
+  "observations": [
+    {
+      "id": "amzn-2025-q2-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-04-01",
+        "end": "2025-06-30",
+        "label": "2025-Q2"
+      },
+      "value": 167702,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 180169,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q4-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-10-01",
+        "end": "2025-12-31",
+        "label": "2025-Q4"
+      },
+      "value": 213386,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q1-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-01-01",
+        "end": "2026-03-31",
+        "label": "2026-Q1"
+      },
+      "value": 181519,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q2-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-04-01",
+        "end": "2026-06-30",
+        "label": "2026-Q2"
+      },
+      "value": 200606,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 201944,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q2-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-04-01",
+        "end": "2025-06-30",
+        "label": "2025-Q2"
+      },
+      "value": 19171,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 17422,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q4-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-10-01",
+        "end": "2025-12-31",
+        "label": "2025-Q4"
+      },
+      "value": 24977,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q1-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-01-01",
+        "end": "2026-03-31",
+        "label": "2026-Q1"
+      },
+      "value": 23852,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q2-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-04-01",
+        "end": "2026-06-30",
+        "label": "2026-Q2"
+      },
+      "value": 27461,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 28076,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q2-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-04-01",
+        "end": "2025-06-30",
+        "label": "2025-Q2"
+      },
+      "value": 18164,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 21187,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q4-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-10-01",
+        "end": "2025-12-31",
+        "label": "2025-Q4"
+      },
+      "value": 21192,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q1-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-01-01",
+        "end": "2026-03-31",
+        "label": "2026-Q1"
+      },
+      "value": 30255,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q2-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-04-01",
+        "end": "2026-06-30",
+        "label": "2026-Q2"
+      },
+      "value": 62647,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-net_income-v1",
+      "metric": "net_income",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 20685,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q2-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-04-01",
+        "end": "2025-06-30",
+        "label": "2025-Q2"
+      },
+      "value": 30873,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 33006,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q4-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-10-01",
+        "end": "2025-12-31",
+        "label": "2025-Q4"
+      },
+      "value": 35579,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q1-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-01-01",
+        "end": "2026-03-31",
+        "label": "2026-Q1"
+      },
+      "value": 37587,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q2-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-04-01",
+        "end": "2026-06-30",
+        "label": "2026-Q2"
+      },
+      "value": 42232,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-aws-revenue-v1",
+      "metric": "revenue",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 45984,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q2-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-04-01",
+        "end": "2025-06-30",
+        "label": "2025-Q2"
+      },
+      "value": 10160,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 11434,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q4-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-10-01",
+        "end": "2025-12-31",
+        "label": "2025-Q4"
+      },
+      "value": 12465,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q1-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-01-01",
+        "end": "2026-03-31",
+        "label": "2026-Q1"
+      },
+      "value": 14161,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q2-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-04-01",
+        "end": "2026-06-30",
+        "label": "2026-Q2"
+      },
+      "value": 16621,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-aws-operating_income-v1",
+      "metric": "operating_income",
+      "scope": "AWS",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 17773,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q2-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-07-01",
+        "end": "2025-06-30",
+        "label": "TTM-2025-Q2"
+      },
+      "value": 670038,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q3-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-10-01",
+        "end": "2025-09-30",
+        "label": "TTM-2025-Q3"
+      },
+      "value": 691330,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q4-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-01-01",
+        "end": "2025-12-31",
+        "label": "TTM-2025-Q4"
+      },
+      "value": 716924,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q1-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-04-01",
+        "end": "2026-03-31",
+        "label": "TTM-2026-Q1"
+      },
+      "value": 742776,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q2-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-07-01",
+        "end": "2026-06-30",
+        "label": "TTM-2026-Q2"
+      },
+      "value": 775680,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-revenue-v1",
+      "metric": "revenue",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": 797455,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q2-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-07-01",
+        "end": "2025-06-30",
+        "label": "TTM-2025-Q2"
+      },
+      "value": 121137,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q3-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-10-01",
+        "end": "2025-09-30",
+        "label": "TTM-2025-Q3"
+      },
+      "value": 130691,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q4-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-01-01",
+        "end": "2025-12-31",
+        "label": "TTM-2025-Q4"
+      },
+      "value": 139514,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q1-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-04-01",
+        "end": "2026-03-31",
+        "label": "TTM-2026-Q1"
+      },
+      "value": 148531,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q2-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-07-01",
+        "end": "2026-06-30",
+        "label": "TTM-2026-Q2"
+      },
+      "value": 161403,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": 168300,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q2-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-07-01",
+        "end": "2025-06-30",
+        "label": "TTM-2025-Q2"
+      },
+      "value": 102953,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q3-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-10-01",
+        "end": "2025-09-30",
+        "label": "TTM-2025-Q3"
+      },
+      "value": 115903,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q4-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-01-01",
+        "end": "2025-12-31",
+        "label": "TTM-2025-Q4"
+      },
+      "value": 128320,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q1-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-04-01",
+        "end": "2026-03-31",
+        "label": "TTM-2026-Q1"
+      },
+      "value": 147299,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q2-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-07-01",
+        "end": "2026-06-30",
+        "label": "TTM-2026-Q2"
+      },
+      "value": 169007,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": 210657,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q2-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-07-01",
+        "end": "2025-06-30",
+        "label": "TTM-2025-Q2"
+      },
+      "value": 18184,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q3-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2024-10-01",
+        "end": "2025-09-30",
+        "label": "TTM-2025-Q3"
+      },
+      "value": 14788,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2025-q4-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-01-01",
+        "end": "2025-12-31",
+        "label": "TTM-2025-Q4"
+      },
+      "value": 11194,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q1-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-04-01",
+        "end": "2026-03-31",
+        "label": "TTM-2026-Q1"
+      },
+      "value": 1232,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q2-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-07-01",
+        "end": "2026-06-30",
+        "label": "TTM-2026-Q2"
+      },
+      "value": -7604,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": -42357,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 35525,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-gross_capex-v1",
+      "metric": "gross_capex",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 35095,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-capex_proceeds-v1",
+      "metric": "capex_proceeds",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 867,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2025-q3-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 34228,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "derived",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null,
+      "inputIds": [
+        "amzn-2025-q3-company-gross_capex-v1",
+        "amzn-2025-q3-company-capex_proceeds-v1"
+      ]
+    },
+    {
+      "id": "amzn-2025-q3-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2025-07-01",
+        "end": "2025-09-30",
+        "label": "2025-Q3"
+      },
+      "value": 1297,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "derived",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null,
+      "inputIds": [
+        "amzn-2025-q3-company-operating_cash_flow-v1",
+        "amzn-2025-q3-company-net_capex-v1"
+      ]
+    },
+    {
+      "id": "amzn-2026-q3-company-operating_cash_flow-v1",
+      "metric": "operating_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 42422,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-gross_capex-v1",
+      "metric": "gross_capex",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 77259,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-capex_proceeds-v1",
+      "metric": "capex_proceeds",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 1381,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-q3-company-net_capex-v1",
+      "metric": "net_capex",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": 75878,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "derived",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null,
+      "inputIds": [
+        "amzn-2026-q3-company-gross_capex-v1",
+        "amzn-2026-q3-company-capex_proceeds-v1"
+      ]
+    },
+    {
+      "id": "amzn-2026-q3-company-free_cash_flow-v1",
+      "metric": "free_cash_flow",
+      "scope": "company",
+      "period": {
+        "scope": "quarter",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "label": "2026-Q3"
+      },
+      "value": -33456,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "derived",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null,
+      "inputIds": [
+        "amzn-2026-q3-company-operating_cash_flow-v1",
+        "amzn-2026-q3-company-net_capex-v1"
+      ]
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-gross_capex-v1",
+      "metric": "gross_capex",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": 215192,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-ttm-2026-q3-company-capex_proceeds-v1",
+      "metric": "capex_proceeds",
+      "scope": "company",
+      "period": {
+        "scope": "ttm",
+        "start": "2025-10-01",
+        "end": "2026-09-30",
+        "label": "TTM-2026-Q3"
+      },
+      "value": 4535,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "reported",
+      "qualifier": "exact",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2026-company-cash_capex_guidance-v1",
+      "metric": "cash_capex_guidance",
+      "scope": "company",
+      "period": {
+        "scope": "calendar_year",
+        "start": "2026-01-01",
+        "end": "2026-12-31",
+        "label": "2026"
+      },
+      "value": 220000,
+      "currency": "USD",
+      "unit": "million",
+      "basis": "amazon-reported-v1",
+      "kind": "guidance",
+      "qualifier": "approximately",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2027-aws-aws_growth_forecast-v1",
+      "metric": "aws_growth_forecast",
+      "scope": "AWS",
+      "period": {
+        "scope": "calendar_year",
+        "start": "2027-01-01",
+        "end": "2027-12-31",
+        "label": "2027"
+      },
+      "value": 0.4,
+      "currency": "USD",
+      "unit": "ratio",
+      "basis": "amazon-reported-v1",
+      "kind": "management_expectation",
+      "qualifier": "greater_than",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    },
+    {
+      "id": "amzn-2028-aws-aws_growth_forecast-v1",
+      "metric": "aws_growth_forecast",
+      "scope": "AWS",
+      "period": {
+        "scope": "calendar_year",
+        "start": "2028-01-01",
+        "end": "2028-12-31",
+        "label": "2028"
+      },
+      "value": 0.4,
+      "currency": "USD",
+      "unit": "ratio",
+      "basis": "amazon-reported-v1",
+      "kind": "management_expectation",
+      "qualifier": "greater_than",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000,
+      "supersedes": null
+    }
+  ],
+  "bedrock": [
+    {
+      "id": "bedrock-token_volume-q32026",
+      "metric": "token_volume",
+      "population": "Total Amazon Bedrock token volume across the service; no common-customer cohort or token mix supplied",
+      "comparison": "year_over_year",
+      "multiple": 17,
+      "qualifier": "nearly",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000
+    },
+    {
+      "id": "bedrock-customer_spending-q32026",
+      "metric": "customer_spending",
+      "population": "Fortune 500 companies spending on Amazon Bedrock; not all Bedrock customers, matched cohort definition not supplied",
+      "comparison": "year_over_year",
+      "multiple": 7,
+      "qualifier": "nearly",
+      "sourceId": "amazon-sec-ex991",
+      "receivedAt": 1793471503000
+    }
+  ],
+  "articleClaim": {
+    "description": "User-described article labels approximately USD77.3bn quarterly purchases as net; article text and original URL were not supplied for verification.",
+    "amountMillions": 77300,
+    "sourceUrl": null,
+    "verified": false
+  }
+}

@@ -1,0 +1,66 @@
+name: AI Capital Intelligence — Remote Research Operations
+
+on:
+  schedule:
+    # Market data & FX deterministic collection: every 15 minutes during US market hours on weekdays
+    - cron: '*/15 13-21 * * 1-5'
+    # News discovery & SEC filings check: every 30 minutes
+    - cron: '*/30 * * * *'
+    # Daily intelligence briefing: 06:30 and 07:30 UTC on weekdays (guarded in job for 07:30 Europe/London BST/GMT)
+    - cron: '30 6,7 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      job_key:
+        description: 'Specific jobKey to run (or all_due)'
+        required: false
+        default: 'all_due'
+
+concurrency:
+  group: aci-remote-research-operations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  unattended-research-ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RESEARCH_SCHEDULER_ENV: 'remote'
+      LIVE_TRADING_ENABLED: 'false'
+      DEMO_TRADING_ENABLED: 'false'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Verify least-privilege secret isolation (no broker, vault or trading secrets)
+        run: |
+          python -c "from worker.remote_research import assert_least_privilege_environment; import os; assert_least_privilege_environment(dict(os.environ))"
+
+      - name: Run Python remote research verification suite
+        run: |
+          python -m unittest discover -s worker -p "test_remote_research.py"
+
+      - name: Trigger persistent scheduled operations endpoint
+        if: ${{ secrets.OPERATIONS_SCHEDULER_SECRET != '' && vars.RESEARCH_APP_ORIGIN != '' }}
+        env:
+          OPERATIONS_SCHEDULER_SECRET: ${{ secrets.OPERATIONS_SCHEDULER_SECRET }}
+          RESEARCH_APP_ORIGIN: ${{ vars.RESEARCH_APP_ORIGIN }}
+          TARGET_JOB: ${{ inputs.job_key || 'all_due' }}
+        run: |
+          if [ "$TARGET_JOB" = "all_due" ]; then
+            BODY='{"environment":"remote"}'
+          else
+            BODY="{\"environment\":\"remote\",\"jobs\":[\"$TARGET_JOB\"],\"forceOnDemand\":true}"
+          fi
+          curl --fail --silent --show-error --max-time 60 \
+            -X POST "${RESEARCH_APP_ORIGIN}/api/operations/scheduled" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${OPERATIONS_SCHEDULER_SECRET}" \
+            -d "$BODY"

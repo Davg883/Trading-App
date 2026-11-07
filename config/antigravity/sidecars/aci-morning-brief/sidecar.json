@@ -1,0 +1,21 @@
+{
+  "builtin": "schedule",
+  "restart_policy": "always",
+  "display_name": "ACI Weekday Morning Intelligence Briefing",
+  "description": "At 07:30 Europe/London on weekdays, generates the Morning Intelligence Brief separating confirmed facts, research interpretation, risk changes and incomplete evidence.",
+  "args": [
+    "CRON_TZ=Europe/London 30 7 * * 1-5",
+    "agentapi",
+    "new-conversation",
+    "--",
+    "Generate the weekday 07:30 Europe/London Morning Intelligence Brief via the daily_intelligence_briefing job. Keep confirmed primary-source facts strictly separate from AI research interpretation, deterministic risk changes, and incomplete evidence. Hold zero execution authority."
+  ],
+  "agent_permissions": {
+    "workspace_uris": [
+      "file:///c%3A/GPT%205%20CODEX/Trading%20app"
+    ],
+    "access_grants": [
+      "command(python -m worker.remote_research)"
+    ]
+  }
+}

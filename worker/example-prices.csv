@@ -1,0 +1,3 @@
+symbol,timestamp,receivedAt,source,currency,close
+DEMO,2026-10-26T14:00:00Z,2026-10-26T14:00:01Z,synthetic-v1,USD,100
+DEMO,2026-10-26T15:00:00Z,2026-10-26T15:00:01Z,synthetic-v1,USD,101
