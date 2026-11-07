@@ -182,7 +182,17 @@ export const runScheduledCloudCycle=internalAction({
  handler:async(ctx,args)=>{
   const owner=process.env.RESEARCH_OWNER_ID;
   if(!owner)throw new Error('RESEARCH_OWNER_ID is not configured in the Convex cloud environment');
-  const env=args.environment??'remote';
+  const schedulerEnv=(process.env.RESEARCH_SCHEDULER_ENV||'remote').trim();
+  if(schedulerEnv==='disabled'&&!args.forceOnDemand){
+   return {
+    executedAt:Date.now(),
+    environment:'disabled' as const,
+    results:[],
+    skippedReason:'scheduler_env_disabled_to_prevent_duplicate_dev_prod_collection',
+    executionAuthority:'none' as const,
+   };
+  }
+  const env=args.environment??(schedulerEnv==='local'?'local':'remote');
   const now=Date.now();
   const userAgent=process.env.SEC_USER_AGENT||'AICapitalIntelligence/0.3 (compliance@vectis.ai)';
   const targetJobs=args.jobs??DEFAULT_RESEARCH_JOBS.map(j=>j.jobKey);
