@@ -5,6 +5,7 @@ import { Authenticated, Unauthenticated, AuthLoading, ConvexReactClient, useMuta
 import { makeFunctionReference } from 'convex/server';
 import { useState } from 'react';
 import ProposalReview from '../components/proposal-review';
+import { useConvexClerkAuth } from '../lib/clerk-convex-auth';
 import { validateReviewContext, type ReviewContext } from '../lib/review-context';
 
 type Row = {_id:string;reviewContext?:ReviewContext;name?:string;symbol?:string;quantity?:number;status?:string;reason?:string;cashGbp?:number;metric?:string;value?:number;unit?:string;source?:string;action?:string;detail?:string;at?:number};
@@ -18,7 +19,7 @@ const freezeRef=makeFunctionReference<'mutation',{name:string;cutoff:number;evid
 
 export default function ConnectedWorkspace(){
   const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));
-  return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}>
+  return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}>
     <AuthLoading><p>Checking your session…</p></AuthLoading>
     <Unauthenticated><p>Sign in to access your private research records.</p><SignInButton mode="modal"><button>Sign in</button></SignInButton></Unauthenticated>
     <Authenticated><UserButton/><Records/></Authenticated>

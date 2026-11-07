@@ -28,7 +28,7 @@ function client(){const url=process.env.NEXT_PUBLIC_CONVEX_URL;if(!url)throw new
 async function context():Promise<Who>{
  if(!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY||!process.env.CLERK_SECRET_KEY||!vaultConfigured()||!process.env.CONVEX_BROKER_ADMIN_KEY)throw new TradingError('not_configured',503,'Trading storage is not configured');
  const session=await auth();if(!session.userId)throw new TradingError('sign_in_required',401,'Sign in required');
- const token=await session.getToken({template:'convex'});if(!token)throw new TradingError('sign_in_required',401,'Sign in required');
+ const token=(await session.getToken({template:'convex'}).catch(()=>null))??(await session.getToken().catch(()=>null));if(!token)throw new TradingError('sign_in_required',401,'Sign in required');
  const user=client();user.setAuth(token);
  const {owner}=await user.query(makeFunctionReference<'query',Record<string,never>,{owner:string}>('recovery:viewer'),{});if(!owner)throw new TradingError('sign_in_required',401,'Sign in required');
  const admin=client();(admin as unknown as {setAdminAuth(t:string):void}).setAdminAuth(process.env.CONVEX_BROKER_ADMIN_KEY);

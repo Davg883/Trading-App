@@ -4,6 +4,7 @@ import {ConvexProviderWithClerk} from 'convex/react-clerk';
 import {Authenticated,Unauthenticated,AuthLoading,ConvexReactClient,useQuery,useMutation} from 'convex/react';
 import {makeFunctionReference} from 'convex/server';
 import {useState} from 'react';
+import {useConvexClerkAuth} from '../lib/clerk-convex-auth';
 import type {RecoveryCase,RecoveryRegistration,RecoveryPlan,RecoveryWindow} from '../lib/market-recovery';
 
 type Metadata={caseId:string;name:string;mode:string;ingestedAt:number};
@@ -17,7 +18,7 @@ const registerRef=makeFunctionReference<'mutation',{caseId:string;name:string;cu
 const reviewRef=makeFunctionReference<'mutation',{experimentId:string;decision:'approve'|'reject';reason:string;acknowledgedRisks:string[];reviewBy:number;supersedesId?:string},string>('recovery:reviewExperiment');
 const iso=(t:number)=>new Date(t).toISOString();
 function stamp(value:string){if(!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(Date.parse(value))||Date.parse(value)<0)throw new Error('Timestamp with explicit timezone required.');return Date.parse(value);}
-export default function ConnectedRecovery(){const[client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve private registrations and human research reviews.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><OwnerRegistry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
+export default function ConnectedRecovery(){const[client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve private registrations and human research reviews.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><OwnerRegistry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
 function OwnerRegistry(){const{userId}=useAuth();return <Registry key={userId}/>;}
 function Registry(){const cases=useQuery(listRef,{}),[selected,setSelected]=useState('');return <div><p>Trusted server ingestion is required. Browser uploads cannot assert a licence, backdate receipt or authorise an allocation.</p><label>Private recovery case<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Choose an imported case</option>{cases?.map(c=><option key={c.caseId} value={c.caseId}>{c.name} · {c.mode}</option>)}</select></label>{cases?.length===0&&<p>No private recovery case has been imported.</p>}<PackageImport/>{selected&&<PrivateCase key={selected} caseId={selected}/>}</div>;}
 /** Calls the trusted, hash-pinned server import. The browser sends only an allowlisted package identifier; the owner comes from the verified session. */

@@ -4,6 +4,7 @@ import {ConvexProviderWithClerk} from 'convex/react-clerk';
 import {Authenticated,Unauthenticated,AuthLoading,ConvexReactClient,useQuery,useMutation} from 'convex/react';
 import {makeFunctionReference} from 'convex/server';
 import {useEffect,useState} from 'react';
+import {useConvexClerkAuth} from '../lib/clerk-convex-auth';
 import type {RiskLimits} from '../lib/trading/order-model';
 
 type Order={orderId:string;state:string;environment:'demo'|'live';ticker:string;draft:{side:string;quantity:number;type:string;limitPrice:number|null;stopPrice:number|null;timeValidity:string|null;thesis:string;counterevidence:string};risk:null|{passed:boolean;reasons:string[];estimate:{grossValue:number|null;fxCost:number;estimatedValue:number|null;accountCurrency:string|null};account?:{cashAvailable:number|null;totalValue:number|null;syncedAt:number}};priceReference:null|{price:number;priceCurrency:string;observedAt:number;sourceDetail:string};reviewNote:string|null;brokerOrderId:number|null;brokerStatus:string|null;filledQuantity:number|null;filledValue:number|null;reconcileChecks:number;lastReconciledAt:number|null;updatedAt:number};
@@ -15,7 +16,7 @@ const iso=(t:number|null|undefined)=>t?new Date(t).toISOString().replace('.000Z'
 const money=(v:number|null|undefined,c?:string|null)=>v==null?'Unavailable':`${c??''} ${v.toFixed(2)}`.trim();
 async function api(body:Record<string,unknown>){const r=await fetch('/api/trading',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({message:'Unreadable response'}));if(!r.ok)throw new Error(j.message??`Request failed (${r.status})`);return j;}
 
-export default function ConnectedTrading({flags}:{flags:{demo:boolean;live:boolean}}){const[client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to manage proposals, approvals and confirmations.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Workspace flags={flags}/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
+export default function ConnectedTrading({flags}:{flags:{demo:boolean;live:boolean}}){const[client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to manage proposals, approvals and confirmations.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Workspace flags={flags}/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
 
 function Workspace({flags}:{flags:{demo:boolean;live:boolean}}){
  const data=useQuery(overviewRef,{}),kill=useMutation(ref('setLiveKillSwitch')),[environment,setEnvironment]=useState<'demo'|'live'>('demo'),[message,setMessage]=useState('');

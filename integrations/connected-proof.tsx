@@ -5,6 +5,7 @@ import {ConvexProviderWithClerk} from 'convex/react-clerk';
 import {Authenticated,Unauthenticated,AuthLoading,ConvexReactClient,useMutation,useQuery} from 'convex/react';
 import {makeFunctionReference} from 'convex/server';
 import {useEffect,useState} from 'react';
+import {useConvexClerkAuth} from '../lib/clerk-convex-auth';
 import {GATE_TYPES,STAGES,type ProofGate,type IntegrityEvidence,type RunUsage} from '../lib/proof-scale';
 
 type Pilot={_id:string;name:string;domain:'investment'|'vectis';mode:'synthetic'|'historical'|'forward';permittedUse:string;stage:typeof STAGES[number]};
@@ -24,7 +25,7 @@ const gbp=(n:number|null|undefined)=>n==null?'Unavailable':`£${n.toFixed(4)}`;
 
 export default function ConnectedProof(){
   const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));
-  return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}><AuthLoading><p>Checking your identity…</p></AuthLoading><Unauthenticated><p>Sign in to review your private evidence and pilots.</p><SignInButton mode="modal"><button className="button primary">Sign in for human review</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Pilots/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;
+  return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}><AuthLoading><p>Checking your identity…</p></AuthLoading><Unauthenticated><p>Sign in to review your private evidence and pilots.</p><SignInButton mode="modal"><button className="button primary">Sign in for human review</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Pilots/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;
 }
 function Pilots(){
   const pilots=useQuery(listRef,{}),create=useMutation(createRef);

@@ -24,7 +24,7 @@ function client(){
 async function context(admin=false){
   if(!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY||!process.env.CLERK_SECRET_KEY||!process.env.NEXT_PUBLIC_CONVEX_URL)throw new BrokerRequestError('not_configured',503);
   const session=await auth();if(!session.userId)throw new BrokerRequestError('sign_in_required',401);
-  const token=await session.getToken({template:'convex'});if(!token)throw new BrokerRequestError('sign_in_required',401);
+  const token=(await session.getToken({template:'convex'}).catch(()=>null))??(await session.getToken().catch(()=>null));if(!token)throw new BrokerRequestError('sign_in_required',401);
   const user=client();user.setAuth(token);
   let identity:{owner:string};try{identity=await user.query(ref('viewer'),{});}catch{throw new BrokerRequestError('storage_unavailable',503);}
   if(!identity.owner)throw new BrokerRequestError('sign_in_required',401);

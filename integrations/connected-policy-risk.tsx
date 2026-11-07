@@ -4,6 +4,7 @@ import {ConvexProviderWithClerk} from 'convex/react-clerk';
 import {Authenticated,Unauthenticated,AuthLoading,ConvexReactClient,useQuery,useMutation} from 'convex/react';
 import {makeFunctionReference} from 'convex/server';
 import {useState} from 'react';
+import {useConvexClerkAuth} from '../lib/clerk-convex-auth';
 import type {PolicyRegistration,evaluatePolicyStudy} from '../lib/policy-risk';
 
 type Metadata={caseId:string;externalId:string;name:string;mode:string;ingestedAt:number};
@@ -17,7 +18,7 @@ const iso=(t:number)=>new Date(t).toISOString();
 const pct=(v:number|null|undefined)=>v==null?'—':`${(v*100).toFixed(2)}%`;
 function stamp(value:string){if(!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(Date.parse(value))||Date.parse(value)<0)throw new Error('Timestamp with explicit timezone required.');return Date.parse(value);}
 
-export default function ConnectedPolicyRisk(){const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve private policy-risk registrations and outcome evaluations.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Registry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
+export default function ConnectedPolicyRisk(){const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve private policy-risk registrations and outcome evaluations.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><Registry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
 
 function Registry(){const rows=useQuery(listRef,{}),[selected,setSelected]=useState('');return <div><p>Trusted server ingestion imports source packages and later observation sets. Browser clients can register a frozen study but cannot submit returns, scores or classifications.</p><div className="proof-form"><label>Private case<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Choose an imported case</option>{rows?.map(r=><option key={r.caseId} value={r.caseId}>{r.name} · {r.externalId}</option>)}</select></label></div>{rows?.length===0&&<p>No policy-risk case has been imported.</p>}{selected&&<PrivateCase key={selected} caseId={selected}/>}</div>;}
 

@@ -44,7 +44,7 @@ export async function importResearchPackage(request:Request){
   let body:unknown;try{body=await request.json();}catch{throw new ImportError('invalid_request',400,'JSON body required');}
   if(!body||typeof body!=='object'||Object.keys(body).join()!=='packageId'||typeof (body as {packageId:unknown}).packageId!=='string')throw new ImportError('invalid_request',400,'Only {packageId} is accepted');
   const session=await auth();if(!session.userId)throw new ImportError('sign_in_required',401,'Sign in required');
-  const token=await session.getToken({template:'convex'});if(!token)throw new ImportError('sign_in_required',401,'Sign in required');
+  const token=(await session.getToken({template:'convex'}).catch(()=>null))??(await session.getToken().catch(()=>null));if(!token)throw new ImportError('sign_in_required',401,'Sign in required');
   const user=client();user.setAuth(token);
   const {owner}=await user.query(makeFunctionReference<'query',Record<string,never>,{owner:string}>('recovery:viewer'),{});
   if(!owner)throw new ImportError('sign_in_required',401,'Sign in required');

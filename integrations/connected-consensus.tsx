@@ -4,6 +4,7 @@ import {ConvexProviderWithClerk} from 'convex/react-clerk';
 import {Authenticated,Unauthenticated,AuthLoading,ConvexReactClient,useQuery,useMutation} from 'convex/react';
 import {makeFunctionReference} from 'convex/server';
 import {useState} from 'react';
+import {useConvexClerkAuth} from '../lib/clerk-convex-auth';
 import type {ConsensusCase,ConsensusPortfolio,ConsensusWindow,buildConsensusStudy,evaluateConsensusWindow} from '../lib/analyst-consensus';
 type Metadata={caseId:string;name:string;mode:string;ingestedAt:number};
 type Review={_id:string;decision:string;reason:string;state:string;reviewedAt:number;reviewBy:number;acknowledgedRisks:string[]};
@@ -18,7 +19,7 @@ const iso=(t:number)=>new Date(t).toISOString();
 function timestamp(v:string){if(!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(v)||!Number.isFinite(Date.parse(v))||Date.parse(v)<0)throw new Error('Timestamp with explicit timezone required');return Date.parse(v);}
 function currentIso(){return new Date().toISOString();}
 function exportStudy(study:Study){const url=URL.createObjectURL(new Blob([JSON.stringify(study,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='registered-consensus-study.json';a.click();URL.revokeObjectURL(url);}
-export default function ConnectedConsensus(){const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve owner-scoped studies, separate research portfolios and human reviews.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><OwnerRegistry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
+export default function ConnectedConsensus(){const [client]=useState(()=>new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!));return <ClerkProvider><ConvexProviderWithClerk client={client} useAuth={useConvexClerkAuth}><AuthLoading><p>Checking your session…</p></AuthLoading><Unauthenticated><p>Sign in to preserve owner-scoped studies, separate research portfolios and human reviews.</p><SignInButton mode="modal"><button className="button primary">Sign in</button></SignInButton></Unauthenticated><Authenticated><UserButton/><OwnerRegistry/></Authenticated></ConvexProviderWithClerk></ClerkProvider>;}
 function OwnerRegistry(){const {userId}=useAuth();return <Registry key={userId}/>;}
 function Registry(){const cases=useQuery(listRef,{}),[selected,setSelected]=useState('');return <div><h3>Authenticated consensus research</h3><p>Trusted source ingestion is required before private registration. Neither models nor browser uploads can assert an authoritative licence or backdate receipt.</p><div className="proof-form"><label>Private source case<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Choose an imported case</option>{cases?.map(c=><option key={c.caseId} value={c.caseId}>{c.name} · {c.mode}</option>)}</select></label></div>{cases?.length===0&&<p>No private consensus cases have been imported.</p>}{selected&&<PrivateCase key={selected} caseId={selected}/>}</div>;}
 function PrivateCase({caseId}:{caseId:string}){
