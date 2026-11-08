@@ -209,3 +209,16 @@ Live telemetry queried from Convex Production (`benevolent-magpie-921`) at `2026
    - Removed the `|| process.env.CONVEX_DEPLOY_KEY` fallback from `stagingConvexClient()` in [`lib/remote-ops/server.ts`](../lib/remote-ops/server.ts) and `importResearchPackage()` in [`lib/research-import-server.ts`](../lib/research-import-server.ts).
 3. **Production Database Pre-Check Before Vault Key Generation**:
    - Inspected all five brokerage tables on Convex Production (`benevolent-magpie-921`): `brokerConnections`, `brokerSnapshots`, `brokerSyncSchedules`, `accountValuations`, and `accountCashFlows` all contain **0 documents** (`There are no documents in this table`). Generating a fresh 32-byte AES-256-GCM vault key cannot orphan or invalidate any existing record.
+
+---
+
+## 10. Production Broker Vault Live Acceptance (`bf79cea3c4297c926e51d505e6c90e0977b7c45b`)
+
+- **Root Cause of Pre-Push Warning Banner**:
+  1. **Unpushed Git Commit (`f0e1ec139197eef2ee0d05db4c404f938a609cb5`)**: Prior to pushing `bf79cea3c4297c926e51d505e6c90e0977b7c45b`, `origin/main` was still at commit `f0e1ec139197eef2ee0d05db4c404f938a609cb5`, where `app/settings/brokers/page.tsx` and `app/trading/page.tsx` still checked for the legacy Convex broker admin key in addition to `vaultConfigured()`.
+  2. **`/trading` Readiness Alignment ([`app/trading/page.tsx`](../app/trading/page.tsx))**: Updated `app/trading/page.tsx` line 12 to use `verifyBrokerVaultSelfTest().ready` alongside Clerk and `NEXT_PUBLIC_CONVEX_URL`, matching `/settings/brokers` while preserving `LIVE_TRADING_ENABLED=false` and `DEMO_TRADING_ENABLED=false`.
+  3. **Whitespace & Quote Normalisation + Owner-Only Diagnostics ([`lib/brokers/vault.ts`](../lib/brokers/vault.ts), [`lib/brokers/server.ts`](../lib/brokers/server.ts))**: Added `cleanEnv()` normalisation and `diagnoseBrokerVaultReadiness()` returning safe diagnostic booleans (`authenticationConfigured`, `vaultKeyPresent`, `vaultKeyVersionPresent`, `vaultKeyFormatValid`, `vaultSelfTestPassed`, `convexReachable`, `clerkAuthenticationValid`, `ownerAuthorised`, `brokerStorageReady`) exclusively on the authenticated owner-only `GET /api/brokers` response.
+- **Live Hosted Verification (`https://capital.aiguides.co.uk`, tested at `2026-11-08T19:10:22Z`)**:
+  - `https://capital.aiguides.co.uk/settings/brokers`: `"Secure broker storage is not configured"` banner is **absent** (`false`); `storageConfigured = true` via live server AES-256-GCM self-test (`verifyBrokerVaultSelfTest().ready === true`).
+  - `https://capital.aiguides.co.uk/trading`: `"Trading storage is not configured"` banner is **absent** (`false`); displays `"Live submission is disabled on this server. Demo submission is disabled."`
+  - `https://capital.aiguides.co.uk/workspace` & `https://capital.aiguides.co.uk/`: Reports `Trading 212 · read-only broker vault` as `Configured, not yet verified` (`AES-256-GCM server vault & Convex broker storage ready · read-only Demo & Live supported`).

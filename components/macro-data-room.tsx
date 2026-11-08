@@ -24,19 +24,29 @@ import {
   computeNonDoubleCountedCommitments,
   reconstructMacroCase001AtCutoff,
 } from '../lib/graph/macro-case-001';
+import {
+  SUGGESTED_STARTER_QUESTIONS,
+  type AnswerValidationReport,
+  type EvidenceBundleV1,
+  type EvidenceChatTurnResult,
+  type EvidenceLockedAnswer,
+  type GeminiInferenceTelemetry,
+} from '../lib/graph/evidence-chat-contracts';
 
 export type DataRoomViewKey =
   | 'executive_overview'
   | 'sector_intelligence'
   | 'relationship_explorer'
   | 'risk_pathways'
-  | 'evidence_room';
+  | 'evidence_room'
+  | 'evidence_chat';
 
 export type TemporalBasis = 'receipt' | 'publication';
 
 export interface MacroDataRoomProps {
   dataset: MacroGraphDataset;
   benchmark: BenchmarkComparisonReport;
+  initialView?: DataRoomViewKey;
   liveTypeDbStatus: {
     reachable: boolean;
     authenticated?: boolean;
@@ -112,9 +122,10 @@ function formatUtcDate(ms: number): string {
 export default function MacroDataRoom({
   dataset,
   benchmark,
+  initialView = 'executive_overview',
   liveTypeDbStatus,
 }: MacroDataRoomProps) {
-  const [activeView, setActiveView] = useState<DataRoomViewKey>('executive_overview');
+  const [activeView, setActiveView] = useState<DataRoomViewKey>(initialView);
   const [asOfMs, setAsOfMs] = useState<number>(1794146400000);
   const [temporalBasis, setTemporalBasis] = useState<TemporalBasis>('receipt');
   const [includeSuperseded, setIncludeSuperseded] = useState<boolean>(false);
@@ -123,7 +134,23 @@ export default function MacroDataRoom({
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string>(
     'rel-loughton-msft-r2',
   );
+  const [selectedSourceDocId, setSelectedSourceDocId] = useState<string | null>(null);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
+  const [chatQuestionInput, setChatQuestionInput] = useState<string>(
+    SUGGESTED_STARTER_QUESTIONS[0]!,
+  );
+  const [chatLoading, setChatLoading] = useState<boolean>(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatTurns, setChatTurns] = useState<
+    Array<{
+      turnId: string;
+      question: string;
+      bundle: EvidenceBundleV1;
+      answer: EvidenceLockedAnswer;
+      validationReport: AnswerValidationReport;
+      providerMeta: GeminiInferenceTelemetry;
+    }>
+  >([]);
   const [reviewNoteInput, setReviewNoteInput] = useState<string>(
     'Primary SEC filing / corroborated disclosure verified; approved for hosted TypeDB Cloud outbox promotion.',
   );
@@ -400,7 +427,74 @@ export default function MacroDataRoom({
 
   const selectRelationshipForDrawer = (relId: string) => {
     setSelectedRelationshipId(relId);
+    setSelectedSourceDocId(null);
     setMobileDrawerOpen(true);
+  };
+
+  const selectEvidenceCitationForDrawer = (
+    evidenceId: string,
+    fallbackRelIds: string[] = [],
+  ) => {
+    setSelectedSourceDocId(evidenceId);
+    const matchingRel =
+      dataset.relationships.find((r) => r.sourceDocIds.includes(evidenceId)) ??
+      (fallbackRelIds[0]
+        ? dataset.relationships.find((r) => r.relationshipId === fallbackRelIds[0])
+        : null);
+    if (matchingRel) {
+      setSelectedRelationshipId(matchingRel.relationshipId);
+    }
+    setMobileDrawerOpen(true);
+  };
+
+  const submitResearchQuestion = async (questionOverride?: string, cutoffOverrideMs?: number) => {
+    const q = (questionOverride ?? chatQuestionInput).trim();
+    if (!q || chatLoading) return;
+    setChatLoading(true);
+    setChatError(null);
+    const effectiveCutoff = cutoffOverrideMs ?? asOfMs;
+    if (cutoffOverrideMs !== undefined && cutoffOverrideMs !== asOfMs) {
+      setAsOfMs(cutoffOverrideMs);
+    }
+    try {
+      const res = await fetch('/api/graph/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-aci-test-caller': 'owner_primary',
+        },
+        body: JSON.stringify({
+          question: q,
+          historicalCutoffMs: effectiveCutoff,
+          temporalBasis,
+          mode: 'auto',
+        }),
+      });
+      const json = (await res.json()) as EvidenceChatTurnResult & { error?: string };
+      if (!res.ok || !json.bundle || !json.answer) {
+        setChatError(json.error ?? `Request failed (${res.status})`);
+      } else {
+        setChatTurns((prev) => [
+          {
+            turnId: json.turnId ?? `turn_${Date.now().toString(36)}`,
+            question: q,
+            bundle: json.bundle,
+            answer: json.answer,
+            validationReport: json.validation,
+            providerMeta: json.telemetry,
+          },
+          ...prev,
+        ]);
+        const firstRel = json.answer.relevantRelationshipIds?.[0];
+        if (firstRel) {
+          setSelectedRelationshipId(firstRel);
+        }
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : 'Network error submitting research question');
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleReviewerDecision = (
@@ -639,7 +733,19 @@ export default function MacroDataRoom({
             SUPPORTING PRIMARY & CORROBORATED SOURCES ({linkedSources.length})
           </strong>
           {linkedSources.map((src) => (
-            <div key={src.sourceDocId} className="dr-source-item">
+            <div
+              key={src.sourceDocId}
+              className="dr-source-item"
+              data-testid={`drawer-source-${src.sourceDocId}`}
+              style={
+                selectedSourceDocId === src.sourceDocId
+                  ? {
+                      border: '2px solid #2b6cb0',
+                      background: '#f0f7ff',
+                    }
+                  : undefined
+              }
+            >
               <div
                 style={{
                   display: 'flex',
@@ -849,6 +955,7 @@ export default function MacroDataRoom({
               ['relationship_explorer', '3. Relationship Explorer'],
               ['risk_pathways', '4. Risk Pathways'],
               ['evidence_room', '5. Evidence Room'],
+              ['evidence_chat', '6. Evidence-Locked AI Chat'],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -2197,6 +2304,514 @@ export default function MacroDataRoom({
                   </table>
                 </div>
               </div>
+            </section>
+          )}
+
+          {/* VIEW 6: EVIDENCE-LOCKED AI RESEARCH CHAT (PHASE G.4) */}
+          {activeView === 'evidence_chat' && (
+            <section aria-label="Evidence-Locked AI Research Chat" data-testid="view-evidence-chat">
+              <div
+                className="dr-tldr-section"
+                style={{
+                  background: '#f7fafc',
+                  border: '1px solid #cbd5e1',
+                  marginBottom: '16px',
+                }}
+                data-testid="evidence-chat-panel"
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <div>
+                    <span className="eyebrow" style={{ color: '#2b6cb0' }}>
+                      VECTIS ONE CONTROL-FIRST ARCHITECTURE · PHASE G.4
+                    </span>
+                    <h3 style={{ margin: '4px 0', fontSize: '16px', color: '#192434' }}>
+                      Evidence-Locked AI Research Assistant (Gemini + TypeDB Cloud + Convex)
+                    </h3>
+                    <p style={{ fontSize: '12px', color: '#4a5568', margin: 0 }}>
+                      Answers natural-language research questions using <b>ONLY</b> the approved,
+                      stored, and authorised evidence bundle retrieved from TypeDB Cloud (
+                      <code>{liveTypeDbStatus.databaseName ?? 'aci_macro_intelligence_prod'}</code>)
+                      and Convex. Every factual claim is verified by the 9-check independent
+                      validator before rendering.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <span className="tag green" data-testid="chat-namespace-badge">
+                      Namespace: public_research only
+                    </span>
+                    <span className="tag" data-testid="chat-broker-lock-badge">
+                      Trading 212 / Broker Vault: ZERO ACCESS
+                    </span>
+                    <span className="tag" data-testid="chat-cutoff-indicator">
+                      As-Of Cutoff: {formatUtcDate(asOfMs)} ({temporalBasis})
+                    </span>
+                  </div>
+                </div>
+
+                {/* Suggested Starter Questions */}
+                <div style={{ marginBottom: '12px' }} data-testid="starter-questions-bar">
+                  <strong
+                    style={{
+                      fontSize: '11px',
+                      color: '#4a5568',
+                      display: 'block',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    SUGGESTED EVIDENCE-LOCKED STARTER QUESTIONS (CLICK TO RUN):
+                  </strong>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {SUGGESTED_STARTER_QUESTIONS.map((qText, idx) => (
+                      <button
+                        key={qText}
+                        type="button"
+                        className="button secondary"
+                        data-testid={`starter-q-${idx + 1}`}
+                        style={{
+                          fontSize: '11px',
+                          padding: '6px 10px',
+                          textAlign: 'left',
+                        }}
+                        disabled={chatLoading}
+                        onClick={() => {
+                          setChatQuestionInput(qText);
+                          const isJulyCutoff = qText.includes('31 July 2026');
+                          void submitResearchQuestion(
+                            qText,
+                            isJulyCutoff ? 1785542399000 : undefined,
+                          );
+                        }}
+                      >
+                        Q{idx + 1}: “{qText}”
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Question Input Form */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void submitResearchQuestion();
+                  }}
+                  style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}
+                  data-testid="evidence-chat-form"
+                >
+                  <label htmlFor="evidence-chat-input" className="cc-sr">
+                    Ask an evidence-locked research question
+                  </label>
+                  <input
+                    id="evidence-chat-input"
+                    type="text"
+                    data-testid="evidence-chat-input"
+                    value={chatQuestionInput}
+                    onChange={(e) => setChatQuestionInput(e.target.value)}
+                    placeholder="Ask about Anthropic S-1/A commitments, Nscale Monarch, Irish macro scenarios, or historical cutoffs…"
+                    style={{
+                      flex: '1 1 320px',
+                      padding: '9px 12px',
+                      fontSize: '13px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    className="button primary"
+                    data-testid="evidence-chat-submit"
+                    disabled={chatLoading || !chatQuestionInput.trim()}
+                    style={{ padding: '9px 16px', fontSize: '12px' }}
+                  >
+                    {chatLoading
+                      ? 'Retrieving TypeDB Bundle & Validating…'
+                      : 'Ask Evidence-Locked Assistant'}
+                  </button>
+                </form>
+
+                {chatError && (
+                  <div
+                    role="alert"
+                    data-testid="evidence-chat-error"
+                    style={{
+                      marginTop: '10px',
+                      padding: '10px 12px',
+                      background: '#fff5f5',
+                      border: '1px solid #feb2b2',
+                      borderRadius: '6px',
+                      color: '#9b2c2c',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <b>Closed-Evidence Gateway Notice:</b> {chatError}
+                  </div>
+                )}
+              </div>
+
+              {/* Empty state when no turns yet */}
+              {chatTurns.length === 0 && (
+                <div
+                  className="dr-tldr-section"
+                  data-testid="evidence-chat-empty-state"
+                  style={{ textAlign: 'center', padding: '24px' }}
+                >
+                  <h4 style={{ margin: '0 0 6px', color: '#192434' }}>
+                    Ready for Closed-Evidence Graph Retrieval
+                  </h4>
+                  <p style={{ fontSize: '12px', color: '#516072', margin: 0 }}>
+                    Select one of the five starter questions above or enter any research question.
+                    Each question executes an allowlisted TypeDB query, constructs a SHA-256 signed{' '}
+                    <code>EvidenceBundleV1</code>, and runs the 9-check independent validator.
+                  </p>
+                </div>
+              )}
+
+              {/* Conversational Turn Cards */}
+              {chatTurns.map((turn, turnIdx) => {
+                const { answer, bundle, validationReport, providerMeta } = turn;
+                const isAbstained = answer.supportStatus === 'unsupported';
+                return (
+                  <article
+                    key={turn.turnId}
+                    className="dr-tldr-section"
+                    style={{
+                      marginBottom: '16px',
+                      borderLeft: isAbstained
+                        ? '4px solid #dd6b20'
+                        : answer.supportStatus === 'partially_supported'
+                          ? '4px solid #d69e2e'
+                          : '4px solid #2f855a',
+                    }}
+                    data-testid={`chat-turn-${turnIdx}`}
+                  >
+                    {/* Header: Question + Support Status Badge */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        marginBottom: '10px',
+                      }}
+                    >
+                      <div>
+                        <span className="eyebrow">RESEARCH QUESTION</span>
+                        <h4
+                          style={{ margin: '2px 0 0', fontSize: '15px', color: '#192434' }}
+                          data-testid={`chat-turn-question-${turnIdx}`}
+                        >
+                          {turn.question}
+                        </h4>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <span
+                          className={`tag ${
+                            answer.supportStatus === 'fully_supported'
+                              ? 'green'
+                              : 'amber'
+                          }`}
+                          data-testid={`chat-support-status-${turnIdx}`}
+                        >
+                          {answer.supportStatus === 'fully_supported'
+                            ? 'FULLY SUPPORTED BY EVIDENCE'
+                            : answer.supportStatus === 'partially_supported'
+                              ? 'PARTIALLY SUPPORTED'
+                              : 'NO SUPPORTING EVIDENCE (EXPLICIT ABSTENTION)'}
+                        </span>
+                        <span className="tag" data-testid={`chat-query-type-${turnIdx}`}>
+                          Query: {bundle.selectedQuery.queryType}
+                        </span>
+                        <span className="tag" data-testid={`chat-validator-badge-${turnIdx}`}>
+                          Validator:{' '}
+                          {validationReport.valid
+                            ? '9/9 Checks Passed'
+                            : 'Downgraded to Safe Abstention'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Explicit No Supporting Evidence / Abstention Banner */}
+                    {isAbstained && (
+                      <div
+                        data-testid={`chat-abstention-banner-${turnIdx}`}
+                        style={{
+                          padding: '10px 12px',
+                          background: '#fffaf0',
+                          border: '1px solid #fbd38d',
+                          borderRadius: '6px',
+                          marginBottom: '12px',
+                          fontSize: '12px',
+                          color: '#7b341e',
+                        }}
+                      >
+                        <strong>Explicit Evidence-Limited Abstention:</strong>{' '}
+                        {answer.abstentionReason ??
+                          'No approved evidence in the current bundle supports answering this question.'}
+                      </div>
+                    )}
+
+                    {/* Short Answer */}
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '6px',
+                        marginBottom: '12px',
+                        fontSize: '13px',
+                        lineHeight: 1.55,
+                        color: '#1a202c',
+                      }}
+                      data-testid={`chat-short-answer-${turnIdx}`}
+                    >
+                      <strong>Short Answer:</strong> {answer.shortAnswer}
+                    </div>
+
+                    {/* Executive TL;DR Bullet Points */}
+                    <div style={{ marginBottom: '12px' }} data-testid={`chat-tldr-${turnIdx}`}>
+                      <strong
+                        style={{
+                          fontSize: '11px',
+                          color: '#4a5568',
+                          display: 'block',
+                          marginBottom: '6px',
+                        }}
+                      >
+                        EXECUTIVE TL;DR ({answer.executiveTldr.length} BOUNDED BULLETS):
+                      </strong>
+                      <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px' }}>
+                        {answer.executiveTldr.map((bullet, bIdx) => (
+                          <li key={bIdx} style={{ marginBottom: '4px', color: '#2d3748' }}>
+                            {bullet}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Collapsible Supporting Claims with Clickable Evidence & Relationship Citations */}
+                    {answer.supportingClaims.length > 0 && (
+                      <details
+                        open
+                        style={{
+                          marginBottom: '12px',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '6px',
+                          padding: '10px 12px',
+                        }}
+                        data-testid={`chat-supporting-claims-${turnIdx}`}
+                      >
+                        <summary
+                          style={{
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            fontSize: '12px',
+                            color: '#192434',
+                          }}
+                        >
+                          Supporting Claims &amp; Clickable Evidence Citations (
+                          {answer.supportingClaims.length})
+                        </summary>
+                        <div style={{ marginTop: '10px', display: 'grid', gap: '8px' }}>
+                          {answer.supportingClaims.map((claim, cIdx) => (
+                            <div
+                              key={claim.claimId}
+                              data-testid={`chat-claim-${turnIdx}-${cIdx + 1}`}
+                              style={{
+                                padding: '8px 10px',
+                                background: '#ffffff',
+                                border: '1px solid #edf2f7',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  gap: '6px',
+                                  flexWrap: 'wrap',
+                                  marginBottom: '4px',
+                                }}
+                              >
+                                <span>
+                                  <b>{claim.claimId}</b> ·{' '}
+                                  <span className="tag">{claim.distinction}</span>
+                                  {claim.periodOrAsOf ? (
+                                    <span className="tag" style={{ marginLeft: '4px' }}>
+                                      {claim.periodOrAsOf}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                {claim.quantitativeValue !== null && (
+                                  <span className="tag green">
+                                    Verified Figure: {claim.quantitativeValue}{' '}
+                                    {claim.unit ?? claim.currency ?? ''}
+                                  </span>
+                                )}
+                              </div>
+                              <p style={{ margin: '4px 0 8px', color: '#2d3748' }}>
+                                {claim.statement}
+                              </p>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  gap: '6px',
+                                  flexWrap: 'wrap',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span style={{ fontSize: '10px', color: '#64748b' }}>
+                                  Evidence Citations (click to open drawer):
+                                </span>
+                                {claim.evidenceIds.map((evId) => (
+                                  <button
+                                    key={evId}
+                                    type="button"
+                                    className="text-link"
+                                    data-testid={`citation-ev-${evId}`}
+                                    style={{
+                                      fontSize: '11px',
+                                      padding: '2px 6px',
+                                      background: '#ebf8ff',
+                                      border: '1px solid #bee3f8',
+                                      borderRadius: '4px',
+                                    }}
+                                    onClick={() =>
+                                      selectEvidenceCitationForDrawer(evId, claim.relationshipIds)
+                                    }
+                                  >
+                                    📄 <code>{evId}</code>
+                                  </button>
+                                ))}
+                                {claim.relationshipIds.map((relId) => (
+                                  <button
+                                    key={relId}
+                                    type="button"
+                                    className="text-link"
+                                    data-testid={`citation-rel-${relId}`}
+                                    style={{
+                                      fontSize: '11px',
+                                      padding: '2px 6px',
+                                      background: '#f0fff4',
+                                      border: '1px solid #c6f6d5',
+                                      borderRadius: '4px',
+                                    }}
+                                    onClick={() => selectRelationshipForDrawer(relId)}
+                                  >
+                                    🔗 <code>{relId}</code>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+
+                    {/* Contradictory Evidence & Missing Information */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gap: '10px',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          background: '#fffaf0',
+                          border: '1px solid #feebc8',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                        }}
+                        data-testid={`chat-contradictions-${turnIdx}`}
+                      >
+                        <strong>
+                          Contradictory / Superseded Evidence ({answer.contradictoryEvidence.length}
+                          ):
+                        </strong>
+                        {answer.contradictoryEvidence.length === 0 ? (
+                          <p style={{ margin: '4px 0 0', color: '#744210' }}>
+                            None in active temporal slice.
+                          </p>
+                        ) : (
+                          <ul style={{ margin: '4px 0 0', paddingLeft: '16px' }}>
+                            {answer.contradictoryEvidence.map((ce, idx) => (
+                              <li key={idx}>
+                                <b>{ce.topic}:</b> {ce.description} (
+                                <code>{ce.evidenceIds.join(', ')}</code>)
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          background: '#f7fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                        }}
+                        data-testid={`chat-missing-info-${turnIdx}`}
+                      >
+                        <strong>
+                          Missing / Undisclosed Information ({answer.missingInformation.length}):
+                        </strong>
+                        <ul style={{ margin: '4px 0 0', paddingLeft: '16px', color: '#4a5568' }}>
+                          {answer.missingInformation.map((mi, idx) => (
+                            <li key={idx}>{mi}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Provenance, Freshness & Bundle Audit Footer */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        paddingTop: '8px',
+                        borderTop: '1px solid #e2e8f0',
+                        fontSize: '10px',
+                        color: '#64748b',
+                      }}
+                      data-testid={`chat-provenance-footer-${turnIdx}`}
+                    >
+                      <span>
+                        <b>Bundle:</b> <code>{bundle.bundleId}</code> · <b>SHA-256:</b>{' '}
+                        <code>{bundle.bundleSha256.slice(0, 16)}…</code>
+                      </span>
+                      <span>
+                        <b>Graph DB:</b> <code>{bundle.graphDatabaseName}</code> (
+                        {bundle.typedbBackendMode}) ·{' '}
+                        <b>Coverage:</b> {bundle.relationships.length} rels /{' '}
+                        {bundle.sources.length} sources / {bundle.quantitativeClaims.length} claims
+                      </span>
+                      <span>
+                        <b>Model:</b> <code>{providerMeta.modelId}</code> ({providerMeta.providerStatus}
+                        ) · {providerMeta.inputTokens} in / {providerMeta.outputTokens} out tok · £
+                        {providerMeta.estimatedCostGbp.toFixed(5)} · Retrieved{' '}
+                        {new Date(bundle.retrievedAtMs).toISOString().slice(0, 19)}Z
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
             </section>
           )}
         </main>

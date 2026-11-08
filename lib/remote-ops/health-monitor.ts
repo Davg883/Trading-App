@@ -197,6 +197,26 @@ export type OperationRunAuditItem = {
  summary: string;
 };
 
+export type EvidenceChatOperationsSummary = {
+ totalTurns: number;
+ turnsToday: number;
+ supportedCount: number;
+ partiallySupportedCount: number;
+ unsupportedCount: number;
+ validationRejectionCount: number;
+ providerErrorCount: number;
+ inputTokensTotal: number;
+ outputTokensTotal: number;
+ dailySpendGbp: number;
+ totalSpendGbp: number;
+ dailyCeilingGbp: number;
+ unsupportedRate: number;
+ modelId: string;
+ geminiConfigured: boolean;
+ geminiEnabled: boolean;
+ lastChatAtMs: number | null;
+};
+
 export type CollectionHealthReport={
  evaluatedAt:number;
  systemEnabled:boolean;
@@ -215,6 +235,7 @@ export type CollectionHealthReport={
  environmentAudit?:ProductionEnvironmentServiceAudit[];
  graphProjection?:GraphProjectionOperationsSummary;
  recentRuns?:OperationRunAuditItem[];
+ evidenceChat?:EvidenceChatOperationsSummary;
 };
 
 const CREDENTIAL_ERROR_CODES=new Set([
@@ -262,6 +283,7 @@ export function evaluateCollectionHealth(input:{
  environmentAudit?:ProductionEnvironmentServiceAudit[];
  graphProjection?:GraphProjectionOperationsSummary;
  recentRuns?:OperationRunAuditItem[];
+ evidenceChat?:EvidenceChatOperationsSummary;
 }):CollectionHealthReport{
  const {now}=input;
  const londonNow=getLondonTimeParts(now);
@@ -292,6 +314,39 @@ export function evaluateCollectionHealth(input:{
    detail:`Model spend (£${dailySpend.toFixed(2)} today / £${monthlySpend.toFixed(2)} month) reached the configured ceiling. Remote AI agents are paused while deterministic market-data collection continues normally.`,
    href:'#agent-operations',
   });
+ }
+
+ if(input.evidenceChat){
+  if(input.evidenceChat.providerErrorCount>=2){
+   alerts.push({
+    id:'evidence-chat-repeated-errors',
+    severity:'warn',
+    providerOrJob:'evidence_chat',
+    title:'Repeated Evidence-Locked Chat provider errors detected.',
+    detail:`${input.evidenceChat.providerErrorCount} provider error(s) recorded in audit log. Closed-evidence validator automatically downgraded affected turns to explicit abstention.`,
+    href:'/research-chat',
+   });
+  }
+  if(input.evidenceChat.totalTurns>=3&&input.evidenceChat.unsupportedRate>0.5){
+   alerts.push({
+    id:'evidence-chat-high-unsupported-rate',
+    severity:'info',
+    providerOrJob:'evidence_chat',
+    title:'High Evidence-Locked Chat abstention / unsupported-answer rate.',
+    detail:`${Math.round(input.evidenceChat.unsupportedRate*100)}% of recent research questions (${input.evidenceChat.unsupportedCount}/${input.evidenceChat.totalTurns}) returned explicit abstention due to closed-evidence scope or historical cutoffs.`,
+    href:'/research-chat',
+   });
+  }
+  if(input.evidenceChat.dailySpendGbp>=input.evidenceChat.dailyCeilingGbp){
+   alerts.push({
+    id:'evidence-chat-budget-ceiling',
+    severity:'alert',
+    providerOrJob:'evidence_chat',
+    title:'Evidence-Locked Chat daily budget ceiling reached.',
+    detail:`Chat spend (£${input.evidenceChat.dailySpendGbp.toFixed(4)}) reached the £${input.evidenceChat.dailyCeilingGbp.toFixed(2)} daily ceiling.`,
+    href:'/research-chat',
+   });
+  }
  }
 
  const defaultByKey=new Map(DEFAULT_RESEARCH_JOBS.map(d=>[d.jobKey,d]));
@@ -543,5 +598,6 @@ export function evaluateCollectionHealth(input:{
   ...(input.environmentAudit?{environmentAudit:input.environmentAudit}:{}),
   ...(input.graphProjection?{graphProjection:input.graphProjection}:{}),
   ...(input.recentRuns?{recentRuns:input.recentRuns}:{}),
+  ...(input.evidenceChat?{evidenceChat:input.evidenceChat}:{}),
  };
 }

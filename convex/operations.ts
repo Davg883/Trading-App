@@ -16,6 +16,7 @@ import {
 import {factDedupeKey,validateForwardExperimentRegistration,validateStagedItem} from '../lib/remote-ops/staging-validator';
 import {
  evaluateCollectionHealth,
+ type EvidenceChatOperationsSummary,
  type GraphProjectionOperationsSummary,
  type ProductionEnvironmentServiceAudit,
  type ProviderCredentialState,
@@ -123,6 +124,7 @@ async function ensureDefaultJobs(ctx:GenericMutationCtx<DataModel>,owner:string,
 
 async function computeSpend(ctx:Ctx,owner:string,now:number){
  const runs=await ctx.db.query('researchJobRuns').withIndex('by_owner',q=>q.eq('owner',owner)).take(1000);
+ const chatTurns=await ctx.db.query('evidenceChatAudit').withIndex('by_owner',q=>q.eq('owner',owner)).take(500);
  const dStart=dayStartUtc(now),mStart=monthStartUtc(now);
  let dailyEstimated=0,dailyActual=0,monthlyEstimated=0,monthlyActual=0;
  for(const r of runs){
@@ -133,6 +135,16 @@ async function computeSpend(ctx:Ctx,owner:string,now:number){
   if(r.startedAt>=dStart){
    dailyEstimated+=r.estimatedCostGbp;
    dailyActual+=r.actualCostGbp??r.estimatedCostGbp;
+  }
+ }
+ for(const t of chatTurns){
+  if(t.createdAtMs>=mStart){
+   monthlyEstimated+=t.estimatedCostGbp;
+   monthlyActual+=t.estimatedCostGbp;
+  }
+  if(t.createdAtMs>=dStart){
+   dailyEstimated+=t.estimatedCostGbp;
+   dailyActual+=t.estimatedCostGbp;
   }
  }
  return {
@@ -214,6 +226,43 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   .query('brokerConnections')
   .withIndex('by_owner',q=>q.eq('owner',owner))
   .first();
+ const chatAuditRows=await ctx.db
+  .query('evidenceChatAudit')
+  .withIndex('by_owner',q=>q.eq('owner',owner))
+  .order('desc')
+  .take(200);
+
+ const dStart=dayStartUtc(now);
+ const chatTurnsToday=chatAuditRows.filter(r=>r.createdAtMs>=dStart);
+ const chatSupportedCount=chatAuditRows.filter(r=>r.supportStatus==='fully_supported').length;
+ const chatPartialCount=chatAuditRows.filter(r=>r.supportStatus==='partially_supported').length;
+ const chatUnsupportedCount=chatAuditRows.filter(r=>r.supportStatus==='unsupported').length;
+ const chatValidationRejectionCount=chatAuditRows.filter(r=>!r.validationValid).length;
+ const chatProviderErrorCount=chatAuditRows.filter(r=>r.providerStatus==='provider_error'||r.providerStatus==='rate_limited'||r.providerStatus==='budget_exceeded').length;
+ const chatInputTokens=chatAuditRows.reduce((s,r)=>s+r.inputTokens,0);
+ const chatOutputTokens=chatAuditRows.reduce((s,r)=>s+r.outputTokens,0);
+ const chatDailySpend=Number(chatTurnsToday.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
+ const chatTotalSpend=Number(chatAuditRows.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
+
+ const evidenceChat:EvidenceChatOperationsSummary={
+  totalTurns:chatAuditRows.length,
+  turnsToday:chatTurnsToday.length,
+  supportedCount:chatSupportedCount,
+  partiallySupportedCount:chatPartialCount,
+  unsupportedCount:chatUnsupportedCount,
+  validationRejectionCount:chatValidationRejectionCount,
+  providerErrorCount:chatProviderErrorCount,
+  inputTokensTotal:chatInputTokens,
+  outputTokensTotal:chatOutputTokens,
+  dailySpendGbp:chatDailySpend,
+  totalSpendGbp:chatTotalSpend,
+  dailyCeilingGbp:settings?.dailyCostCeilingGbp??DEFAULT_DAILY_CEILING_GBP,
+  unsupportedRate:chatAuditRows.length>0?Number((chatUnsupportedCount/chatAuditRows.length).toFixed(4)):0,
+  modelId:'gemini-2.5-flash',
+  geminiConfigured:Boolean(process.env.GEMINI_API_KEY||process.env.GOOGLE_API_KEY),
+  geminiEnabled:process.env.EVIDENCE_CHAT_GEMINI_ENABLED==='true',
+  lastChatAtMs:chatAuditRows[0]?.createdAtMs??null,
+ };
 
  const hasStoredMarketObs=marketObsRows.length>0;
  const mktSucceeded=mktJob?.lastSuccessAt!==null&&!mktJob?.lastErrorCode;
@@ -452,6 +501,7 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   environmentAudit,
   graphProjection,
   recentRuns:formattedRecentRuns,
+  evidenceChat,
  });
 
  const parsedMarketObs:AuthorisedMarketObservation[]=marketObsRows.map(r=>({

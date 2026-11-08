@@ -222,6 +222,41 @@ export function AgentOperationsPanel({
     </div>
    )}
 
+   {health.evidenceChat&&(
+    <div className="cc-strip" style={{marginTop:'12px'}} data-testid="agent-ops-evidence-chat">
+     <dl>
+      <div className="cc-strip-item">
+       <dt>Evidence-Locked AI Chat ({health.evidenceChat.modelId})</dt>
+       <dd data-testid="agent-ops-chat-status">
+        {health.evidenceChat.geminiEnabled&&health.evidenceChat.geminiConfigured
+         ?'Live Gemini + closed-evidence validator active'
+         :'Deterministic closed-evidence synthesis + validator active'}
+        {' · '}
+        <Link href="/research-chat">Open Research Chat →</Link>
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Research Q&amp;A audit ({health.evidenceChat.totalTurns} turns)</dt>
+       <dd data-testid="agent-ops-chat-turns">
+        {health.evidenceChat.supportedCount} supported · {health.evidenceChat.partiallySupportedCount} partial · {health.evidenceChat.unsupportedCount} abstained ({Math.round(health.evidenceChat.unsupportedRate*100)}%)
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Independent validator &amp; provider gates</dt>
+       <dd data-testid="agent-ops-chat-validator">
+        {health.evidenceChat.validationRejectionCount} hallucination rejection(s) · {health.evidenceChat.providerErrorCount} provider error(s)
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Chat token &amp; cost budget</dt>
+       <dd data-testid="agent-ops-chat-cost">
+        {health.evidenceChat.inputTokensTotal} in / {health.evidenceChat.outputTokensTotal} out tok · £{health.evidenceChat.dailySpendGbp.toFixed(4)} today / £{health.evidenceChat.dailyCeilingGbp.toFixed(2)} ceiling
+       </dd>
+      </div>
+     </dl>
+    </div>
+   )}
+
    {health.environmentAudit&&health.environmentAudit.length>0&&(
     <div className="cc-widgets" style={{marginTop:'12px'}} data-testid="agent-ops-environment-audit">
      {health.environmentAudit.map(svc=>{
