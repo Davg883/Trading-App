@@ -1,0 +1,363 @@
+# AI Capital Intelligence — Phase G.1: Macro Intelligence TypeQL 3 Schema
+# Schema Version: macro-intelligence-graph-3.14-v1
+# Compatible Server: TypeDB 3.14.2 (Community Edition / TypeDB Cloud)
+# Compatible Drivers: @typedb/driver-http@3.14.0, typedb-driver==3.14.0
+
+define
+
+  # ---------------------------------------------------------------------------
+  # 1. Attributes (Canonical Identifiers, Temporal Provenance & Epistemic State)
+  # ---------------------------------------------------------------------------
+  attribute schema_version, value string;
+  attribute tenant_owner, value string;
+  attribute visibility_scope, value string;
+
+  # Canonical entity keys & identifiers
+  attribute org_id, value string;
+  attribute sec_cik, value string;
+  attribute lei_code, value string;
+  attribute ticker_symbol, value string;
+  attribute legal_name, value string;
+  attribute display_name, value string;
+  attribute org_subtype_label, value string;
+  attribute incorporation_jurisdiction, value string;
+
+  attribute sector_id, value string;
+  attribute sector_name, value string;
+  attribute industry_group, value string;
+  attribute economic_layer, value string;
+
+  attribute project_id, value string;
+  attribute project_name, value string;
+  attribute project_type, value string;
+  attribute project_stage, value string;
+  attribute planned_capacity_mw, value double;
+  attribute energised_capacity_mw, value double;
+
+  attribute instrument_id, value string;
+  attribute instrument_type, value string;
+  attribute instrument_currency, value string;
+  attribute figi_code, value string;
+
+  attribute asset_id, value string;
+  attribute asset_name, value string;
+  attribute energy_source_type, value string;
+  attribute nameplate_capacity_mw, value double;
+
+  attribute location_id, value string;
+  attribute location_name, value string;
+  attribute country_code, value string;
+  attribute region_or_state, value string;
+  attribute municipality, value string;
+  attribute grid_zone, value string;
+
+  attribute source_doc_id, value string;
+  attribute source_title, value string;
+  attribute source_url, value string;
+  attribute source_kind, value string;
+  attribute source_authority, value string;
+  attribute content_sha256, value string;
+  attribute publication_basis, value string;
+
+  attribute observation_id, value string;
+  attribute metric_name, value string;
+  attribute metric_value, value double;
+  attribute metric_unit, value string;
+  attribute reporting_period_label, value string;
+  attribute period_start_ms, value integer;
+  attribute period_end_ms, value integer;
+  attribute accounting_basis, value string;
+  attribute metric_definition, value string;
+  attribute observation_kind, value string;
+
+  # Relationship & provenance attributes
+  attribute relationship_id, value string;
+  attribute logical_event_id, value string;
+  attribute relationship_version, value integer;
+  attribute supersedes_relationship_id, value string;
+  attribute relationship_category, value string;
+  attribute contractual_status, value string;
+  attribute epistemic_status, value string;
+  attribute extraction_status, value string;
+  attribute reviewer_status, value string;
+  attribute reviewed_by, value string;
+  attribute conflict_group_id, value string;
+  attribute economic_group_id, value string;
+
+  attribute principal_amount, value double;
+  attribute currency_code, value string;
+  attribute capacity_unit, value string;
+  attribute capacity_quantity, value double;
+  attribute conditions_summary, value string;
+  attribute binding_obligation, value boolean;
+
+  # Temporal timestamps (UTC epoch milliseconds; never invented)
+  attribute effective_from_ms, value integer;
+  attribute effective_to_ms, value integer;
+  attribute maturity_at_ms, value integer;
+  attribute published_at_ms, value integer;
+  attribute received_at_ms, value integer;
+  attribute ingested_at_ms, value integer;
+  attribute projection_key, value string;
+
+  # ---------------------------------------------------------------------------
+  # 2. Canonical Entities & Organisation Subtype Hierarchy
+  # ---------------------------------------------------------------------------
+  entity organisation,
+    owns org_id @key,
+    owns legal_name,
+    owns display_name,
+    owns org_subtype_label,
+    owns sec_cik,
+    owns lei_code,
+    owns ticker_symbol,
+    owns incorporation_jurisdiction,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays supply_relationship:supplier,
+    plays supply_relationship:recipient,
+    plays procurement_relationship:buyer,
+    plays procurement_relationship:vendor,
+    plays financing_arrangement:financier,
+    plays financing_arrangement:borrower,
+    plays financing_arrangement:issuer,
+    plays financing_arrangement:arranger,
+    plays guarantee_arrangement:guarantor,
+    plays guarantee_arrangement:borrower,
+    plays guarantee_arrangement:beneficiary,
+    plays ownership_stake:owner_entity,
+    plays ownership_stake:owned_entity,
+    plays operational_control:operator,
+    plays leasing_agreement:lessor,
+    plays leasing_agreement:lessee,
+    plays leasing_agreement:lease_guarantor,
+    plays project_dependency:dependent_organisation,
+    plays sector_participation:participant_organisation,
+    plays observation_attribution:subject_organisation,
+    plays observation_attribution:counterparty_organisation;
+
+  entity public_company, sub organisation;
+  entity private_company, sub organisation;
+  entity hyperscaler, sub public_company;
+  entity semiconductor_supplier, sub public_company;
+  entity specialist_compute_provider, sub organisation;
+  entity ai_laboratory, sub private_company;
+  entity utility_provider, sub organisation;
+  entity government_body, sub organisation;
+
+  entity sector_classification,
+    owns sector_id @key,
+    owns sector_name,
+    owns industry_group,
+    owns economic_layer,
+    plays sector_participation:target_sector,
+    plays project_dependency:impacted_sector;
+
+  entity infrastructure_project,
+    owns project_id @key,
+    owns project_name,
+    owns project_type,
+    owns project_stage,
+    owns planned_capacity_mw,
+    owns energised_capacity_mw,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays supply_relationship:target_project,
+    plays procurement_relationship:target_project,
+    plays financing_arrangement:target_project,
+    plays guarantee_arrangement:target_project,
+    plays ownership_stake:owned_project,
+    plays operational_control:operated_project,
+    plays leasing_agreement:leased_project,
+    plays project_dependency:dependent_project,
+    plays project_dependency:prerequisite_project,
+    plays location_placement:located_asset,
+    plays observation_attribution:subject_project;
+
+  entity financial_instrument,
+    owns instrument_id @key,
+    owns instrument_type,
+    owns instrument_currency,
+    owns ticker_symbol,
+    owns figi_code,
+    plays financing_arrangement:issued_instrument,
+    plays ownership_stake:held_instrument;
+
+  entity energy_asset,
+    owns asset_id @key,
+    owns asset_name,
+    owns energy_source_type,
+    owns nameplate_capacity_mw,
+    plays operational_control:operated_energy_asset,
+    plays project_dependency:prerequisite_energy_asset,
+    plays location_placement:located_asset;
+
+  entity geographical_location,
+    owns location_id @key,
+    owns location_name,
+    owns country_code,
+    owns region_or_state,
+    owns municipality,
+    owns grid_zone,
+    plays location_placement:host_location,
+    plays project_dependency:regulatory_jurisdiction;
+
+  entity source_document,
+    owns source_doc_id @key,
+    owns source_title,
+    owns source_url,
+    owns source_kind,
+    owns source_authority,
+    owns content_sha256,
+    owns publication_basis,
+    owns published_at_ms,
+    owns received_at_ms,
+    owns ingested_at_ms,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays evidential_support:supporting_document;
+
+  entity financial_observation,
+    owns observation_id @key,
+    owns metric_name,
+    owns metric_value,
+    owns metric_unit,
+    owns currency_code,
+    owns reporting_period_label,
+    owns period_start_ms,
+    owns period_end_ms,
+    owns accounting_basis,
+    owns metric_definition,
+    owns observation_kind,
+    owns published_at_ms,
+    owns received_at_ms,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays observation_attribution:recorded_observation,
+    plays evidential_support:supported_claim;
+
+  # ---------------------------------------------------------------------------
+  # 3. Typed Relationships (Binary & Multi-Participant N-ary Hyperedges)
+  # ---------------------------------------------------------------------------
+  relation macro_relationship @abstract,
+    owns relationship_id @key,
+    owns logical_event_id,
+    owns relationship_version,
+    owns supersedes_relationship_id,
+    owns relationship_category,
+    owns contractual_status,
+    owns epistemic_status,
+    owns extraction_status,
+    owns reviewer_status,
+    owns reviewed_by,
+    owns conflict_group_id,
+    owns economic_group_id,
+    owns principal_amount,
+    owns currency_code,
+    owns capacity_unit,
+    owns capacity_quantity,
+    owns conditions_summary,
+    owns binding_obligation,
+    owns effective_from_ms,
+    owns effective_to_ms,
+    owns maturity_at_ms,
+    owns published_at_ms,
+    owns received_at_ms,
+    owns projection_key,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays evidential_support:supported_claim,
+    plays supersession_link:prior_assertion,
+    plays supersession_link:superseding_assertion;
+
+  relation supply_relationship, sub macro_relationship,
+    relates supplier,
+    relates recipient,
+    relates target_project;
+
+  relation procurement_relationship, sub macro_relationship,
+    relates buyer,
+    relates vendor,
+    relates target_project;
+
+  # N-ary financing relation supporting >2 participants (financier, borrower, issuer, arranger, project, instrument)
+  relation financing_arrangement, sub macro_relationship,
+    relates financier,
+    relates borrower,
+    relates issuer,
+    relates arranger,
+    relates target_project,
+    relates issued_instrument;
+
+  # N-ary guarantee relation supporting >2 participants (guarantor, borrower, beneficiary, project)
+  relation guarantee_arrangement, sub macro_relationship,
+    relates guarantor,
+    relates borrower,
+    relates beneficiary,
+    relates target_project;
+
+  relation ownership_stake, sub macro_relationship,
+    relates owner_entity,
+    relates owned_entity,
+    relates owned_project,
+    relates held_instrument;
+
+  relation operational_control, sub macro_relationship,
+    relates operator,
+    relates operated_project,
+    relates operated_energy_asset;
+
+  # N-ary leasing relation supporting lessor, lessee, optional lease_guarantor, and leased_project
+  relation leasing_agreement, sub macro_relationship,
+    relates lessor,
+    relates lessee,
+    relates lease_guarantor,
+    relates leased_project;
+
+  relation project_dependency, sub macro_relationship,
+    relates dependent_project,
+    relates dependent_organisation,
+    relates prerequisite_project,
+    relates prerequisite_energy_asset,
+    relates impacted_sector,
+    relates regulatory_jurisdiction;
+
+  relation sector_participation,
+    owns relationship_id @key,
+    owns relationship_version,
+    owns epistemic_status,
+    owns published_at_ms,
+    owns received_at_ms,
+    owns tenant_owner,
+    owns visibility_scope,
+    relates participant_organisation,
+    relates target_sector,
+    plays evidential_support:supported_claim;
+
+  relation location_placement,
+    owns relationship_id @key,
+    relates located_asset,
+    relates host_location;
+
+  relation observation_attribution,
+    owns relationship_id @key,
+    relates recorded_observation,
+    relates subject_organisation,
+    relates subject_project,
+    relates counterparty_organisation;
+
+  relation evidential_support,
+    owns relationship_id @key,
+    owns contractual_status,
+    owns binding_obligation,
+    owns extraction_status,
+    owns reviewer_status,
+    owns received_at_ms,
+    relates supporting_document,
+    relates supported_claim;
+
+  relation supersession_link,
+    owns relationship_id @key,
+    owns effective_from_ms,
+    relates prior_assertion,
+    relates superseding_assertion;

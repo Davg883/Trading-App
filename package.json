@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.22",
+    "@typedb/driver-http": "3.14.0",
     "convex": "1.48.0",
     "lucide-react": "1.62.0",
     "next": "16.4.3",
