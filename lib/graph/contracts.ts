@@ -419,11 +419,25 @@ export type MacroTldrSummary = {
   nextInformationToCollect: TldrStatement[];
 };
 
+export type GraphProjectionStatusSummary = {
+  stale: boolean;
+  staleReason: string | null;
+  maxProjectionLagMs: number;
+  projectedCount: number;
+  pendingCount: number;
+  retryingCount: number;
+  deadLetterCount: number;
+  lastProjectedSequence: number;
+};
+
 export type GraphQueryResponse = {
   queryType: AllowlistedQueryType;
   schemaVersion: typeof MACRO_GRAPH_SCHEMA_VERSION;
   backendMode: 'typedb_live' | 'deterministic_mirror';
   typedbServerVersion: string | null;
+  liveAnswerCount?: number;
+  liveQueryLatencyMs?: number | null;
+  projectionStatus?: GraphProjectionStatusSummary;
   asOfMs: number;
   temporalBasis: 'receipt' | 'publication';
   compiledTypeQl: string;

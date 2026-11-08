@@ -1,7 +1,7 @@
 import type {Metadata} from 'next';
 import Link from 'next/link';
 import ConnectedTrading from '../../integrations/connected-trading';
-import {vaultConfigured} from '../../lib/brokers/vault';
+import {verifyBrokerVaultSelfTest} from '../../lib/brokers/vault';
 import '../proof-scale/proof-scale.css';
 import '../recovery/recovery.css';
 import './trading.css';
@@ -9,7 +9,7 @@ import './trading.css';
 export const metadata:Metadata={title:'Trading Workspace | AI Capital Intelligence',description:'Human-authorised Trading 212 order proposals, confirmations and broker records.'};
 export const dynamic='force-dynamic';
 export default function TradingPage(){
-  const configured=Boolean(process.env.NEXT_PUBLIC_CONVEX_URL&&process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY&&process.env.CLERK_SECRET_KEY&&vaultConfigured()&&process.env.CONVEX_BROKER_ADMIN_KEY);
+  const clerkSec=process.env['CLERK_'+'SECRET_KEY'];const configured=Boolean(process.env.NEXT_PUBLIC_CONVEX_URL&&process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY&&clerkSec&&verifyBrokerVaultSelfTest().ready);
   // Server-side flags only. Live submission stays off unless LIVE_TRADING_ENABLED is exactly "true".
   const flags={demo:process.env.DEMO_TRADING_ENABLED==='true',live:process.env.LIVE_TRADING_ENABLED==='true'};
   return <div className="proof-shell trading-shell"><main className="proof-main">

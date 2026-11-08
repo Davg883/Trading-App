@@ -145,6 +145,18 @@
   align-items: start;
 }
 
+.data-room-body > main {
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.data-room-body table {
+  white-space: normal;
+}
+
 .dr-kpi-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -188,6 +200,9 @@
   border-radius: 8px;
   padding: 20px 22px;
   margin-bottom: 18px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .dr-card-header {
@@ -265,6 +280,9 @@
   border: 1px solid #e6ebf0;
   border-radius: 6px;
   padding: 14px 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .dr-tldr-section h3 {

@@ -21,10 +21,10 @@ function installTransport(options:{failStorage?:boolean;historyRateLimit?:boolea
       const payload=JSON.parse(body) as {path:string};
       if(payload.path==='brokers:viewer')return json({status:'success',value:{owner}});
       if(options.failStorage)throw new Error(`sensitive backend detail ${credentials.apiSecret}`);
-      if(payload.path==='brokers:deleteInternal')return json({status:'success',value:{deleted:true,providerRevocationRequired:true}});
-      if(payload.path==='brokers:saveInternal')return json({status:'success',value:{connectionId:'mock-connection',revision:1}});
-      if(payload.path==='brokers:acquireSyncInternal')return json({status:'success',value:{ok:true,connectionId:'mock-connection',environment:'demo',revision:1,leaseToken:'mock-lease',encryptedPayload,operation:'sync'}});
-      if(payload.path==='brokers:recordSyncInternal')return json({status:'success',value:{stored:true}});
+      if(payload.path==='brokers:deleteConnection')return json({status:'success',value:{deleted:true,providerRevocationRequired:true}});
+      if(payload.path==='brokers:save')return json({status:'success',value:{connectionId:'mock-connection',revision:1}});
+      if(payload.path==='brokers:acquireSync')return json({status:'success',value:{ok:true,connectionId:'mock-connection',environment:'demo',revision:1,leaseToken:'mock-lease',encryptedPayload,operation:'sync'}});
+      if(payload.path==='brokers:recordSync')return json({status:'success',value:{stored:true}});
       throw new Error('Unexpected internal resource');
     }
     if(url==='https://demo.trading212.com/api/v0/equity/account/summary')return json({id:123,currency:'GBP',totalValue:1100,cash:{availableToTrade:100,reservedForOrders:0,inPies:0},investments:{currentValue:1000,totalCost:900,realizedProfitLoss:0,unrealizedProfitLoss:100},unexpectedSecret:credentials.apiSecret});
@@ -46,10 +46,10 @@ describe('server-only broker route boundary',()=>{
     const calls=installTransport();
     const response=await saveBrokerConnection(request('/api/brokers',{provider:'trading212',environment:'demo',...credentials}));
     expect(response.status).toBe(200);expect(response.headers.get('Cache-Control')).toContain('no-store');
-    expect(calls).toHaveLength(2);expect(calls[0].auth).toBe('Bearer mock-user-jwt');expect(calls[1].auth).toBe('Convex mock-admin-key');
+    expect(calls).toHaveLength(2);expect(calls[0].auth).toBe('Bearer mock-user-jwt');expect(calls[1].auth).toBe('Bearer mock-user-jwt');
     expect(calls.every(c=>c.redirect==='error'&&c.cache==='no-store')).toBe(true);
     const stored=JSON.parse(calls[1].body) as {path:string;args:[{owner:string;encryptedPayload:string;maskedKey:string}]};
-    expect(stored.path).toBe('brokers:saveInternal');expect(stored.args[0].owner).toBe(owner);
+    expect(stored.path).toBe('brokers:save');expect(stored.args[0].owner).toBeUndefined();
     expect(decryptCredentials(JSON.parse(stored.args[0].encryptedPayload),owner,'demo',vaultEnvironment)).toEqual(credentials);
     const output=await response.text();for(const secret of [credentials.apiKey,credentials.apiSecret,vaultEnvironment.BROKER_VAULT_KEY_B64,'mock-admin-key']){expect(output).not.toContain(secret);expect(calls.map(c=>c.body).join('')).not.toContain(secret);}
   });
@@ -75,14 +75,14 @@ describe('server-only broker route boundary',()=>{
     expect(response.status).toBe(200);expect(await response.json()).toMatchObject({synchronised:true,partial:false,readOnly:true});
     const provider=calls.filter(c=>c.url.startsWith('https://demo.trading212.com/'));expect(provider).toHaveLength(3);expect(provider.every(c=>c.method==='GET'&&c.redirect==='error'&&c.cache==='no-store')).toBe(true);
     expect(provider.every(c=>c.auth===`Basic ${Buffer.from(`${credentials.apiKey}:${credentials.apiSecret}`).toString('base64')}`)).toBe(true);
-    const stored=calls.find(c=>c.body.includes('brokers:recordSyncInternal'));expect(stored).toBeDefined();expect(stored!.body).not.toContain(credentials.apiSecret);expect(stored!.body).not.toContain('unexpectedSecret');
+    const stored=calls.find(c=>c.body.includes('brokers:recordSync'));expect(stored).toBeDefined();expect(stored!.body).not.toContain(credentials.apiSecret);expect(stored!.body).not.toContain('unexpectedSecret');
     expect(calls.some(c=>c.url.includes('/orders')||c.url.includes('live.trading212'))).toBe(false);
   });
   it('preserves a rate-limit retry time when transaction history is an optional partial failure',async()=>{
     const calls=installTransport({historyRateLimit:true}),before=Date.now();
     const response=await synchroniseBrokerConnection(request('/api/brokers/sync',{connectionId:'mock-connection',environment:'demo',operation:'sync'}));
     expect(response.status).toBe(200);const output=await response.text();expect(JSON.parse(output)).toMatchObject({partial:true,historyErrorCode:'rate_limited'});expect(output).not.toContain(credentials.apiSecret);
-    const call=calls.find(c=>c.body.includes('brokers:recordSyncInternal'))!;
+    const call=calls.find(c=>c.body.includes('brokers:recordSync'))!;
     const stored=JSON.parse(call.body) as {args:[{errorCode:string;retryAfterAt:number;snapshotJson:string}]};
     expect(stored.args[0].errorCode).toBe('rate_limited');expect(stored.args[0].retryAfterAt).toBeGreaterThanOrEqual(before+119000);expect(stored.args[0].snapshotJson).not.toContain(credentials.apiSecret);
   });
@@ -93,5 +93,5 @@ it('deletes an authenticated owner connection without needing the lost encryptio
   const calls=installTransport();vi.stubEnv('BROKER_VAULT_KEY_B64','');
   const response=await deleteBrokerConnection(new Request('http://localhost:3000/api/brokers',{method:'DELETE',headers:{'Content-Type':'application/json',Origin:'http://localhost:3000'},body:JSON.stringify({connectionId:'mock-connection',environment:'demo'})}));
   expect(response.status).toBe(200);expect(await response.json()).toMatchObject({deleted:true,providerRevocationRequired:true});
-  expect(calls).toHaveLength(2);const deletion=JSON.parse(calls[1].body);expect(deletion.path).toBe('brokers:deleteInternal');expect(deletion.args[0]).toEqual({owner,connectionId:'mock-connection',environment:'demo'});expect(calls.every(c=>c.url.startsWith('https://mock.convex.cloud/'))).toBe(true);
+  expect(calls).toHaveLength(2);const deletion=JSON.parse(calls[1].body);expect(deletion.path).toBe('brokers:deleteConnection');expect(deletion.args[0]).toEqual({connectionId:'mock-connection',environment:'demo'});expect(calls.every(c=>c.url.startsWith('https://mock.convex.cloud/'))).toBe(true);
 });

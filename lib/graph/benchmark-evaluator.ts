@@ -157,11 +157,11 @@ export async function runGraphVsConvexBenchmark(
           'Convex-to-TypeDB outbox projection and bounded TL;DR generation are 100% deterministic (0 LLM tokens, £0.00 model cost).',
       },
       ongoingMonthlyHostingCostEstimateUsd: {
-        typedbCommunitySelfHostedContainerUsd: 12,
-        typedbCloudStarterUsd: 95,
+        typedbCommunitySelfHostedContainerUsd: 0,
+        typedbCloudStarterUsd: 50,
         convexIncrementalOutboxStorageUsd: 0,
         detail:
-          'TypeDB CE 3.14.2 runs in ~350 MB RAM on a private container/VM ($10–$15/mo on Railway/Fly.io with persistent volume and mTLS/WireGuard); TypeDB Cloud managed cluster starts around $95/mo.',
+          'TypeDB Cloud Explore tier (2 vCPU, 4 GB RAM, 10 GB storage, TLS enabled) runs at $0/mo (Free Forever); TypeDB Cloud Launch tier with automated snapshots and 3-node HA starts at $0.07/hr (~$50.40/mo); Convex append-only outbox adds $0 incremental cost within existing plan limits.',
       },
     },
     valueAddConclusion:

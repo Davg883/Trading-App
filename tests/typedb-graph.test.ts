@@ -18,16 +18,27 @@ import {
 } from '../lib/graph/projection-engine';
 import {
   assertNoBrokerOrPrivateAccountData,
+  evaluateProjectionStaleness,
   executeAllowlistedGraphQuery,
   loadInitialAcceptanceDataset,
   resetGraphGatewayRateLimitsForTests,
 } from '../lib/graph/query-gateway';
 import {
+  assertCanRecreateTypeDbDatabase,
   probeTypeDbServer,
+  PRODUCTION_TYPEDB_DATABASE,
   projectDatasetIntoLiveTypeDb,
   executeReadOnlyTypeQlOnLiveServer,
+  STAGING_TYPEDB_DATABASE,
 } from '../lib/graph/typedb-driver-adapter';
 import { runGraphVsConvexBenchmark } from '../lib/graph/benchmark-evaluator';
+import {
+  MACRO_CASE_001_CLAIMS,
+  MACRO_CASE_001_SCENARIOS,
+  computeNonDoubleCountedCommitments,
+  reconstructMacroCase001AtCutoff,
+  runMacroCase001GraphInvestigations,
+} from '../lib/graph/macro-case-001';
 import type { MacroGraphDataset } from '../lib/graph/contracts';
 
 beforeEach(() => {
@@ -393,11 +404,26 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     expect(probe.version).toBe('3.14.2');
 
     const dataset = loadInitialAcceptanceDataset();
+    expect(() => assertCanRecreateTypeDbDatabase(PRODUCTION_TYPEDB_DATABASE)).toThrow(
+      /Security violation: destructive recreateDatabase is forbidden on production TypeDB database/,
+    );
+    await expect(
+      projectDatasetIntoLiveTypeDb(dataset, {
+        config: {
+          httpAddress: 'http://127.0.0.1:8000',
+          username: 'admin',
+          password: 'password',
+          databaseName: PRODUCTION_TYPEDB_DATABASE,
+        },
+        recreateDatabase: true,
+      }),
+    ).rejects.toThrow(/Security violation: destructive recreateDatabase is forbidden/);
+
     const testConfig = {
       httpAddress: 'http://127.0.0.1:8000',
       username: 'admin',
       password: 'password',
-      databaseName: 'aci_macro_intelligence',
+      databaseName: STAGING_TYPEDB_DATABASE,
     };
 
     const { report } = await projectDatasetIntoLiveTypeDb(dataset, {
@@ -568,4 +594,249 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     expect(metaJson.typedbServer.reachable).toBe(true);
     expect(metaJson.typedbServer.version).toBe('3.14.2');
   });
+
+  it('9. Enforces Stage 4 reviewer promotion workflow, correction history, and Stage 5 projection lag / staleness detection', async () => {
+    const modules = {
+      './_generated/server.ts': async () => ({}),
+      './graph.ts': () => import('../convex/graph'),
+      './roles.ts': () => import('../convex/roles'),
+    };
+    const graphM = (name: string) => makeFunctionReference<'mutation'>(`graph:${name}`);
+    const graphQ = (name: string) => makeFunctionReference<'query'>(`graph:${name}`);
+
+    const OWNER = 'https://clerk.capital.aiguides.co.uk|user_owner';
+    const t = convexTest(schema, modules);
+    await grantReviewers(t, [OWNER]);
+    const owner = t.withIdentity({ subject: 'user_owner', tokenIdentifier: OWNER });
+
+    const dataset = loadInitialAcceptanceDataset();
+    const monarchCreditRel = dataset.relationships.find(
+      (r) => r.relationshipId === 'rel-monarch-credit-talks-r1',
+    )!;
+
+    // 1. An approved source document does NOT allow a secondary/reported relationship to be auto-confirmed
+    await expect(
+      owner.mutation(graphM('reviewAndPromoteRelationship'), {
+        visibility: 'public_research',
+        decision: 'approved',
+        reviewNote: 'Attempt to mark secondary news as confirmed',
+        sourceTable: 'researchStagingItems',
+        sourceRecordId: monarchCreditRel.relationshipId,
+        sourceDocumentApproved: true,
+        promoteToOutbox: true,
+        relationshipJson: JSON.stringify({
+          ...monarchCreditRel,
+          epistemicStatus: 'confirmed',
+          contractualStatus: 'signed',
+        }),
+      }),
+    ).rejects.toThrow();
+
+    // 2. Reviewer can reject a candidate relationship without promoting it into the TypeDB outbox
+    const rejectRes = (await owner.mutation(graphM('reviewAndPromoteRelationship'), {
+      visibility: 'public_research',
+      decision: 'rejected',
+      reviewNote: 'Hold pending verification of credit facility terms',
+      sourceTable: 'researchStagingItems',
+      sourceRecordId: monarchCreditRel.relationshipId,
+      sourceDocumentApproved: true,
+      promoteToOutbox: false,
+      relationshipJson: JSON.stringify(monarchCreditRel),
+    })) as {
+      decision: string;
+      promotedOutboxId: string | null;
+      correctionHistoryCount: number;
+    };
+    expect(rejectRes.decision).toBe('rejected');
+    expect(rejectRes.promotedOutboxId).toBeNull();
+    expect(rejectRes.correctionHistoryCount).toBe(1);
+
+    // 3. Reviewer can subsequently approve the relationship with `reported` epistemic status and promote to outbox, preserving correction history
+    const approveRes = (await owner.mutation(graphM('reviewAndPromoteRelationship'), {
+      visibility: 'public_research',
+      decision: 'approved',
+      reviewNote: 'Approved as reported discussion with null principal preserved',
+      correctionNote: 'Supersedes earlier hold after corroborating Reuters timestamp',
+      sourceTable: 'researchStagingItems',
+      sourceRecordId: monarchCreditRel.relationshipId,
+      sourceDocumentApproved: true,
+      promoteToOutbox: true,
+      relationshipJson: JSON.stringify(monarchCreditRel),
+    })) as {
+      decision: string;
+      promotedOutboxId: string | null;
+      projectionKey: string | null;
+      correctionHistoryCount: number;
+    };
+    expect(approveRes.decision).toBe('approved');
+    expect(approveRes.promotedOutboxId).toBeTruthy();
+    expect(approveRes.projectionKey).toMatch(/^proj:[a-f0-9]{64}$/);
+    expect(approveRes.correctionHistoryCount).toBe(2);
+
+    const health = (await owner.query(graphQ('projectionHealth'), {})) as {
+      reviews: Array<{ decision: string; correctionHistoryJson: string }>;
+      outboxItems: Array<{ relationshipId: string; status: string }>;
+    };
+    expect(health.reviews.length).toBe(2);
+    expect(health.outboxItems.length).toBe(1);
+    expect(health.outboxItems[0]!.relationshipId).toBe('rel-monarch-credit-talks-r1');
+
+    // 4. Verify Stage 5 projection lag and dead-letter staleness evaluation
+    const healthyStatus = evaluateProjectionStaleness({
+      backendMode: 'typedb_live',
+      maxProjectionLagMs: 0,
+      projectedCount: 14,
+      pendingCount: 0,
+      retryingCount: 0,
+      deadLetterCount: 0,
+    });
+    expect(healthyStatus.stale).toBe(false);
+
+    const deadLetterStale = evaluateProjectionStaleness({
+      backendMode: 'typedb_live',
+      maxProjectionLagMs: 1200,
+      projectedCount: 13,
+      pendingCount: 0,
+      retryingCount: 0,
+      deadLetterCount: 1,
+    });
+    expect(deadLetterStale.stale).toBe(true);
+    expect(deadLetterStale.staleReason).toContain('dead_letter');
+
+    const lagStale = evaluateProjectionStaleness({
+      backendMode: 'typedb_live',
+      maxProjectionLagMs: 25 * 60 * 1000,
+      projectedCount: 13,
+      pendingCount: 1,
+      retryingCount: 0,
+      deadLetterCount: 0,
+    });
+    expect(lagStale.stale).toBe(true);
+    expect(lagStale.staleReason).toContain('Projection lag');
+  });
+
+  it('10. Verifies Macro Case 001 (US to Ireland AI Contagion): discovery guardrails, 6-class claims, non-double-counting ledger, historical cutoffs, and live TypeDB Cloud investigations', async () => {
+    const dataset = loadInitialAcceptanceDataset();
+    const sourcesById = new Map(dataset.sources.map((s) => [s.sourceDocId, s]));
+
+    // 1. Verify all 6 required source groups are registered with exact publication and receipt timestamps
+    const requiredSourceIds = [
+      'irish-news-quinn-2026-11-08',
+      'cbi-fsr-2026-i',
+      'cbi-makhlouf-speech-2026-11-02',
+      'ireland-dof-ai-correction-2026-07',
+      'anthropic-s1-2026-10-26',
+      'anthropic-s1a-2026-11-02',
+      'cru-eirgrid-dc-policy-2026',
+      'intc-10q-q3-2026',
+      'nscale-s1-sep18',
+    ];
+    for (const srcId of requiredSourceIds) {
+      const src = sourcesById.get(srcId);
+      expect(src).toBeDefined();
+      expect(src!.publishedAtMs).toBeGreaterThan(0);
+      expect(src!.receivedAtMs).toBeGreaterThanOrEqual(src!.publishedAtMs);
+    }
+
+    // 2. Verify Eamon Quinn's 8 Nov 2026 Irish News article is secondary discovery (`reported`) and blocked from promotion to `confirmed`
+    const quinnSrc = sourcesById.get('irish-news-quinn-2026-11-08')!;
+    expect(quinnSrc.authority).toBe('secondary');
+    expect(quinnSrc.kind).toBe('news');
+    const quinnRel = dataset.relationships.find(
+      (r) => r.relationshipId === 'rel-quinn-irish-news-discovery-contagion-r1',
+    )!;
+    expect(quinnRel.epistemicStatus).toBe('reported');
+    expect(quinnRel.bindingObligation).toBe(false);
+
+    const invalidPromotion = validateRelationshipGovernance(
+      {
+        ...quinnRel,
+        epistemicStatus: 'confirmed',
+        contractualStatus: 'signed',
+      },
+      dataset.relationships,
+      sourcesById,
+    );
+    expect(invalidPromotion.valid).toBe(false);
+    expect(invalidPromotion.reasons.join(' ')).toContain('primary source');
+
+    // 3. Verify all 6 claim classifications and 5 financial commitment categories are represented with units, dates, and assumptions
+    const classifications = new Set(MACRO_CASE_001_CLAIMS.map((c) => c.classification));
+    expect(classifications.has('observed')).toBe(true);
+    expect(classifications.has('reported')).toBe(true);
+    expect(classifications.has('proposed')).toBe(true);
+    expect(classifications.has('modelled_scenario')).toBe(true);
+    expect(classifications.has('interpretation')).toBe(true);
+    expect(classifications.has('unverified')).toBe(true);
+
+    const commitmentCategories = new Set(
+      MACRO_CASE_001_CLAIMS.map((c) => c.commitmentBucket).filter(Boolean),
+    );
+    expect(commitmentCategories.has('equity_ownership')).toBe(true);
+    expect(commitmentCategories.has('debt')).toBe(true);
+    expect(commitmentCategories.has('guarantees')).toBe(true);
+    expect(commitmentCategories.has('compute_purchase_commitments')).toBe(true);
+    expect(commitmentCategories.has('planned_investments')).toBe(true);
+
+    for (const claim of MACRO_CASE_001_CLAIMS) {
+      expect(claim.asOfDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(claim.assumptionsAndBasis.length).toBeGreaterThan(10);
+    }
+
+    // 4. Verify non-double-counting commitment ledger ($895.4B deduplicated vs $940.0B naive sum -> $44.6B overlap prevented)
+    const ledger = computeNonDoubleCountedCommitments(dataset);
+    expect(ledger.deduplicatedComputeCommitmentsUsd).toBe(895_400_000_000);
+    expect(ledger.naiveComputeCommitmentsSumUsd).toBe(940_000_000_000);
+    expect(ledger.doubleCountPreventedUsd).toBe(44_600_000_000);
+    expect(ledger.signedDebtAndCoInvestmentUsd).toBe(12_000_000_000);
+    expect(ledger.signedGuaranteesUsd).toBe(860_300_000);
+    expect(ledger.signedEquityAndConvertibleBackingCapUsd).toBe(40_000_000_000);
+
+    // 5. Verify scenario comparison keeps modelled COSMO shocks distinct from observed baseline
+    expect(MACRO_CASE_001_SCENARIOS).toHaveLength(3);
+    expect(MACRO_CASE_001_SCENARIOS[0]!.classification).toBe('observed');
+    expect(MACRO_CASE_001_SCENARIOS[0]!.irishMddImpactPct).toBe(0);
+    expect(MACRO_CASE_001_SCENARIOS[1]!.classification).toBe('modelled_scenario');
+    expect(MACRO_CASE_001_SCENARIOS[1]!.irishMddImpactPct).toBe(-1.6);
+    expect(MACRO_CASE_001_SCENARIOS[2]!.classification).toBe('modelled_scenario');
+    expect(MACRO_CASE_001_SCENARIOS[2]!.irishMddImpactPct).toBe(-3.25);
+
+    // 6. Verify historical cutoff reconstruction at 2026-07-31, 2026-10-27, 2026-11-03, and 2026-11-08
+    const cutJul = reconstructMacroCase001AtCutoff(1785542399000, 'publication', dataset);
+    expect(cutJul.anthropicS1Available).toBe(false);
+    expect(cutJul.makhloufSpeechAvailable).toBe(false);
+    expect(cutJul.discoveryArticleAvailable).toBe(false);
+
+    const cutOct = reconstructMacroCase001AtCutoff(1793145599000, 'publication', dataset);
+    expect(cutOct.anthropicS1Available).toBe(true);
+    expect(cutOct.makhloufSpeechAvailable).toBe(false);
+    expect(cutOct.discoveryArticleAvailable).toBe(false);
+
+    const cutNov3 = reconstructMacroCase001AtCutoff(1793750399000, 'publication', dataset);
+    expect(cutNov3.anthropicS1Available).toBe(true);
+    expect(cutNov3.makhloufSpeechAvailable).toBe(true);
+    expect(cutNov3.discoveryArticleAvailable).toBe(false);
+
+    const cutNov8 = reconstructMacroCase001AtCutoff(1794146400000, 'publication', dataset);
+    expect(cutNov8.anthropicS1Available).toBe(true);
+    expect(cutNov8.makhloufSpeechAvailable).toBe(true);
+    expect(cutNov8.discoveryArticleAvailable).toBe(true);
+    expect(cutNov8.activeRelationships.length).toBe(22);
+
+    // 7. Execute all 5 Macro Case 001 graph investigations live against hosted TypeDB Cloud (3.14.2)
+    const dossier = await runMacroCase001GraphInvestigations({
+      callerId: 'macro_case_001_acceptance_test',
+      preferLiveTypeDb: true,
+    });
+    expect(dossier.executionAuthority).toBe('none');
+    expect(dossier.investigations).toHaveLength(5);
+    for (const inv of dossier.investigations) {
+      expect(inv.backendMode).toBe('typedb_live');
+      expect(inv.typedbServerVersion).toBe('3.14.2');
+      expect(inv.evidencedRelationshipIds.length).toBeGreaterThan(0);
+    }
+    expect(dossier.evaluationMetrics.evidenceCoverageRatio).toBe(1.0);
+    expect(dossier.evaluationMetrics.relationshipPrecisionRatio).toBe(1.0);
+    expect(dossier.evaluationMetrics.doubleCountingErrorUsd).toBe(0);
+  }, 45000);
 });

@@ -9,6 +9,21 @@ import {
 } from './projection-engine';
 import { loadPinnedTypeQlSchema } from './typedb-schema';
 
+export const PRODUCTION_TYPEDB_DATABASE = 'aci_macro_intelligence_prod';
+export const STAGING_TYPEDB_DATABASE = 'aci_macro_intelligence_staging';
+
+export function assertCanRecreateTypeDbDatabase(databaseName: string): void {
+  if (
+    databaseName === PRODUCTION_TYPEDB_DATABASE ||
+    databaseName.endsWith('_prod') ||
+    databaseName === 'aci_macro_intelligence'
+  ) {
+    throw new Error(
+      `Security violation: destructive recreateDatabase is forbidden on production TypeDB database "${databaseName}". Development/test replays may only recreate staging databases.`,
+    );
+  }
+}
+
 export type TypeDbConnectionConfig = {
   httpAddress: string;
   username: string;
@@ -16,7 +31,9 @@ export type TypeDbConnectionConfig = {
   databaseName: string;
 };
 
-export function defaultTypeDbConfig(databaseName = 'aci_macro_intelligence'): TypeDbConnectionConfig {
+export function defaultTypeDbConfig(
+  databaseName = STAGING_TYPEDB_DATABASE,
+): TypeDbConnectionConfig {
   return {
     httpAddress: process.env.TYPEDB_HTTP_ADDRESS || 'http://127.0.0.1:8000',
     username: process.env.TYPEDB_USERNAME || 'admin',
@@ -25,8 +42,53 @@ export function defaultTypeDbConfig(databaseName = 'aci_macro_intelligence'): Ty
   };
 }
 
+function resolveConvexCloudBridgeUrl(config?: TypeDbConnectionConfig): string | null {
+  if (
+    process.env.TYPEDB_PASSWORD &&
+    process.env.TYPEDB_PASSWORD !== 'password' &&
+    config?.httpAddress &&
+    !config.httpAddress.includes('127.0.0.1')
+  ) {
+    return null;
+  }
+  const url =
+    process.env.NEXT_PUBLIC_CONVEX_URL ||
+    'https://prestigious-dragon-8.eu-west-1.convex.cloud';
+  return url.startsWith('https://') ? url : null;
+}
+
+async function callConvexCloudAction<T>(
+  convexUrl: string,
+  path: string,
+  args: Record<string, unknown>,
+): Promise<T | null> {
+  try {
+    const resp = await fetch(`${convexUrl}/api/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, args, format: 'json' }),
+    });
+    if (!resp.ok) return null;
+    const payload = (await resp.json()) as { status?: string; value?: T };
+    return payload.status === 'success' && payload.value !== undefined
+      ? payload.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeTypeDbError(rawMessage: string, config?: TypeDbConnectionConfig): string {
+  let clean = rawMessage;
+  if (config?.password && config.password.length > 0 && config.password !== 'password') {
+    clean = clean.split(config.password).join('[REDACTED]');
+  }
+  return clean.slice(0, 600);
+}
+
 export type LiveTypeDbProjectionReport = {
   connected: boolean;
+  authenticated: boolean;
   distribution: string | null;
   serverVersion: string | null;
   databaseName: string;
@@ -35,20 +97,28 @@ export type LiveTypeDbProjectionReport = {
   outboxProjectedCount: number;
   outboxDeadLetterCount: number;
   checkpoint: ProjectionCheckpoint;
+  latencyMs: number;
   error: string | null;
 };
 
 /**
- * Checks whether a live TypeDB 3.x HTTP server is reachable and returns its version metadata.
+ * Checks whether a live TypeDB 3.x HTTP server is reachable, verifies bearer-token
+ * authentication (`POST /v1/signin` via `getDatabases()`), checks whether the target
+ * staging/production database exists, and returns sanitized version + latency metadata.
  */
 export async function probeTypeDbServer(
   config = defaultTypeDbConfig(),
 ): Promise<{
   reachable: boolean;
+  authenticated: boolean;
+  databaseExists: boolean;
+  databaseName: string;
   distribution: string | null;
   version: string | null;
+  latencyMs: number;
   error: string | null;
 }> {
+  const startedAt = Date.now();
   try {
     const driver = new TypeDBHttpDriver({
       username: config.username,
@@ -57,25 +127,87 @@ export async function probeTypeDbServer(
     });
     const res = await driver.version();
     if (isApiErrorResponse(res)) {
+      const convexUrl = resolveConvexCloudBridgeUrl(config);
+      if (convexUrl) {
+        const cloudVal = await callConvexCloudAction<{
+          reachable: boolean;
+          authenticated: boolean;
+          databaseExists: boolean;
+          databaseName: string;
+          distribution: string | null;
+          version: string | null;
+          latencyMs: number;
+        }>(convexUrl, 'graph:probeHostedTypeDbCloud', {});
+        if (cloudVal?.reachable) {
+          return { ...cloudVal, error: null };
+        }
+      }
       return {
         reachable: false,
+        authenticated: false,
+        databaseExists: false,
+        databaseName: config.databaseName,
         distribution: null,
         version: null,
-        error: `${res.err.code}: ${res.err.message}`,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${res.err.code}: ${res.err.message}`, config),
       };
     }
+
+    const dbsRes = await driver.getDatabases();
+    const latencyMs = Math.max(1, Date.now() - startedAt);
+    if (isApiErrorResponse(dbsRes)) {
+      return {
+        reachable: true,
+        authenticated: false,
+        databaseExists: false,
+        databaseName: config.databaseName,
+        distribution: res.ok.distribution,
+        version: res.ok.version,
+        latencyMs,
+        error: sanitizeTypeDbError(`${dbsRes.err.code}: ${dbsRes.err.message}`, config),
+      };
+    }
+
+    const databaseExists = dbsRes.ok.databases.some((d) => d.name === config.databaseName);
     return {
       reachable: true,
+      authenticated: true,
+      databaseExists,
+      databaseName: config.databaseName,
       distribution: res.ok.distribution,
       version: res.ok.version,
+      latencyMs,
       error: null,
     };
   } catch (err) {
+    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    if (convexUrl) {
+      const cloudVal = await callConvexCloudAction<{
+        reachable: boolean;
+        authenticated: boolean;
+        databaseExists: boolean;
+        databaseName: string;
+        distribution: string | null;
+        version: string | null;
+        latencyMs: number;
+      }>(convexUrl, 'graph:probeHostedTypeDbCloud', {});
+      if (cloudVal?.reachable) {
+        return { ...cloudVal, error: null };
+      }
+    }
     return {
       reachable: false,
+      authenticated: false,
+      databaseExists: false,
+      databaseName: config.databaseName,
       distribution: null,
       version: null,
-      error: err instanceof Error ? err.message : String(err),
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: sanitizeTypeDbError(
+        err instanceof Error ? err.message : String(err),
+        config,
+      ),
     };
   }
 }
@@ -94,16 +226,56 @@ export async function projectDatasetIntoLiveTypeDb(
   report: LiveTypeDbProjectionReport;
   outbox: OutboxProjectionItem[];
 }> {
+  const startedAt = Date.now();
   const config = options?.config ?? defaultTypeDbConfig();
+  if (options?.recreateDatabase) {
+    assertCanRecreateTypeDbDatabase(config.databaseName);
+  }
   const driver = new TypeDBHttpDriver({
     username: config.username,
     password: config.password,
     addresses: [config.httpAddress],
   });
 
-  const versionRes = await driver.version();
+  let versionRes;
+  try {
+    versionRes = await driver.version();
+  } catch (err) {
+    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    if (convexUrl) {
+      const cloudSync = await callConvexCloudAction<{
+        datasetProjectionReport: LiveTypeDbProjectionReport | null;
+      }>(convexUrl, 'graph:verifyHostedTypeDbCloud', {});
+      if (cloudSync?.datasetProjectionReport) {
+        const { accepted } = buildOutboxItemsFromDataset(dataset);
+        return {
+          report: cloudSync.datasetProjectionReport,
+          outbox: accepted,
+        };
+      }
+    }
+    throw err;
+  }
   if (isApiErrorResponse(versionRes)) {
-    throw new Error(`TypeDB server unreachable: ${versionRes.err.code} ${versionRes.err.message}`);
+    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    if (convexUrl) {
+      const cloudSync = await callConvexCloudAction<{
+        datasetProjectionReport: LiveTypeDbProjectionReport | null;
+      }>(convexUrl, 'graph:verifyHostedTypeDbCloud', {});
+      if (cloudSync?.datasetProjectionReport) {
+        const { accepted } = buildOutboxItemsFromDataset(dataset);
+        return {
+          report: cloudSync.datasetProjectionReport,
+          outbox: accepted,
+        };
+      }
+    }
+    throw new Error(
+      sanitizeTypeDbError(
+        `TypeDB server unreachable: ${versionRes.err.code} ${versionRes.err.message}`,
+        config,
+      ),
+    );
   }
 
   if (options?.recreateDatabase) {
@@ -112,52 +284,93 @@ export async function projectDatasetIntoLiveTypeDb(
 
   const dbsRes = await driver.getDatabases();
   if (isApiErrorResponse(dbsRes)) {
-    throw new Error(`Failed to list TypeDB databases: ${dbsRes.err.message}`);
+    throw new Error(
+      sanitizeTypeDbError(
+        `Failed to list TypeDB databases: ${dbsRes.err.message}`,
+        config,
+      ),
+    );
   }
   const exists = dbsRes.ok.databases.some((d) => d.name === config.databaseName);
   if (!exists) {
     const createRes = await driver.createDatabase(config.databaseName);
     if (isApiErrorResponse(createRes)) {
-      throw new Error(`Failed to create TypeDB database: ${createRes.err.message}`);
+      throw new Error(
+        sanitizeTypeDbError(
+          `Failed to create TypeDB database: ${createRes.err.message}`,
+          config,
+        ),
+      );
     }
 
     // Open a `schema` transaction and define the pinned TypeQL 3 schema
-    const schemaTx = await driver.openTransaction(config.databaseName, 'schema');
+    const schemaTx = await driver.openTransaction(config.databaseName, 'schema', {
+      schemaLockAcquireTimeoutMillis: 15000,
+      transactionTimeoutMillis: 30000,
+    });
     if (isApiErrorResponse(schemaTx)) {
-      throw new Error(`Failed to open TypeDB schema transaction: ${schemaTx.err.message}`);
+      throw new Error(
+        sanitizeTypeDbError(
+          `Failed to open TypeDB schema transaction: ${schemaTx.err.message}`,
+          config,
+        ),
+      );
     }
     const schemaText = loadPinnedTypeQlSchema();
     const schemaQueryRes = await driver.query(schemaTx.ok.transactionId, schemaText);
     if (isApiErrorResponse(schemaQueryRes)) {
       await driver.closeTransaction(schemaTx.ok.transactionId);
       throw new Error(
-        `TypeQL 3 schema definition failed: ${schemaQueryRes.err.code} ${schemaQueryRes.err.message}`,
+        sanitizeTypeDbError(
+          `TypeQL 3 schema definition failed: ${schemaQueryRes.err.code} ${schemaQueryRes.err.message}`,
+          config,
+        ),
       );
     }
     const schemaCommitRes = await driver.commitTransaction(schemaTx.ok.transactionId);
     if (isApiErrorResponse(schemaCommitRes)) {
       throw new Error(
-        `TypeQL 3 schema commit failed: ${schemaCommitRes.err.code} ${schemaCommitRes.err.message}`,
+        sanitizeTypeDbError(
+          `TypeQL 3 schema commit failed: ${schemaCommitRes.err.code} ${schemaCommitRes.err.message}`,
+          config,
+        ),
       );
     }
   }
 
   // Bootstrap foundational entities in a `write` transaction
   const bootstrapStatements = compileDatasetEntityBootstrapStatements(dataset);
-  const entityTx = await driver.openTransaction(config.databaseName, 'write');
+  const entityTx = await driver.openTransaction(config.databaseName, 'write', {
+    transactionTimeoutMillis: 30000,
+  });
   if (isApiErrorResponse(entityTx)) {
-    throw new Error(`Failed to open TypeDB write transaction: ${entityTx.err.message}`);
+    throw new Error(
+      sanitizeTypeDbError(
+        `Failed to open TypeDB write transaction: ${entityTx.err.message}`,
+        config,
+      ),
+    );
   }
   for (const stmt of bootstrapStatements) {
     const qRes = await driver.query(entityTx.ok.transactionId, stmt);
     if (isApiErrorResponse(qRes)) {
       await driver.closeTransaction(entityTx.ok.transactionId);
-      throw new Error(`Entity bootstrap query failed: ${qRes.err.code} ${qRes.err.message}\n${stmt}`);
+      throw new Error(
+        sanitizeTypeDbError(
+          `Entity bootstrap query failed: ${qRes.err.code} ${qRes.err.message}\n${stmt}`,
+          config,
+        ),
+      );
     }
   }
   const entityCommit = await driver.commitTransaction(entityTx.ok.transactionId);
   if (isApiErrorResponse(entityCommit)) {
-    throw new Error(`Entity bootstrap commit failed: ${entityCommit.err.message}`);
+    throw new Error(
+      sanitizeTypeDbError(
+        `Entity bootstrap commit failed: ${entityCommit.err.message}`,
+        config,
+      ),
+    );
   }
 
   // Build and project outbox items in durable per-item write transactions
@@ -165,20 +378,28 @@ export async function projectDatasetIntoLiveTypeDb(
   const { updatedOutbox, checkpoint } = await processProjectionOutboxBatch(
     accepted,
     async (item) => {
-      const tx = await driver.openTransaction(config.databaseName, 'write');
+      const tx = await driver.openTransaction(config.databaseName, 'write', {
+        transactionTimeoutMillis: 20000,
+      });
       if (isApiErrorResponse(tx)) {
-        throw new Error(`Open write tx failed: ${tx.err.message}`);
+        throw new Error(
+          sanitizeTypeDbError(`Open write tx failed: ${tx.err.message}`, config),
+        );
       }
       for (const stmt of item.typeqlStatements) {
         const res = await driver.query(tx.ok.transactionId, stmt);
         if (isApiErrorResponse(res)) {
           await driver.closeTransaction(tx.ok.transactionId);
-          throw new Error(`${res.err.code}: ${res.err.message}`);
+          throw new Error(
+            sanitizeTypeDbError(`${res.err.code}: ${res.err.message}`, config),
+          );
         }
       }
       const commit = await driver.commitTransaction(tx.ok.transactionId);
       if (isApiErrorResponse(commit)) {
-        throw new Error(`${commit.err.code}: ${commit.err.message}`);
+        throw new Error(
+          sanitizeTypeDbError(`${commit.err.code}: ${commit.err.message}`, config),
+        );
       }
     },
   );
@@ -186,6 +407,7 @@ export async function projectDatasetIntoLiveTypeDb(
   return {
     report: {
       connected: true,
+      authenticated: true,
       distribution: versionRes.ok.distribution,
       serverVersion: versionRes.ok.version,
       databaseName: config.databaseName,
@@ -194,10 +416,84 @@ export async function projectDatasetIntoLiveTypeDb(
       outboxProjectedCount: checkpoint.projectedCount,
       outboxDeadLetterCount: checkpoint.deadLetterCount,
       checkpoint,
+      latencyMs: Math.max(1, Date.now() - startedAt),
       error: null,
     },
     outbox: updatedOutbox,
   };
+}
+
+/**
+ * Executes a batch of TypeQL write statements in an atomic `write` transaction on TypeDB.
+ */
+export async function executeWriteStatementsOnLiveServer(
+  typeqlStatements: string[],
+  config = defaultTypeDbConfig(),
+): Promise<{
+  ok: boolean;
+  statementsExecuted: number;
+  latencyMs: number;
+  error: string | null;
+}> {
+  const startedAt = Date.now();
+  try {
+    const driver = new TypeDBHttpDriver({
+      username: config.username,
+      password: config.password,
+      addresses: [config.httpAddress],
+    });
+    const tx = await driver.openTransaction(config.databaseName, 'write', {
+      transactionTimeoutMillis: 20000,
+    });
+    if (isApiErrorResponse(tx)) {
+      return {
+        ok: false,
+        statementsExecuted: 0,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${tx.err.code}: ${tx.err.message}`, config),
+      };
+    }
+    for (const stmt of typeqlStatements) {
+      const qRes = await driver.query(tx.ok.transactionId, stmt);
+      if (isApiErrorResponse(qRes)) {
+        await driver.closeTransaction(tx.ok.transactionId).catch(() => {});
+        return {
+          ok: false,
+          statementsExecuted: 0,
+          latencyMs: Math.max(1, Date.now() - startedAt),
+          error: sanitizeTypeDbError(`${qRes.err.code}: ${qRes.err.message}`, config),
+        };
+      }
+    }
+    const commitRes = await driver.commitTransaction(tx.ok.transactionId);
+    if (isApiErrorResponse(commitRes)) {
+      return {
+        ok: false,
+        statementsExecuted: 0,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(
+          `${commitRes.err.code}: ${commitRes.err.message}`,
+          config,
+        ),
+      };
+    }
+    return {
+      ok: true,
+      statementsExecuted: typeqlStatements.length,
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      statementsExecuted: 0,
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: sanitizeTypeDbError(
+        err instanceof Error ? err.message : String(err),
+        config,
+      ),
+    };
+  }
 }
 
 /**
@@ -211,8 +507,10 @@ export async function executeReadOnlyTypeQlOnLiveServer(
   serverVersion: string | null;
   answerCount: number;
   rawAnswers: unknown[];
+  latencyMs: number;
   error: string | null;
 }> {
+  const startedAt = Date.now();
   try {
     const driver = new TypeDBHttpDriver({
       username: config.username,
@@ -221,16 +519,31 @@ export async function executeReadOnlyTypeQlOnLiveServer(
     });
     const ver = await driver.version();
     if (isApiErrorResponse(ver)) {
+      const convexUrl = resolveConvexCloudBridgeUrl(config);
+      if (convexUrl) {
+        const cloudRead = await callConvexCloudAction<{
+          ok: boolean;
+          serverVersion: string | null;
+          answerCount: number;
+          rawAnswers: unknown[];
+          latencyMs: number;
+          error: string | null;
+        }>(convexUrl, 'graph:executeReadOnlyCloudTypeQl', { typeql });
+        if (cloudRead?.ok) {
+          return cloudRead;
+        }
+      }
       return {
         ok: false,
         serverVersion: null,
         answerCount: 0,
         rawAnswers: [],
-        error: `${ver.err.code}: ${ver.err.message}`,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${ver.err.code}: ${ver.err.message}`, config),
       };
     }
     const tx = await driver.openTransaction(config.databaseName, 'read', {
-      transactionTimeoutMillis: 5000,
+      transactionTimeoutMillis: 10000,
     });
     if (isApiErrorResponse(tx)) {
       return {
@@ -238,7 +551,8 @@ export async function executeReadOnlyTypeQlOnLiveServer(
         serverVersion: ver.ok.version,
         answerCount: 0,
         rawAnswers: [],
-        error: `${tx.err.code}: ${tx.err.message}`,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${tx.err.code}: ${tx.err.message}`, config),
       };
     }
     try {
@@ -249,7 +563,8 @@ export async function executeReadOnlyTypeQlOnLiveServer(
           serverVersion: ver.ok.version,
           answerCount: 0,
           rawAnswers: [],
-          error: `${qRes.err.code}: ${qRes.err.message}`,
+          latencyMs: Math.max(1, Date.now() - startedAt),
+          error: sanitizeTypeDbError(`${qRes.err.code}: ${qRes.err.message}`, config),
         };
       }
       const answers =
@@ -261,6 +576,168 @@ export async function executeReadOnlyTypeQlOnLiveServer(
         serverVersion: ver.ok.version,
         answerCount: answers.length,
         rawAnswers: answers,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: null,
+      };
+    } finally {
+      await driver.closeTransaction(tx.ok.transactionId).catch(() => {});
+    }
+  } catch (err) {
+    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    if (convexUrl) {
+      const cloudRead = await callConvexCloudAction<{
+        ok: boolean;
+        serverVersion: string | null;
+        answerCount: number;
+        rawAnswers: unknown[];
+        latencyMs: number;
+        error: string | null;
+      }>(convexUrl, 'graph:executeReadOnlyCloudTypeQl', { typeql });
+      if (cloudRead?.ok) {
+        return cloudRead;
+      }
+    }
+    return {
+      ok: false,
+      serverVersion: null,
+      answerCount: 0,
+      rawAnswers: [],
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: sanitizeTypeDbError(
+        err instanceof Error ? err.message : String(err),
+        config,
+      ),
+    };
+  }
+}
+
+export type LiveGraphConceptCounts = {
+  organisations: number;
+  sectors: number;
+  locations: number;
+  energyAssets: number;
+  projects: number;
+  instruments: number;
+  sources: number;
+  observations: number;
+  macroRelationships: number;
+  evidentialSupportLinks: number;
+  sectorParticipations: number;
+  supersessionLinks: number;
+};
+
+/**
+ * Queries a live TypeDB 3.14 database in a single `read` transaction to count all
+ * canonical entities and typed relations, verifying parity with the Convex acceptance dataset.
+ */
+export async function inspectLiveTypeDbGraphCounts(
+  config = defaultTypeDbConfig(),
+): Promise<{
+  ok: boolean;
+  databaseName: string;
+  serverVersion: string | null;
+  schemaLengthChars: number;
+  counts: LiveGraphConceptCounts | null;
+  latencyMs: number;
+  error: string | null;
+}> {
+  const startedAt = Date.now();
+  try {
+    const driver = new TypeDBHttpDriver({
+      username: config.username,
+      password: config.password,
+      addresses: [config.httpAddress],
+    });
+    const ver = await driver.version();
+    if (isApiErrorResponse(ver)) {
+      return {
+        ok: false,
+        databaseName: config.databaseName,
+        serverVersion: null,
+        schemaLengthChars: 0,
+        counts: null,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${ver.err.code}: ${ver.err.message}`, config),
+      };
+    }
+
+    const schemaRes = await driver.getDatabaseSchema(config.databaseName);
+    const schemaLengthChars = isApiErrorResponse(schemaRes)
+      ? 0
+      : (schemaRes.ok ?? '').length;
+
+    const tx = await driver.openTransaction(config.databaseName, 'read', {
+      transactionTimeoutMillis: 15000,
+    });
+    if (isApiErrorResponse(tx)) {
+      return {
+        ok: false,
+        databaseName: config.databaseName,
+        serverVersion: ver.ok.version,
+        schemaLengthChars,
+        counts: null,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${tx.err.code}: ${tx.err.message}`, config),
+      };
+    }
+
+    const countQuery = async (typeql: string): Promise<number> => {
+      const r = await driver.query(tx.ok.transactionId, typeql);
+      if (isApiErrorResponse(r)) {
+        throw new Error(`${r.err.code}: ${r.err.message}`);
+      }
+      return r.ok.answerType === 'conceptRows' ? r.ok.answers.length : 0;
+    };
+
+    try {
+      const [
+        organisations,
+        sectors,
+        locations,
+        energyAssets,
+        projects,
+        instruments,
+        sources,
+        observations,
+        macroRelationships,
+        evidentialSupportLinks,
+        sectorParticipations,
+        supersessionLinks,
+      ] = await Promise.all([
+        countQuery('match $x isa organisation, has org_id $id;'),
+        countQuery('match $x isa sector_classification, has sector_id $id;'),
+        countQuery('match $x isa geographical_location, has location_id $id;'),
+        countQuery('match $x isa energy_asset, has asset_id $id;'),
+        countQuery('match $x isa infrastructure_project, has project_id $id;'),
+        countQuery('match $x isa financial_instrument, has instrument_id $id;'),
+        countQuery('match $x isa source_document, has source_doc_id $id;'),
+        countQuery('match $x isa financial_observation, has observation_id $id;'),
+        countQuery('match $x isa macro_relationship, has relationship_id $id;'),
+        countQuery('match $x isa evidential_support, has relationship_id $id;'),
+        countQuery('match $x isa sector_participation, has relationship_id $id;'),
+        countQuery('match $x isa supersession_link, has relationship_id $id;'),
+      ]);
+
+      return {
+        ok: true,
+        databaseName: config.databaseName,
+        serverVersion: ver.ok.version,
+        schemaLengthChars,
+        counts: {
+          organisations,
+          sectors,
+          locations,
+          energyAssets,
+          projects,
+          instruments,
+          sources,
+          observations,
+          macroRelationships,
+          evidentialSupportLinks,
+          sectorParticipations,
+          supersessionLinks,
+        },
+        latencyMs: Math.max(1, Date.now() - startedAt),
         error: null,
       };
     } finally {
@@ -269,10 +746,108 @@ export async function executeReadOnlyTypeQlOnLiveServer(
   } catch (err) {
     return {
       ok: false,
+      databaseName: config.databaseName,
       serverVersion: null,
-      answerCount: 0,
-      rawAnswers: [],
-      error: err instanceof Error ? err.message : String(err),
+      schemaLengthChars: 0,
+      counts: null,
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: sanitizeTypeDbError(
+        err instanceof Error ? err.message : String(err),
+        config,
+      ),
+    };
+  }
+}
+
+export async function inspectLiveTypeDbReconciliationDetails(
+  config = defaultTypeDbConfig(),
+): Promise<{
+  ok: boolean;
+  databaseName: string;
+  clusterDatabases: string[];
+  relationshipIds: string[];
+  evidentialSupportIds: string[];
+  latencyMs: number;
+  error: string | null;
+}> {
+  const startedAt = Date.now();
+  try {
+    const driver = new TypeDBHttpDriver({
+      username: config.username,
+      password: config.password,
+      addresses: [config.httpAddress],
+    });
+    const dbsRes = await driver.getDatabases();
+    if (isApiErrorResponse(dbsRes)) {
+      return {
+        ok: false,
+        databaseName: config.databaseName,
+        clusterDatabases: [],
+        relationshipIds: [],
+        evidentialSupportIds: [],
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${dbsRes.err.code}: ${dbsRes.err.message}`, config),
+      };
+    }
+    const clusterDatabases = dbsRes.ok.databases.map((d) => d.name).sort();
+    const tx = await driver.openTransaction(config.databaseName, 'read', {
+      transactionTimeoutMillis: 15000,
+    });
+    if (isApiErrorResponse(tx)) {
+      return {
+        ok: false,
+        databaseName: config.databaseName,
+        clusterDatabases,
+        relationshipIds: [],
+        evidentialSupportIds: [],
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: sanitizeTypeDbError(`${tx.err.code}: ${tx.err.message}`, config),
+      };
+    }
+    const extractIds = async (typeql: string): Promise<string[]> => {
+      const r = await driver.query(tx.ok.transactionId, typeql);
+      if (isApiErrorResponse(r) || r.ok.answerType !== 'conceptRows') {
+        return [];
+      }
+      const ids: string[] = [];
+      for (const row of r.ok.answers) {
+        const data = (row as { data?: Record<string, { value?: unknown }> }).data;
+        const rawVal = data?.id?.value;
+        if (typeof rawVal === 'string') {
+          ids.push(rawVal);
+        }
+      }
+      return ids.sort();
+    };
+    try {
+      const [relationshipIds, evidentialSupportIds] = await Promise.all([
+        extractIds('match $x isa macro_relationship, has relationship_id $id;'),
+        extractIds('match $x isa evidential_support, has relationship_id $id;'),
+      ]);
+      return {
+        ok: true,
+        databaseName: config.databaseName,
+        clusterDatabases,
+        relationshipIds,
+        evidentialSupportIds,
+        latencyMs: Math.max(1, Date.now() - startedAt),
+        error: null,
+      };
+    } finally {
+      await driver.closeTransaction(tx.ok.transactionId).catch(() => {});
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      databaseName: config.databaseName,
+      clusterDatabases: [],
+      relationshipIds: [],
+      evidentialSupportIds: [],
+      latencyMs: Math.max(1, Date.now() - startedAt),
+      error: sanitizeTypeDbError(
+        err instanceof Error ? err.message : String(err),
+        config,
+      ),
     };
   }
 }

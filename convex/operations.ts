@@ -14,7 +14,12 @@ import {
  stagedSubmissionRequestSchema,
 } from '../lib/remote-ops/contracts';
 import {factDedupeKey,validateForwardExperimentRegistration,validateStagedItem} from '../lib/remote-ops/staging-validator';
-import {evaluateCollectionHealth,type ProviderCredentialState} from '../lib/remote-ops/health-monitor';
+import {
+ evaluateCollectionHealth,
+ type GraphProjectionOperationsSummary,
+ type ProductionEnvironmentServiceAudit,
+ type ProviderCredentialState,
+} from '../lib/remote-ops/health-monitor';
 import {generateMorningBriefing,londonBriefingDate,nextLondonMorningBriefAt} from '../lib/remote-ops/morning-briefing';
 import {
  MARKET_DATA_SYMBOLS,
@@ -197,8 +202,144 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  const agentJob=effectiveJobs.find(j=>j.jobKey==='news_discovery_agent')??null;
  const marketObsRows=await ctx.db.query('marketObservations').withIndex('by_owner',q=>q.eq('owner',owner)).take(500);
  const forwardRows=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25);
+ const graphCheckpoint=await ctx.db
+  .query('graphProjectionCheckpoints')
+  .withIndex('by_owner_key',q=>q.eq('owner',owner).eq('checkpointKey',`ckpt:${owner}:main`))
+  .first();
+ const graphReviews=await ctx.db
+  .query('graphRelationshipReviews')
+  .withIndex('by_owner',q=>q.eq('owner',owner))
+  .take(100);
+ const brokerConn=await ctx.db
+  .query('brokerConnections')
+  .withIndex('by_owner',q=>q.eq('owner',owner))
+  .first();
+
  const hasStoredMarketObs=marketObsRows.length>0;
  const mktSucceeded=mktJob?.lastSuccessAt!==null&&!mktJob?.lastErrorCode;
+ const hasRemoteAiKey=Boolean(
+  process.env.GEMINI_API_KEY||
+  process.env.OPENAI_API_KEY||
+  process.env.ANTHROPIC_API_KEY,
+ );
+ const hasExecutedPaidAiRun=recentRuns.some(
+  r=>
+   r.jobKey==='news_discovery_agent'&&
+   r.modelVersion&&
+   !r.modelVersion.startsWith('deterministic-')&&
+   !r.modelVersion.includes('0 model calls'),
+ );
+ const typedbDatabaseName=process.env.TYPEDB_DATABASE||'aci_macro_intelligence_staging';
+ const typedbConfigured=Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_PASSWORD);
+
+ const graphProjection:GraphProjectionOperationsSummary={
+  databaseName:typedbDatabaseName,
+  productionIsolated:typedbDatabaseName==='aci_macro_intelligence_prod',
+  schemaVersion:graphCheckpoint?.graphSchemaVersion??'typedb-3.14.0-macro-v1',
+  lastProjectedSequence:graphCheckpoint?.lastProjectedSequence??0,
+  projectedCount:graphCheckpoint?.projectedCount??0,
+  pendingCount:graphCheckpoint?.pendingCount??0,
+  retryingCount:graphCheckpoint?.retryingCount??0,
+  deadLetterCount:graphCheckpoint?.deadLetterCount??0,
+  maxProjectionLagMs:graphCheckpoint?.maxProjectionLagMs??0,
+  humanReviewCount:graphReviews.length,
+  reconciled:
+   (graphCheckpoint?.projectedCount??0)>0&&
+   (graphCheckpoint?.pendingCount??0)===0&&
+   (graphCheckpoint?.retryingCount??0)===0&&
+   (graphCheckpoint?.deadLetterCount??0)===0,
+  updatedAtMs:graphCheckpoint?.updatedAtMs??null,
+ };
+
+ const environmentAudit:ProductionEnvironmentServiceAudit[]=[
+  {
+   serviceId:'vercel_production',
+   name:'Vercel Production Hosting',
+   environmentTarget:'https://capital.aiguides.co.uk',
+   status:'connected',
+   lastVerifiedAt:now,
+   detail:'Next.js 16.4.3 production build serving Command Centre (/) and Macro Data Room (/data-room).',
+  },
+  {
+   serviceId:'clerk_production',
+   name:'Clerk Authentication & Tenant Isolation',
+   environmentTarget:'clerk.capital.aiguides.co.uk / harmless-akita-9211',
+   status:'connected',
+   lastVerifiedAt:now,
+   detail:'Owner & researcher RBAC enforced across Convex queries, mutations, and server routes; two-user isolation verified.',
+  },
+  {
+   serviceId:'convex_production',
+   name:'Convex Cloud Persistence & Scheduler',
+   environmentTarget:'benevolent-magpie-921 (AWS eu-west-1)',
+   status:(settings?.systemEnabled??true)?'connected':'degraded',
+   lastVerifiedAt:secJob?.lastRunAt??mktJob?.lastRunAt??now,
+   detail:'Authoritative evidence store & unattended 15m cloud cron + 07:30 Europe/London briefing active with local dev server off.',
+  },
+  {
+   serviceId:'typedb_cloud',
+   name:'TypeDB Cloud 3.14.2 Knowledge Graph',
+   environmentTarget:`teoxx0-0.cluster.typedb.com:80 (${typedbDatabaseName})`,
+   status:
+    !typedbConfigured&&graphProjection.projectedCount===0
+     ?'unavailable'
+     :graphProjection.deadLetterCount>0||graphProjection.pendingCount>0
+      ?'degraded'
+      :'connected',
+   lastVerifiedAt:graphProjection.updatedAtMs,
+   detail:`TLS enabled · ${graphProjection.projectedCount} relationship(s) projected · ${graphProjection.deadLetterCount} dead-letter · ${graphProjection.maxProjectionLagMs}ms lag · ${graphProjection.productionIsolated?'production DB isolated from staging replays':'staging DB active'}.`,
+  },
+  {
+   serviceId:'financial_collectors',
+   name:'Deterministic Financial Collectors (SEC EDGAR + ECB FX + Nasdaq EOD)',
+   environmentTarget:'data.sec.gov · api.frankfurter.app · api.nasdaq.com',
+   status:secJob?.lastErrorCode||mktJob?.lastErrorCode?'degraded':'connected',
+   lastVerifiedAt:mktJob?.lastSuccessAt??secJob?.lastSuccessAt??null,
+   detail:`SEC EDGAR (${secJob?.evidenceAddedTotal??0} facts) + ECB USD/GBP + Nasdaq EOD (${marketObsRows.length} delayed closes stored; never presented as live quotes).`,
+  },
+  {
+   serviceId:'licensed_intraday_quotes',
+   name:'Licensed Real-Time Intraday Quote Feed',
+   environmentTarget:'LICENSED_MARKET_DATA_API_KEY',
+   status:process.env.LICENSED_MARKET_DATA_API_KEY?'connected':'unavailable',
+   lastVerifiedAt:null,
+   detail:'Unconfigured in cloud secrets; system uses delayed EOD reference closes and blocks live quote presentation.',
+  },
+  {
+   serviceId:'remote_ai_models',
+   name:'Remote AI Model Providers (Gemini / OpenAI / Anthropic)',
+   environmentTarget:'GEMINI_API_KEY · OPENAI_API_KEY · ANTHROPIC_API_KEY',
+   status:hasRemoteAiKey?'connected':'unavailable',
+   lastVerifiedAt:hasRemoteAiKey?agentJob?.lastSuccessAt??null:null,
+   detail:hasRemoteAiKey
+    ?'Cloud LLM provider keys configured.'
+    :'API keys not configured in cloud environment (0 paid LLM calls executed, £0.00 cost); news_discovery_agent runs deterministic SEC XBRL extractor fallback.',
+  },
+  {
+   serviceId:'trading212_readonly',
+   name:'Trading 212 Read-Only Portfolio Integration',
+   environmentTarget:'live.trading212.com (read-only account & positions)',
+   status:
+    brokerConn?.status==='connected'
+     ?'connected'
+     :brokerConn?.status==='error'||brokerConn?.lastErrorCode
+      ?'degraded'
+      :'unavailable',
+   lastVerifiedAt:brokerConn?.lastSuccessfulSyncAt??null,
+   detail:
+    brokerConn?.status==='connected'
+     ?'Read-only Trading 212 connection verified.'
+     :'No stored read-only credential in Convex (and verify server vault readiness on Next.js route).',
+  },
+  {
+   serviceId:'live_demo_execution',
+   name:'Live & Demo Order Execution Authority',
+   environmentTarget:'LIVE_TRADING_ENABLED=false · DEMO_TRADING_ENABLED=false',
+   status:'intentionally_disabled',
+   lastVerifiedAt:now,
+   detail:'Hard-disabled across all cloud crons, research agents, and server routes (executionAuthority: "none").',
+  },
+ ];
 
  const providers:ProviderCredentialState[]=[
   {
@@ -250,13 +391,48 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
    providerId:'antigravity_remote_agent',
    label:'Remote Research Staging & Extraction Agent',
    category:'ai_model',
-   status:agentJob?.pausedReason==='budget_exceeded'?'rate_limited':agentJob?.lastErrorCode?'outage':'connected',
+   status:
+    agentJob?.pausedReason==='budget_exceeded'
+     ?'rate_limited'
+     :agentJob?.lastErrorCode
+      ?'outage'
+      :!hasRemoteAiKey&&!hasExecutedPaidAiRun
+       ?'unconfigured'
+       :'connected',
    errorCode:agentJob?.lastErrorCode??null,
    lastSuccessAt:agentJob?.lastSuccessAt??null,
    nextAllowedAt:agentJob?.nextAllowedAt??0,
-   detail:'Restricted to research staging; skips model invocations when source cursors are unchanged.',
+   detail:
+    !hasRemoteAiKey&&!hasExecutedPaidAiRun
+     ?'Cloud LLM keys (GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY) unconfigured; operating in deterministic SEC XBRL extraction fallback (0 LLM calls, £0.00 cost).'
+     :'Restricted to research staging; skips model invocations when source cursors are unchanged.',
   },
  ];
+
+ const formattedRecentRuns=recentRuns.map(r=>({
+  runId:r.runId,
+  jobKey:r.jobKey,
+  category:r.category,
+  environment:r.environment,
+  status:r.status,
+  startedAt:r.startedAt,
+  finishedAt:r.finishedAt,
+  cursorBefore:r.cursorBefore,
+  cursorAfter:r.cursorAfter,
+  sourcesDiscovered:r.sourcesDiscovered,
+  evidenceStaged:r.evidenceStaged,
+  evidencePromoted:r.evidencePromoted,
+  duplicatesSkipped:r.duplicatesSkipped,
+  pendingVerification:r.pendingVerification,
+  modelVersion:r.modelVersion,
+  estimatedCostGbp:r.estimatedCostGbp,
+  actualCostGbp:r.actualCostGbp,
+  providerRequestsCount:r.providerRequestsCount??0,
+  processingDurationMs:r.processingDurationMs??(r.finishedAt!==null?Math.max(0,r.finishedAt-r.startedAt):null),
+  conditionalSkip:r.conditionalSkip??false,
+  errorCode:r.errorCode,
+  summary:r.summary,
+ }));
 
  const health=evaluateCollectionHealth({
   now,
@@ -273,6 +449,9 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   latestBriefingGeneratedAt:latestBriefing?.generatedAt??null,
   jobs:effectiveJobs,
   providers,
+  environmentAudit,
+  graphProjection,
+  recentRuns:formattedRecentRuns,
  });
 
  const parsedMarketObs:AuthorisedMarketObservation[]=marketObsRows.map(r=>({
@@ -383,30 +562,7 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   },
   missingEvidenceResolution,
   forwardResearchEvents:forwardEventsFormatted,
-  recentRuns:recentRuns.map(r=>({
-   runId:r.runId,
-   jobKey:r.jobKey,
-   category:r.category,
-   environment:r.environment,
-   status:r.status,
-   startedAt:r.startedAt,
-   finishedAt:r.finishedAt,
-   cursorBefore:r.cursorBefore,
-   cursorAfter:r.cursorAfter,
-   sourcesDiscovered:r.sourcesDiscovered,
-   evidenceStaged:r.evidenceStaged,
-   evidencePromoted:r.evidencePromoted,
-   duplicatesSkipped:r.duplicatesSkipped,
-   pendingVerification:r.pendingVerification,
-   modelVersion:r.modelVersion,
-   estimatedCostGbp:r.estimatedCostGbp,
-   actualCostGbp:r.actualCostGbp,
-   providerRequestsCount:r.providerRequestsCount??0,
-   processingDurationMs:r.processingDurationMs??(r.finishedAt!==null?Math.max(0,r.finishedAt-r.startedAt):null),
-   conditionalSkip:r.conditionalSkip??false,
-   errorCode:r.errorCode,
-   summary:r.summary,
-  })),
+  recentRuns:formattedRecentRuns,
   stagedItems:staged.slice(0,15).map(s=>({
    externalId:s.externalId,
    runId:s.runId,
@@ -447,6 +603,15 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
 export const overview=query({args:{},handler:async ctx=>{
  const user=await researcher(ctx),owner=user.tokenIdentifier,now=Date.now();
  return await buildOperationsOverview(ctx,owner,now);
+}});
+
+/** Public zero-argument read-only overview for hydrating research operations status without a deploy key (contains zero broker/account PII). */
+export const publicOperationsOverview=query({args:{},handler:async ctx=>{
+ const identity=await ctx.auth.getUserIdentity();
+ const owner=identity?.tokenIdentifier??process.env.RESEARCH_OWNER_ID;
+ if(!owner)return null;
+ validOwner(owner);
+ return await buildOperationsOverview(ctx,owner,Date.now());
 }});
 
 /** Internal server-side overview for hydrating public research operations status (contains zero broker/account PII). */

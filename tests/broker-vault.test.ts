@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from 'vitest';
 vi.mock('server-only',()=>({}));
-import {encryptCredentials,decryptCredentials,maskApiKey,vaultConfigured} from '../lib/brokers/vault';
+import {encryptCredentials,decryptCredentials,maskApiKey,vaultConfigured,diagnoseBrokerVaultReadiness} from '../lib/brokers/vault';
 
 const key=Buffer.alloc(32,7).toString('base64'),env={BROKER_VAULT_KEY_B64:key,BROKER_VAULT_KEY_VERSION:'test-v1'},credentials={apiKey:'mock-key-not-real',apiSecret:'mock-secret-not-real'};
 describe('server-side broker credential encryption',()=>{
@@ -12,3 +12,12 @@ describe('server-side broker credential encryption',()=>{
 });
 
 it('fully masks provider key suffixes that cannot be safely stored as identifiers',()=>{expect(maskApiKey('mock-key-tail+/==')).toBe('••••');});
+
+it('accepts valid 32-byte base64 keys with accidental surrounding quotes or trailing newlines and reports safe diagnostic booleans',()=>{
+  const quotedEnv={['BROKER_VAULT_KEY_B64']:`  "${key}"\r\n`,BROKER_VAULT_KEY_VERSION:' "test-v1"\n'};
+  expect(vaultConfigured(quotedEnv)).toBe(true);
+  const diag=diagnoseBrokerVaultReadiness(quotedEnv);
+  expect(diag).toEqual({vaultKeyPresent:true,vaultKeyVersionPresent:true,vaultKeyFormatValid:true,vaultSelfTestPassed:true});
+  const stored=encryptCredentials(credentials,'owner-a','demo',quotedEnv);
+  expect(decryptCredentials(stored,'owner-a','demo',env)).toEqual(credentials);
+});

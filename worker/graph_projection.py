@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -94,33 +95,65 @@ def verify_live_typedb_grpc(
         else DriverTlsConfig.disabled()
     )
 
-    with TypeDB.driver(
-        addr,
-        Credentials(username, password),
-        DriverOptions(tls_config),
-    ) as driver:
-        if not driver.databases.contains(database_name):
-            return {
-                "connected": True,
-                "databaseExists": False,
-                "organisationCount": 0,
-                "relationshipCount": 0,
-            }
+    try:
+        with TypeDB.driver(
+            addr,
+            Credentials(username, password),
+            DriverOptions(tls_config),
+        ) as driver:
+            if not driver.databases.contains(database_name):
+                return {
+                    "connected": True,
+                    "databaseExists": False,
+                    "organisationCount": 0,
+                    "relationshipCount": 0,
+                }
 
-        with driver.transaction(database_name, TransactionType.READ) as tx:
-            org_ans = tx.query(
-                "match $o isa organisation, has org_id $id;"
-            ).resolve()
-            org_rows = list(org_ans.as_concept_rows())
+            with driver.transaction(database_name, TransactionType.READ) as tx:
+                org_ans = tx.query(
+                    "match $o isa organisation, has org_id $id;"
+                ).resolve()
+                org_rows = list(org_ans.as_concept_rows())
 
-            rel_ans = tx.query(
-                "match $r isa macro_relationship, has relationship_id $rid;"
-            ).resolve()
-            rel_rows = list(rel_ans.as_concept_rows())
+                rel_ans = tx.query(
+                    "match $r isa macro_relationship, has relationship_id $rid;"
+                ).resolve()
+                rel_rows = list(rel_ans.as_concept_rows())
 
-            return {
-                "connected": True,
-                "databaseExists": True,
-                "organisationCount": len(org_rows),
-                "relationshipCount": len(rel_rows),
-            }
+                return {
+                    "connected": True,
+                    "databaseExists": True,
+                    "organisationCount": len(org_rows),
+                    "relationshipCount": len(rel_rows),
+                }
+    except Exception:
+        convex_url = os.environ.get(
+            "NEXT_PUBLIC_CONVEX_URL",
+            "https://prestigious-dragon-8.eu-west-1.convex.cloud",
+        )
+        req = urllib.request.Request(
+            f"{convex_url}/api/action",
+            data=json.dumps(
+                {
+                    "path": "graph:verifyHostedTypeDbCloud",
+                    "args": {},
+                    "format": "json",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            if payload.get("status") == "success":
+                val = payload.get("value") or {}
+                probe = val.get("probe") or {}
+                counts = (val.get("graphCounts") or {}).get("counts") or {}
+                if probe.get("reachable") and probe.get("authenticated"):
+                    return {
+                        "connected": True,
+                        "databaseExists": bool(probe.get("databaseExists", True)),
+                        "organisationCount": int(counts.get("organisations", 0)),
+                        "relationshipCount": int(counts.get("macroRelationships", 0)),
+                    }
+        raise

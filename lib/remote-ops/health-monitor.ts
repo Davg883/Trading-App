@@ -141,6 +141,62 @@ export type HealthMonitorAlert={
  href:string;
 };
 
+export type ProductionConnectionStatus =
+ | 'connected'
+ | 'configured_not_tested'
+ | 'degraded'
+ | 'unavailable'
+ | 'intentionally_disabled';
+
+export type ProductionEnvironmentServiceAudit = {
+ serviceId: string;
+ name: string;
+ environmentTarget: string;
+ status: ProductionConnectionStatus;
+ lastVerifiedAt: number | null;
+ detail: string;
+};
+
+export type GraphProjectionOperationsSummary = {
+ databaseName: string;
+ productionIsolated: boolean;
+ schemaVersion: string;
+ lastProjectedSequence: number;
+ projectedCount: number;
+ pendingCount: number;
+ retryingCount: number;
+ deadLetterCount: number;
+ maxProjectionLagMs: number;
+ humanReviewCount: number;
+ reconciled: boolean;
+ updatedAtMs: number | null;
+};
+
+export type OperationRunAuditItem = {
+ runId: string;
+ jobKey: string;
+ category: JobCategory;
+ environment: JobEnvironment;
+ status: string;
+ startedAt: number;
+ finishedAt: number | null;
+ cursorBefore: string | null;
+ cursorAfter: string | null;
+ sourcesDiscovered: number;
+ evidenceStaged: number;
+ evidencePromoted: number;
+ duplicatesSkipped: number;
+ pendingVerification: number;
+ modelVersion: string | null;
+ estimatedCostGbp: number;
+ actualCostGbp: number | null;
+ providerRequestsCount: number;
+ processingDurationMs: number | null;
+ conditionalSkip: boolean;
+ errorCode: string | null;
+ summary: string;
+};
+
 export type CollectionHealthReport={
  evaluatedAt:number;
  systemEnabled:boolean;
@@ -156,6 +212,9 @@ export type CollectionHealthReport={
  jobs:JobHealthSummary[];
  providers:ProviderCredentialState[];
  alerts:HealthMonitorAlert[];
+ environmentAudit?:ProductionEnvironmentServiceAudit[];
+ graphProjection?:GraphProjectionOperationsSummary;
+ recentRuns?:OperationRunAuditItem[];
 };
 
 const CREDENTIAL_ERROR_CODES=new Set([
@@ -200,8 +259,12 @@ export function evaluateCollectionHealth(input:{
  }>;
  providers?:ProviderCredentialState[];
  executionPaths?:HostedExecutionPathItem[];
+ environmentAudit?:ProductionEnvironmentServiceAudit[];
+ graphProjection?:GraphProjectionOperationsSummary;
+ recentRuns?:OperationRunAuditItem[];
 }):CollectionHealthReport{
  const {now}=input;
+ const londonNow=getLondonTimeParts(now);
  const alerts:HealthMonitorAlert[]=[];
 
  if(!input.systemEnabled||input.activeEnvironment==='disabled'){
@@ -239,10 +302,16 @@ export function evaluateCollectionHealth(input:{
   const ageMs=j.lastSuccessAt===null?null:Math.max(0,now-j.lastSuccessAt);
   const staleThresholdMs=Math.max(j.intervalMinutes*3*60_000,36*3600_000);
   const freshThresholdMs=Math.max(j.intervalMinutes*1.5*60_000,2*3600_000);
+  const jobBriefingDate=
+   j.jobKey==='daily_intelligence_briefing'
+    ?(input.latestBriefingDate??(j.lastSuccessAt?getLondonTimeParts(j.lastSuccessAt).dateKey:null))
+    :null;
   const freshness:JobHealthSummary['freshness']=
    ageMs===null?'unavailable':
-   ageMs<=freshThresholdMs?'fresh':
-   ageMs<=staleThresholdMs?'delayed':'stale';
+   j.jobKey==='daily_intelligence_briefing'&&jobBriefingDate!==londonNow.dateKey
+    ?((londonNow.isWeekday&&londonNow.minutesSinceMidnight<7*60+30&&ageMs<=staleThresholdMs)?'delayed':'stale')
+    :ageMs<=freshThresholdMs?'fresh':
+    ageMs<=staleThresholdMs?'delayed':'stale';
 
   if(j.lastErrorCode&&CREDENTIAL_ERROR_CODES.has(j.lastErrorCode)){
    alerts.push({
@@ -347,7 +416,6 @@ export function evaluateCollectionHealth(input:{
   promotedTotal>0?'imported':
   anyConditionalSkip?'unchanged_cursor':'none_imported';
 
- const londonNow=getLondonTimeParts(now);
  const briefJob=jobs.find(j=>j.jobKey==='daily_intelligence_briefing')??null;
  const briefingDate=input.latestBriefingDate??(briefJob?.lastSuccessAt?getLondonTimeParts(briefJob.lastSuccessAt).dateKey:null);
  const briefingGeneratedAt=input.latestBriefingGeneratedAt??briefJob?.lastSuccessAt??null;
@@ -412,10 +480,10 @@ export function evaluateCollectionHealth(input:{
  const executionPaths:HostedExecutionPathItem[]=input.executionPaths??[
   {
    id:'convex_cloud_scheduler_and_collectors',
-   label:'Convex Cloud Scheduler & SEC/FX Collectors (prestigious-dragon-8, eu-west-1)',
+   label:'Convex Cloud Scheduler & SEC/FX Collectors (benevolent-magpie-921 / prestigious-dragon-8, eu-west-1)',
    deployment:'cloud_hosted',
    status:schedulerWorking?'active':'standby',
-   detail:'Continuously deployed in AWS eu-west-1; runs 15m research cycle and 07:30 Europe/London (GMT/BST) briefing with laptop off.',
+   detail:'Continuously deployed in AWS eu-west-1; runs 15m research cycle, TypeDB outbox projection, and 07:30 Europe/London (GMT/BST) briefing with laptop off.',
   },
   {
    id:'python_remote_research_cli',
@@ -443,7 +511,7 @@ export function evaluateCollectionHealth(input:{
    label:'Licensed Intraday Equity/Index Quote Feed (LICENSED_MARKET_DATA_API_KEY)',
    deployment:'unconfigured_provider',
    status:'unavailable',
-   detail:'Unconfigured; market_data_collect records failed:licensed_quote_provider_unconfigured and refuses to treat delayed closes as live quotes.',
+   detail:'Unconfigured; market_data_collect uses delayed EOD reference closes and refuses to treat delayed closes as live quotes.',
   },
  ];
 
@@ -472,5 +540,8 @@ export function evaluateCollectionHealth(input:{
   jobs,
   providers,
   alerts,
+  ...(input.environmentAudit?{environmentAudit:input.environmentAudit}:{}),
+  ...(input.graphProjection?{graphProjection:input.graphProjection}:{}),
+  ...(input.recentRuns?{recentRuns:input.recentRuns}:{}),
  };
 }

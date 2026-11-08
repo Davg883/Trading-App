@@ -40,7 +40,7 @@ export const viewer=query({args:{},handler:async ctx=>({owner:await authenticate
 export const list=query({args:{},handler:async ctx=>{const owner=await authenticatedOwner(ctx);return (await ctx.db.query('brokerConnections').withIndex('by_owner',q=>q.eq('owner',owner)).take(10)).map(metadata);}});
 export const detail=query({args:{connectionId:v.id('brokerConnections')},handler:async(ctx,args)=>{const owner=await authenticatedOwner(ctx),row=await owned(ctx,args.connectionId,owner);const snapshot=await ctx.db.query('brokerSnapshots').withIndex('by_connection',q=>q.eq('owner',owner).eq('connectionId',row._id)).order('desc').first();return {...metadata(row),snapshot:snapshot&&snapshot.revision===row.revision?JSON.parse(snapshot.snapshotJson):null};}});
 
-export const saveInternal=internalMutation({args:{owner:v.string(),environment:brokerEnvironment,maskedKey:v.string(),encryptedPayload:v.string()},handler:async(ctx,args)=>{
+async function saveForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner:string;environment:'demo'|'live';maskedKey:string;encryptedPayload:string}){
   validOwner(args.owner);validMaskedKey(args.maskedKey);const encryptedPayload=validEncryptedPayload(args.encryptedPayload),now=Date.now();
   const previous=await ctx.db.query('brokerConnections').withIndex('by_environment',q=>q.eq('owner',args.owner).eq('environment',args.environment)).first();
   let id:GenericId<'brokerConnections'>,revision:number;
@@ -51,9 +51,11 @@ export const saveInternal=internalMutation({args:{owner:v.string(),environment:b
   const schedule=await ctx.db.query('brokerSyncSchedules').withIndex('by_owner_env',q=>q.eq('owner',args.owner).eq('environment',args.environment)).first();
   if(schedule)await ctx.db.patch(schedule._id,{pausedReason:null,consecutiveFailures:0,nextRunAt:now,updatedAt:now});
   return {connectionId:id,revision};
-}});
+}
+export const saveInternal=internalMutation({args:{owner:v.string(),environment:brokerEnvironment,maskedKey:v.string(),encryptedPayload:v.string()},handler:saveForOwner});
+export const save=mutation({args:{environment:brokerEnvironment,maskedKey:v.string(),encryptedPayload:v.string()},handler:async(ctx,args)=>saveForOwner(ctx,{owner:await humanOwner(ctx),...args})});
 export const getVaultInternal=internalQuery({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment},handler:async(ctx,args)=>{const row=await owned(ctx,args.connectionId,args.owner,args.environment),vault=await ctx.db.query('brokerCredentials').withIndex('by_connection',q=>q.eq('connectionId',row._id)).unique();if(!vault||vault.owner!==args.owner||vault.revision!==row.revision)throw new Error('Connection unavailable');return {connectionId:row._id,environment:row.environment,revision:row.revision,encryptedPayload:vault.encryptedPayload};}});
-export const acquireSyncInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment,operation:brokerOperation},handler:async(ctx,args)=>{
+async function acquireSyncForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner:string;connectionId:GenericId<'brokerConnections'>;environment:'demo'|'live';operation:'test'|'sync'}){
   const row=await owned(ctx,args.connectionId,args.owner,args.environment),now=Date.now();
   if(row.leaseToken&&row.leaseUntil>now)return {ok:false as const,code:'sync_in_progress' as const,retryAfterAt:row.leaseUntil};
   if(row.nextAllowedAt>now)return {ok:false as const,code:'rate_limited' as const,retryAfterAt:row.nextAllowedAt};
@@ -61,8 +63,10 @@ export const acquireSyncInternal=internalMutation({args:{owner:v.string(),connec
   const leaseNumber=row.leaseNumber+1,leaseToken=`${row._id}:${row.revision}:${leaseNumber}`;
   await ctx.db.patch(row._id,{status:'syncing',leaseToken,leaseNumber,leaseUntil:now+LEASE_MS,nextAllowedAt:now+COOLDOWN_MS,lastAttemptAt:now,updatedAt:now,operation:args.operation});
   return {ok:true as const,connectionId:row._id,environment:row.environment,revision:row.revision,leaseToken,encryptedPayload:vault.encryptedPayload,operation:args.operation};
-}});
-export const recordSyncInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment,leaseToken:v.string(),revision:v.number(),snapshotJson:v.optional(v.string()),errorCode:v.optional(brokerErrorCode),retryAfterAt:v.optional(v.number()),rateLimitJson:v.optional(v.string())},handler:async(ctx,args)=>{
+}
+export const acquireSyncInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment,operation:brokerOperation},handler:acquireSyncForOwner});
+export const acquireSync=mutation({args:{connectionId:v.id('brokerConnections'),environment:brokerEnvironment,operation:brokerOperation},handler:async(ctx,args)=>acquireSyncForOwner(ctx,{owner:await humanOwner(ctx),...args})});
+async function recordSyncForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner:string;connectionId:GenericId<'brokerConnections'>;environment:'demo'|'live';leaseToken:string;revision:number;snapshotJson?:string;errorCode?:Connection['lastErrorCode']&string;retryAfterAt?:number;rateLimitJson?:string}){
   const row=await ctx.db.get(args.connectionId),now=Date.now();validOwner(args.owner);
   // Completion after credential replacement/deletion must not recreate a vault or
   // publish another generation's account snapshot.
@@ -93,14 +97,18 @@ export const recordSyncInternal=internalMutation({args:{owner:v.string(),connect
     return {stored:true,errorCode:classified};
   }
   return {stored:true};
-}});
-export const deleteInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment},handler:async(ctx,args)=>{
+}
+export const recordSyncInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment,leaseToken:v.string(),revision:v.number(),snapshotJson:v.optional(v.string()),errorCode:v.optional(brokerErrorCode),retryAfterAt:v.optional(v.number()),rateLimitJson:v.optional(v.string())},handler:recordSyncForOwner});
+export const recordSync=mutation({args:{connectionId:v.id('brokerConnections'),environment:brokerEnvironment,leaseToken:v.string(),revision:v.number(),snapshotJson:v.optional(v.string()),errorCode:v.optional(brokerErrorCode),retryAfterAt:v.optional(v.number()),rateLimitJson:v.optional(v.string())},handler:async(ctx,args)=>recordSyncForOwner(ctx,{owner:await humanOwner(ctx),...args})});
+async function deleteForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner:string;connectionId:GenericId<'brokerConnections'>;environment:'demo'|'live'}){
   const row=await owned(ctx,args.connectionId,args.owner,args.environment);
   const vaults=await ctx.db.query('brokerCredentials').withIndex('by_connection',q=>q.eq('connectionId',row._id)).collect();for(const vault of vaults)await ctx.db.delete(vault._id);
   const snapshots=await ctx.db.query('brokerSnapshots').withIndex('by_connection',q=>q.eq('owner',args.owner).eq('connectionId',row._id)).collect();for(const snapshot of snapshots)await ctx.db.delete(snapshot._id);
   const schedules=await ctx.db.query('brokerSyncSchedules').withIndex('by_owner_env',q=>q.eq('owner',args.owner).eq('environment',args.environment)).collect();for(const schedule of schedules)await ctx.db.delete(schedule._id);
   await ctx.db.delete(row._id);return {deleted:true,providerRevocationRequired:true};
-}});
+}
+export const deleteInternal=internalMutation({args:{owner:v.string(),connectionId:v.id('brokerConnections'),environment:brokerEnvironment},handler:deleteForOwner});
+export const deleteConnection=mutation({args:{connectionId:v.id('brokerConnections'),environment:brokerEnvironment},handler:async(ctx,args)=>deleteForOwner(ctx,{owner:await humanOwner(ctx),...args})});
 
 
 // ---------- Automatic synchronisation schedules (owner opt-in) ----------
@@ -129,7 +137,7 @@ export const setAutoSync=mutation({args:{environment:brokerEnvironment,enabled:v
  * Claims due schedules atomically (one claimant per schedule across tabs, servers and the scheduler).
  * With `owner`, only that owner's schedules are considered (dashboard heartbeat); without it, the global due list (scheduler).
  */
-export const claimDueInternal=internalMutation({args:{owner:v.optional(v.string()),limit:v.number()},handler:async(ctx,args)=>{
+async function claimDueForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner?:string;limit:number}){
   const now=Date.now(),limit=Math.max(1,Math.min(25,Math.floor(args.limit)));
   const rows=args.owner!==undefined?(validOwner(args.owner),await ctx.db.query('brokerSyncSchedules').withIndex('by_owner_env',q=>q.eq('owner',args.owner!)).collect()):await ctx.db.query('brokerSyncSchedules').withIndex('by_due',q=>q.eq('enabled',true).lte('nextRunAt',now)).take(limit*4);
   const claimed:{owner:string;environment:'demo'|'live';connectionId:GenericId<'brokerConnections'>}[]=[];
@@ -143,10 +151,12 @@ export const claimDueInternal=internalMutation({args:{owner:v.optional(v.string(
     claimed.push({owner:s.owner,environment:s.environment,connectionId:connection._id});
   }
   return claimed;
-}});
+}
+export const claimDueInternal=internalMutation({args:{owner:v.optional(v.string()),limit:v.number()},handler:claimDueForOwner});
+export const claimDue=mutation({args:{limit:v.number()},handler:async(ctx,args)=>claimDueForOwner(ctx,{owner:await humanOwner(ctx),limit:args.limit})});
 
 /** Records a scheduled run. Credential problems pause the schedule; temporary failures back off exponentially. */
-export const recordScheduledOutcomeInternal=internalMutation({args:{owner:v.string(),environment:brokerEnvironment,outcome:v.union(v.literal('synchronised'),v.literal('partial'),v.literal('failed'),v.literal('skipped')),errorCode:v.optional(v.string())},handler:async(ctx,args)=>{
+async function recordScheduledOutcomeForOwner(ctx:GenericMutationCtx<DataModel>,args:{owner:string;environment:'demo'|'live';outcome:'synchronised'|'partial'|'failed'|'skipped';errorCode?:string}){
   validOwner(args.owner);const now=Date.now();
   const s=await ctx.db.query('brokerSyncSchedules').withIndex('by_owner_env',q=>q.eq('owner',args.owner).eq('environment',args.environment)).first();if(!s)return;
   const connection=await ctx.db.query('brokerConnections').withIndex('by_environment',q=>q.eq('owner',args.owner).eq('environment',args.environment)).first();
@@ -156,4 +166,6 @@ export const recordScheduledOutcomeInternal=internalMutation({args:{owner:v.stri
     if(PAUSE_ON.has(code))await ctx.db.patch(s._id,{lastRunAt:now,lastOutcome:`failed:${code}`,consecutiveFailures:failures,pausedReason:code,claimedUntil:0,updatedAt:now});
     else await ctx.db.patch(s._id,{lastRunAt:now,lastOutcome:`failed:${code}`,consecutiveFailures:failures,nextRunAt:Math.max(notBefore,now+Math.min(interval*2**Math.min(failures,6),MAX_BACKOFF_MS)),claimedUntil:0,updatedAt:now});
   }else await ctx.db.patch(s._id,{lastRunAt:now,lastOutcome:args.outcome,consecutiveFailures:args.outcome==='skipped'?s.consecutiveFailures:0,nextRunAt:Math.max(notBefore,now+interval),claimedUntil:0,updatedAt:now});
-}});
+}
+export const recordScheduledOutcomeInternal=internalMutation({args:{owner:v.string(),environment:brokerEnvironment,outcome:v.union(v.literal('synchronised'),v.literal('partial'),v.literal('failed'),v.literal('skipped')),errorCode:v.optional(v.string())},handler:recordScheduledOutcomeForOwner});
+export const recordScheduledOutcome=mutation({args:{environment:brokerEnvironment,outcome:v.union(v.literal('synchronised'),v.literal('partial'),v.literal('failed'),v.literal('skipped')),errorCode:v.optional(v.string())},handler:async(ctx,args)=>recordScheduledOutcomeForOwner(ctx,{owner:await humanOwner(ctx),...args})});

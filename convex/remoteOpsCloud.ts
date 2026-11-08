@@ -22,6 +22,7 @@ const internalAction:ActionBuilder<DataModel,'internal'>=internalActionGeneric;
 
 const qRef=(name:string)=>makeFunctionReference<'query'>(`operations:${name}`);
 const mRef=(name:string)=>makeFunctionReference<'mutation'>(`operations:${name}`);
+const graphARef=(name:string)=>makeFunctionReference<'action'>(`graph:${name}`);
 
 type RawArticleCandidate=CandidateSourceDocument;
 
@@ -835,6 +836,29 @@ export const runScheduledCloudCycle=internalAction({
       detail:`date=${briefWindow.dateKey}, regime=${briefWindow.regime}, deduplicated=${Boolean(briefRes.briefingDeduplicated)}, facts=${confirmedFacts.length}`,
      });
     }
+   }
+  }
+
+  // 6. Non-blocking TypeDB Cloud Outbox Projection (`typedb_outbox_project`)
+  // Isolated in try/catch so a TypeDB Cloud outage never interrupts Convex evidence ingestion.
+  if(process.env.TYPEDB_HTTP_ADDRESS){
+   try{
+    const syncRes=await ctx.runAction(graphARef('syncAndVerifyTypeDbCloud'),{
+     owner,
+     recreateDatabase:false,
+     runAllAllowlistedQueries:false,
+    }) as {ok:boolean;databaseName?:string;outboxResults?:unknown[]};
+    results.push({
+     jobKey:'typedb_outbox_project',
+     status:syncRes.ok?'succeeded':'degraded_mirror_fallback',
+     detail:`database=${syncRes.databaseName??'aci_macro_intelligence_staging'}, projected=${syncRes.outboxResults?.length??0}`,
+    });
+   }catch(err){
+    results.push({
+     jobKey:'typedb_outbox_project',
+     status:'degraded_mirror_fallback',
+     detail:err instanceof Error?err.message:'typedb_unreachable_isolated',
+    });
    }
   }
 

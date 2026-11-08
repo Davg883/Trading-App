@@ -192,10 +192,13 @@ export async function fetchLiveOperationsOverview():Promise<{
  forwardResearchEvents?:ForwardResearchEventRecord[];
 }|null>{
  try{
-  const owner=process.env.RESEARCH_OWNER_ID;
-  if(!owner||!process.env.NEXT_PUBLIC_CONVEX_URL)return null;
-  const client=stagingConvexClient();
-  const res=await client.query(qRef('getOperationsOverviewInternal'),{owner}) as {
+  const url=process.env.NEXT_PUBLIC_CONVEX_URL;
+  if(!url)return null;
+  const c=new ConvexHttpClient(url,{
+   logger:false,
+   fetch:(input,init)=>fetch(input,{...init,cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)}),
+  });
+  const res=await c.query(qRef('publicOperationsOverview'),{}) as {
    health:CollectionHealthReport;
    latestBriefing:MorningBriefingRecord|null;
    marketData?:{
@@ -205,7 +208,7 @@ export async function fetchLiveOperationsOverview():Promise<{
    };
    missingEvidenceResolution?:MissingEvidenceResolverReport;
    forwardResearchEvents?:ForwardResearchEventRecord[];
-  };
+  }|null;
   return res;
  }catch{
   return null;

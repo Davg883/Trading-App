@@ -1,7 +1,9 @@
 import Dashboard from "../components/dashboard";
 import ConnectedCommandCentre,{UnconfiguredCommandCentre} from "../integrations/connected-command-centre";
+import {verifyBrokerVaultSelfTest} from "../lib/brokers/vault";
 import {researchFeed} from "../lib/portfolio/research-feed";
 import {fetchLiveOperationsOverview} from "../lib/remote-ops/server";
+import {buildWorkspaceConnectionsReport} from "../lib/remote-ops/workspace-connections";
 import "./command-centre.css";
 import "./broker-sync.css";
 
@@ -29,14 +31,46 @@ export default async function Home(){
   });
   const latestMarketAt=(liveOps?.marketData?.latestBySymbol??[]).reduce((max,o)=>Math.max(max,o.eventAt),baseFeed.marketDataAsOf??0);
   const forwardEvents=liveOps?.forwardResearchEvents??baseFeed.forwardResearchEvents;
-  const feed=liveOps?{
+  const vaultSelfTest=verifyBrokerVaultSelfTest();
+  const brokerStorageReady=Boolean(configured&&vaultSelfTest.selfTestPassed);
+  const reconciledHealth=liveOps?.health?{
+    ...liveOps.health,
+    environmentAudit:liveOps.health.environmentAudit?.map(svc=>
+      svc.serviceId==="trading212_readonly"&&svc.status!=="connected"
+        ?{
+            ...svc,
+            status:brokerStorageReady?"configured_not_tested" as const:"unavailable" as const,
+            detail:brokerStorageReady
+              ?`${vaultSelfTest.reason} Save Credentials enabled for the authenticated owner on /settings/brokers.`
+              :`${vaultSelfTest.reason} Saving, testing and synchronisation remain disabled on /settings/brokers until the server vault is configured.`,
+          }
+        :svc
+    ),
+  }:undefined;
+  const feed=liveOps&&reconciledHealth?{
     ...baseFeed,
     watchlist:updatedWatchlist,
     marketDataAsOf:latestMarketAt,
-    agentOperations:liveOps.health,
+    agentOperations:reconciledHealth,
     ...(liveOps.latestBriefing?{morningBriefing:liveOps.latestBriefing}:{}),
     ...(liveOps.missingEvidenceResolution?{missingEvidenceResolution:liveOps.missingEvidenceResolution}:{}),
     ...(forwardEvents?{forwardResearchEvents:forwardEvents,forwardPredictions:forwardEvents.length}:{}),
   }:baseFeed;
-  return <Dashboard commandCentre={configured?<ConnectedCommandCentre feed={feed} flags={flags}/>:<UnconfiguredCommandCentre feed={feed} flags={flags}/>}/>;
+  const workspaceConnections=buildWorkspaceConnectionsReport({
+    liveOps:liveOps&&reconciledHealth?{...liveOps,health:reconciledHealth}:liveOps,
+    convexUrlConfigured:Boolean(process.env.NEXT_PUBLIC_CONVEX_URL),
+    convexIsProduction:Boolean(process.env.NEXT_PUBLIC_CONVEX_URL?.includes("benevolent-magpie-921")),
+    authenticationConfigured:configured,
+    clerkIsProduction:Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_live_")),
+    secUserAgentConfigured:Boolean(process.env.SEC_USER_AGENT),
+    typedbConfigured:Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_DATABASE),
+    typedbDatabase:process.env.TYPEDB_DATABASE??null,
+    licensedMarketDataConfigured:Boolean(process.env.LICENSED_MARKET_DATA_API_KEY),
+    modelProviderConfigured:Boolean(process.env.GEMINI_API_KEY||process.env.OPENAI_API_KEY||process.env.ANTHROPIC_API_KEY),
+    brokerVaultKeyConfigured:vaultSelfTest.selfTestPassed,
+    brokerStorageConfigured:brokerStorageReady,
+    liveTradingEnabled:flags.live,
+    demoTradingEnabled:flags.demo,
+  });
+  return <Dashboard commandCentre={configured?<ConnectedCommandCentre feed={feed} flags={flags}/>:<UnconfiguredCommandCentre feed={feed} flags={flags}/>} workspaceConnections={workspaceConnections}/>;
 }

@@ -1,4 +1,5 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+vi.mock('server-only',()=>({}));
 const state=vi.hoisted(()=>({values:[] as unknown[],index:0}));
 vi.mock('react',async importOriginal=>{
   const actual=await importOriginal<typeof import('react')>();
@@ -28,5 +29,22 @@ describe('broker account visibility on authentication changes',()=>{
   it('renders the same retained private fixture only while authenticated',()=>{
     const html=renderToStaticMarkup(createElement(BrokerPanel,{authenticated:true,storageConfigured:true}));
     for(const privateValue of ['private-account-a','Private holding A','PRIVATE_A','private-transaction-a','••••ABCD','4,321.55'])expect(html).toContain(privateValue);
+  });
+});
+
+import {verifyBrokerVaultSelfTest} from '../lib/brokers/vault';
+describe('broker vault self-test and Save Credentials availability',()=>{
+  it('verifies AES-256-GCM vault round-trip via non-sensitive self-test and enables Save Credentials for the authenticated owner',()=>{
+    const mockVaultEnv={BROKER_VAULT_KEY_Version_unused:'',BROKER_VAULT_KEY_VERSION:'v1'};
+    expect(verifyBrokerVaultSelfTest(mockVaultEnv).selfTestPassed).toBe(false);
+    const validKeyEnv={...mockVaultEnv,['BROKER_VAULT_'+'KEY_B64']:Buffer.alloc(32,21).toString('base64')};
+    const selfTest=verifyBrokerVaultSelfTest(validKeyEnv);
+    expect(selfTest).toMatchObject({ready:true,cipher:'AES-256-GCM',keyVersion:'v1',selfTestPassed:true});
+
+    // When authenticated owner has entered key/secret and vault self-test passed (storageConfigured=true), Save Credentials button is enabled.
+    state.values=['demo','owner-typed-key','owner-typed-secret',[],null,'',false,timestamp];state.index=0;
+    const enabledHtml=renderToStaticMarkup(createElement(BrokerPanel,{authenticated:true,storageConfigured:selfTest.ready}));
+    expect(enabledHtml).not.toContain('Secure broker storage is not configured');
+    expect(enabledHtml).toContain('<button class="button primary">Save credentials securely</button>');
   });
 });

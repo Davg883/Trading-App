@@ -17,6 +17,7 @@ import type * as defence from "../defence.js";
 import type * as defenceValidators from "../defenceValidators.js";
 import type * as earnings from "../earnings.js";
 import type * as earningsValidators from "../earningsValidators.js";
+import type * as graph from "../graph.js";
 import type * as http from "../http.js";
 import type * as infrastructure from "../infrastructure.js";
 import type * as infrastructureValidators from "../infrastructureValidators.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   defenceValidators: typeof defenceValidators;
   earnings: typeof earnings;
   earningsValidators: typeof earningsValidators;
+  graph: typeof graph;
   http: typeof http;
   infrastructure: typeof infrastructure;
   infrastructureValidators: typeof infrastructureValidators;

@@ -9,9 +9,21 @@ import type {
   MacroGraphDataset,
   MacroRelationship,
 } from '../lib/graph/contracts';
-import { reconstructGraphRelationshipsAtDate } from '../lib/graph/identity-governance';
+import {
+  reconstructGraphRelationshipsAtDate,
+  validateRelationshipGovernance,
+} from '../lib/graph/identity-governance';
+import { computeDeterministicProjectionKey } from '../lib/graph/projection-engine';
 import { generateBoundedGraphTldr } from '../lib/graph/tldr-generator';
 import type { BenchmarkComparisonReport } from '../lib/graph/benchmark-evaluator';
+import {
+  MACRO_CASE_001_CLAIMS,
+  MACRO_CASE_001_HISTORICAL_CUTOFFS,
+  MACRO_CASE_001_ID,
+  MACRO_CASE_001_SCENARIOS,
+  computeNonDoubleCountedCommitments,
+  reconstructMacroCase001AtCutoff,
+} from '../lib/graph/macro-case-001';
 
 export type DataRoomViewKey =
   | 'executive_overview'
@@ -27,18 +39,55 @@ export interface MacroDataRoomProps {
   benchmark: BenchmarkComparisonReport;
   liveTypeDbStatus: {
     reachable: boolean;
+    authenticated?: boolean;
+    databaseExists?: boolean;
+    databaseName?: string;
+    distribution?: string | null;
     version: string | null;
+    latencyMs?: number;
+    tlsEnabled?: boolean;
   };
 }
 
+export type ReviewerDecisionRecord = {
+  relationshipId: string;
+  version: number;
+  decision: 'approved' | 'rejected';
+  reviewer: string;
+  reviewedAtMs: number;
+  reviewNote: string;
+  sourceDocIds: string[];
+  epistemicStatus: EpistemicStatus;
+  contractualStatus: MacroRelationship['contractualStatus'];
+  projectionKey: string | null;
+  outboxStatus: 'projected' | 'pending' | 'retrying' | 'dead_letter' | 'not_enqueued';
+  lastError: string | null;
+};
+
 const AS_OF_PRESETS = [
+  {
+    label: '2026-11-08 — Macro Case 001 Discovery & Full Receipt State',
+    asOfMs: 1794146400000,
+  },
   {
     label: '2026-11-05 — Full Receipt State (Active v2)',
     asOfMs: 1793900000000,
   },
   {
+    label: '2026-11-03 — Post-Anthropic S-1/A & Makhlouf Speech',
+    asOfMs: 1793750399000,
+  },
+  {
+    label: '2026-10-27 — Post-Anthropic Initial S-1 Filing',
+    asOfMs: 1793145599000,
+  },
+  {
     label: '2026-09-25 — Pre-Cancellation State (Loughton v1 Announced)',
     asOfMs: 1790380800000,
+  },
+  {
+    label: '2026-07-31 — Post-Ireland Dept of Finance & CBI FSR 2026 I',
+    asOfMs: 1785542399000,
   },
 ];
 
@@ -66,7 +115,7 @@ export default function MacroDataRoom({
   liveTypeDbStatus,
 }: MacroDataRoomProps) {
   const [activeView, setActiveView] = useState<DataRoomViewKey>('executive_overview');
-  const [asOfMs, setAsOfMs] = useState<number>(1793900000000);
+  const [asOfMs, setAsOfMs] = useState<number>(1794146400000);
   const [temporalBasis, setTemporalBasis] = useState<TemporalBasis>('receipt');
   const [includeSuperseded, setIncludeSuperseded] = useState<boolean>(false);
   const [focalId, setFocalId] = useState<string>('org-nscale');
@@ -75,6 +124,115 @@ export default function MacroDataRoom({
     'rel-loughton-msft-r2',
   );
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
+  const [reviewNoteInput, setReviewNoteInput] = useState<string>(
+    'Primary SEC filing / corroborated disclosure verified; approved for hosted TypeDB Cloud outbox promotion.',
+  );
+  const [reviewerDecisions, setReviewerDecisions] = useState<
+    Record<string, ReviewerDecisionRecord>
+  >({});
+  const [simulatedOutboxFailureRelId, setSimulatedOutboxFailureRelId] = useState<
+    string | null
+  >(null);
+  const [lastReplayAtMs, setLastReplayAtMs] = useState<number | null>(null);
+
+  const commitmentLedger = useMemo(
+    () => computeNonDoubleCountedCommitments(dataset),
+    [dataset],
+  );
+
+  const case001Cutoffs = useMemo(
+    () =>
+      MACRO_CASE_001_HISTORICAL_CUTOFFS.map((c) => {
+        const snap = reconstructMacroCase001AtCutoff(c.asOfMs, 'publication', dataset);
+        return {
+          cutoffDateIso: new Date(c.asOfMs).toISOString().slice(0, 10),
+          cutoffMs: c.asOfMs,
+          label: c.label,
+          activeRelationshipCount: snap.activeRelationships.length,
+          anthropicS1DisclosuresKnown: snap.anthropicS1Available,
+          makhloufSpeechKnown: snap.makhloufSpeechAvailable,
+          irishNewsDiscoveryKnown: snap.discoveryArticleAvailable,
+        };
+      }),
+    [dataset],
+  );
+
+  const case001Investigations = useMemo(
+    () => [
+      {
+        questionId: 'inv-1-shared-counterparties',
+        question: '1. Which companies share financing or infrastructure counterparties?',
+        queryType: 'shared_counterparty_exposure',
+        findingSummary:
+          'Anthropic shares Amazon (AMZN) and Alphabet (GOOGL) across three simultaneous roles—Class N shareholder/convertible backer, enterprise cloud distributor, and compute supplier ($895.4B S-1/A commitment envelope)—while sharing Nscale and NVIDIA (NVDA) on the Monarch campus ($44.6B service cap + $1.0B NVIDIA convertible note + reported guarantee discussions). In Ireland, Amazon (AWS) and Microsoft share EirGrid and CRU on Dublin Metro grid infrastructure, while Intel, Microsoft, Alphabet, and Amazon share fiscal exposure to the Irish Department of Finance.',
+        evidencedRelationshipIds: [
+          'rel-anthropic-amzn-dual-role-r1',
+          'rel-anthropic-googl-dual-role-r1',
+          'rel-anthropic-s1a-amzn-compute-r1',
+          'rel-anthropic-monarch-services-r1',
+          'rel-nscale-nvda-convertible-r1',
+          'rel-aws-dublin-eirgrid-dep-r1',
+          'rel-msft-dublin-eirgrid-dep-r1',
+        ],
+      },
+      {
+        questionId: 'inv-2-third-party-funding-dependencies',
+        question: '2. Which contractual arrangements depend on third-party funding?',
+        queryType: 'project_dependency_network',
+        findingSummary:
+          'Four documented arrangements depend on external debt, credit guarantees, or co-investment: (1) Nscale’s $44.6B Monarch contract with Anthropic depends on project financing and unsigned NVIDIA credit-support discussions (rel-monarch-credit-talks-r1, null principal) alongside NVIDIA’s $1.0B convertible note; (2) Nscale’s Ward County Texas lease depends on NVIDIA’s signed $860.3M lease guarantee; (3) Intel’s Fab 34 in Leixlip, Ireland relies on an $11.0B Semiconductor Co-Investment (SCJV) structure; and (4) Anthropic’s $895.4B multi-year compute commitments rely on IPO capital formation and hyperscaler convertible/Class N backing ($40.0B Alphabet cap).',
+        evidencedRelationshipIds: [
+          'rel-anthropic-monarch-services-r1',
+          'rel-monarch-credit-talks-r1',
+          'rel-nscale-nvda-convertible-r1',
+          'rel-ward-county-guarantee-r1',
+          'rel-intc-fab34-leixlip-scjv-r1',
+          'rel-anthropic-googl-dual-role-r1',
+        ],
+      },
+      {
+        questionId: 'inv-3-irish-economic-exposures',
+        question: '3. Which Irish economic exposures are documented?',
+        queryType: 'sector_connections',
+        findingSummary:
+          'Official Irish disclosures document three primary exposures: (1) Fiscal & Employment: multinational technology companies generate 17.0% of Irish income tax and >20.0% of corporate tax receipts (Dept of Finance, July 2026); (2) Electricity Grid Concentration: data centres consume 21.0% of Ireland’s national metered electricity, with AWS and Microsoft campuses in Dublin subject to CRU/EirGrid on-site dispatchable generation mandates; and (3) Semiconductor Capex: Intel’s Fab 34 in Leixlip, Co. Kildare carries an $11.0B SCJV capital commitment.',
+        evidencedRelationshipIds: [
+          'rel-ireland-dof-cbi-macro-exposure-r1',
+          'rel-aws-dublin-eirgrid-dep-r1',
+          'rel-msft-dublin-eirgrid-dep-r1',
+          'rel-intc-fab34-leixlip-scjv-r1',
+        ],
+      },
+      {
+        questionId: 'inv-4-evidenced-transmission-pathways',
+        question: '4. Which transmission pathways are directly evidenced?',
+        queryType: 'organisation_relationship_summary',
+        findingSummary:
+          'Three US-to-Ireland transmission channels are directly evidenced in primary filings and official regulatory reports: (A) Multinational Capex & Export Channel: US hyperscalers and chipmakers (Amazon, Microsoft, Alphabet, Intel) fund Irish data-centre and semiconductor infrastructure; (B) Fiscal & High-Earner Tax Channel: US tech valuation or earnings shocks transmit to Ireland’s Exchequer via the 17.0% income-tax and >20.0% corporate-tax concentration; and (C) Non-Bank Financial Intermediation (NBFI) & Private-Credit Channel: CBI FSR 2026 I identifies Dublin-domiciled investment funds and private credit as sensitive to US asset repricing, whereas domestic Irish retail banks have low direct AI exposure.',
+        evidencedRelationshipIds: [
+          'rel-ireland-dof-cbi-macro-exposure-r1',
+          'rel-intc-fab34-leixlip-scjv-r1',
+          'rel-aws-dublin-eirgrid-dep-r1',
+          'rel-msft-dublin-eirgrid-dep-r1',
+          'rel-quinn-irish-news-discovery-contagion-r1',
+        ],
+      },
+      {
+        questionId: 'inv-5-deteriorating-credit-and-investment-scenarios',
+        question: '5. What changes when hypothetical investment or credit conditions deteriorate?',
+        queryType: 'as_known_at_date_graph',
+        findingSummary:
+          'Under the Irish Department of Finance July 2026 COSMO scenarios, a -10% US tech equity shock reduces Irish Modified Domestic Demand (MDD) by -1.6% after 1 year (investment -4.5%, exports -2.6%, consumption -0.7%, employment growth -0.7 pp), while a severe -20% US equity shock reduces Irish MDD by -3.25%. In the AI infrastructure credit chain, tighter credit conditions pressure unsigned third-party guarantee negotiations (rel-monarch-credit-talks-r1) and elevate refinancing costs on neocloud debt without implying deterministic default losses from graph topology alone.',
+        evidencedRelationshipIds: [
+          'rel-ireland-dof-cbi-macro-exposure-r1',
+          'rel-monarch-credit-talks-r1',
+          'rel-anthropic-s1a-amzn-compute-r1',
+          'rel-loughton-msft-r2',
+        ],
+      },
+    ],
+    [],
+  );
 
   // Close mobile drawer on Escape
   useEffect(() => {
@@ -243,6 +401,111 @@ export default function MacroDataRoom({
   const selectRelationshipForDrawer = (relId: string) => {
     setSelectedRelationshipId(relId);
     setMobileDrawerOpen(true);
+  };
+
+  const handleReviewerDecision = (
+    rel: MacroRelationship,
+    decision: 'approved' | 'rejected',
+  ) => {
+    const nowMs = Date.now();
+    const reviewerId =
+      rel.reviewedBy ?? 'https://clerk.capital.aiguides.co.uk|reviewer_human';
+    const note =
+      reviewNoteInput.trim() ||
+      (decision === 'approved'
+        ? 'Approved for Convex graphProjectionOutbox promotion.'
+        : 'Rejected pending primary SEC filing verification.');
+
+    if (decision === 'approved') {
+      const gov = validateRelationshipGovernance(rel, dataset.relationships, sourcesById);
+      const projKey = computeDeterministicProjectionKey(
+        'public_research',
+        'public_research',
+        rel,
+      );
+      setReviewerDecisions((prev) => ({
+        ...prev,
+        [rel.relationshipId]: {
+          relationshipId: rel.relationshipId,
+          version: rel.version,
+          decision: gov.valid ? 'approved' : 'rejected',
+          reviewer: reviewerId,
+          reviewedAtMs: nowMs,
+          reviewNote: gov.valid ? note : `Governance blocked: ${gov.reasons.join(' ')}`,
+          sourceDocIds: rel.sourceDocIds,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+          projectionKey: gov.valid ? projKey : null,
+          outboxStatus: gov.valid ? 'projected' : 'not_enqueued',
+          lastError: gov.valid ? null : gov.reasons.join(' '),
+        },
+      }));
+    } else {
+      setReviewerDecisions((prev) => ({
+        ...prev,
+        [rel.relationshipId]: {
+          relationshipId: rel.relationshipId,
+          version: rel.version,
+          decision: 'rejected',
+          reviewer: reviewerId,
+          reviewedAtMs: nowMs,
+          reviewNote: note,
+          sourceDocIds: rel.sourceDocIds,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+          projectionKey: null,
+          outboxStatus: 'not_enqueued',
+          lastError: null,
+        },
+      }));
+    }
+  };
+
+  const handleSimulateDeadLetter = (rel: MacroRelationship) => {
+    const nowMs = Date.now();
+    const projKey = computeDeterministicProjectionKey(
+      'public_research',
+      'public_research',
+      rel,
+    );
+    setSimulatedOutboxFailureRelId(rel.relationshipId);
+    setReviewerDecisions((prev) => ({
+      ...prev,
+      [rel.relationshipId]: {
+        relationshipId: rel.relationshipId,
+        version: rel.version,
+        decision: 'approved',
+        reviewer: rel.reviewedBy ?? 'https://clerk.capital.aiguides.co.uk|reviewer_human',
+        reviewedAtMs: nowMs,
+        reviewNote: 'Outbox lease attempt failed during simulated TypeDB downtime.',
+        sourceDocIds: rel.sourceDocIds,
+        epistemicStatus: rel.epistemicStatus,
+        contractualStatus: rel.contractualStatus,
+        projectionKey: projKey,
+        outboxStatus: 'dead_letter',
+        lastError: 'Simulated TypeDB HTTP timeout (attempt 3/3 -> dead_letter)',
+      },
+    }));
+  };
+
+  const handleReplayFromCheckpoint = () => {
+    const nowMs = Date.now();
+    setSimulatedOutboxFailureRelId(null);
+    setLastReplayAtMs(nowMs);
+    setReviewerDecisions((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        const rec = next[key]!;
+        if (rec.decision === 'approved') {
+          next[key] = {
+            ...rec,
+            outboxStatus: 'projected',
+            lastError: null,
+          };
+        }
+      }
+      return next;
+    });
   };
 
   const renderEpistemicBadge = (status: EpistemicStatus) => (
@@ -421,6 +684,117 @@ export default function MacroDataRoom({
             </div>
           ))}
         </div>
+
+        {/* Stage 4 Human Review & Outbox Promotion Controls */}
+        <div
+          style={{
+            marginTop: '14px',
+            padding: '12px',
+            background: '#f6f8fb',
+            border: '1px solid #d8e1ec',
+            borderRadius: '6px',
+          }}
+          data-testid="drawer-reviewer-promotion"
+        >
+          <strong
+            style={{
+              fontSize: '11px',
+              color: '#192434',
+              display: 'block',
+              marginBottom: '6px',
+            }}
+          >
+            HUMAN REVIEW &amp; OUTBOX PROMOTION (STAGE 4)
+          </strong>
+          <p style={{ fontSize: '11px', color: '#4c5b6d', margin: '0 0 8px' }}>
+            Approving a source document never auto-confirms extracted relationships. Each
+            hyperedge requires explicit reviewer sign-off before promotion into{' '}
+            <code>graphProjectionOutbox</code> and hosted TypeDB Cloud (
+            <code>aci_macro_intelligence_staging</code>).
+          </p>
+          <label
+            htmlFor={`review-note-${rel.relationshipId}`}
+            style={{ fontSize: '10px', fontWeight: 600, display: 'block', marginBottom: '4px' }}
+          >
+            Reviewer Decision Rationale:
+          </label>
+          <input
+            id={`review-note-${rel.relationshipId}`}
+            type="text"
+            data-testid="reviewer-note-input"
+            value={reviewNoteInput}
+            onChange={(e) => setReviewNoteInput(e.target.value)}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              fontSize: '11px',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              border: '1px solid #cbd5e1',
+              marginBottom: '8px',
+            }}
+          />
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="button primary"
+              data-testid="approve-promote-relationship-btn"
+              style={{ padding: '6px 10px', fontSize: '11px' }}
+              onClick={() => handleReviewerDecision(rel, 'approved')}
+            >
+              Approve &amp; Promote to Outbox
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              data-testid="reject-relationship-btn"
+              style={{ padding: '6px 10px', fontSize: '11px' }}
+              onClick={() => handleReviewerDecision(rel, 'rejected')}
+            >
+              Reject Relationship
+            </button>
+          </div>
+          {reviewerDecisions[rel.relationshipId] && (
+            <div
+              data-testid="drawer-review-outcome"
+              style={{
+                marginTop: '8px',
+                padding: '8px',
+                background:
+                  reviewerDecisions[rel.relationshipId]!.decision === 'approved'
+                    ? '#edf7ed'
+                    : '#fff4f4',
+                border: '1px solid #c6e0c6',
+                borderRadius: '4px',
+                fontSize: '11px',
+              }}
+            >
+              <div>
+                <b>Decision:</b>{' '}
+                {reviewerDecisions[rel.relationshipId]!.decision.toUpperCase()} ·{' '}
+                <b>Outbox:</b> {reviewerDecisions[rel.relationshipId]!.outboxStatus}
+              </div>
+              <div>
+                <b>Reviewer:</b>{' '}
+                <code>{reviewerDecisions[rel.relationshipId]!.reviewer}</code> ·{' '}
+                {formatUtcDate(reviewerDecisions[rel.relationshipId]!.reviewedAtMs)}
+              </div>
+              {reviewerDecisions[rel.relationshipId]!.projectionKey && (
+                <div style={{ wordBreak: 'break-all', fontSize: '10px', color: '#435365' }}>
+                  <b>Key:</b>{' '}
+                  <code>
+                    {reviewerDecisions[rel.relationshipId]!.projectionKey!.slice(0, 28)}…
+                  </code>
+                </div>
+              )}
+              {reviewerDecisions[rel.relationshipId]!.lastError && (
+                <div style={{ color: '#9c2b2b', marginTop: '4px' }}>
+                  <b>Failure:</b> {reviewerDecisions[rel.relationshipId]!.lastError}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -442,8 +816,18 @@ export default function MacroDataRoom({
           <span className="dr-pill live" data-testid="typedb-live-pill">
             TypeDB Server:{' '}
             {liveTypeDbStatus.reachable
-              ? `LIVE (${liveTypeDbStatus.version})`
+              ? `LIVE (${liveTypeDbStatus.version})${
+                  liveTypeDbStatus.databaseName
+                    ? ` · ${liveTypeDbStatus.databaseName}`
+                    : ''
+                }${liveTypeDbStatus.tlsEnabled ? ' · TLS' : ''}`
               : 'MIRROR FALLBACK'}
+          </span>
+          <span className="dr-pill" data-testid="projection-lag-pill">
+            Outbox:{' '}
+            {simulatedOutboxFailureRelId
+              ? 'STALE (1 retrying / dead_letter)'
+              : `${dataset.relationships.length}/${dataset.relationships.length} Projected (0ms lag)`}
           </span>
           <span className="dr-pill">Schema: {dataset.schemaVersion}</span>
           <span className="dr-pill guardrail">
@@ -530,7 +914,7 @@ export default function MacroDataRoom({
 
       {/* Main Two-Column Workspace */}
       <div className="data-room-body">
-        <main>
+        <main style={{ minWidth: 0, overflowX: 'hidden' }}>
           {/* KPI Strip */}
           <section className="dr-kpi-strip" aria-label="Knowledge Graph Telemetry">
             <div className="dr-kpi-card">
@@ -724,6 +1108,464 @@ export default function MacroDataRoom({
               <div className="dr-non-causation-banner" data-testid="non-causation-notice">
                 <strong>Epistemic & Non-Causation Guardrail:</strong>{' '}
                 {tldr.nonCausationNotice}
+              </div>
+
+              {/* MACRO CASE 001: AI INFRASTRUCTURE CONTAGION, US TO IRELAND */}
+              <div
+                data-testid="macro-case-001-workspace"
+                style={{
+                  marginTop: '20px',
+                  borderTop: '2px solid #d4dde8',
+                  paddingTop: '18px',
+                }}
+              >
+                <div className="dr-card-header" style={{ marginBottom: '12px' }}>
+                  <div>
+                    <span className="eyebrow">
+                      CASE ID: {MACRO_CASE_001_ID} · HOSTED TYPEDB CLOUD DOSSIER
+                    </span>
+                    <h2 style={{ fontSize: '17px', marginTop: '4px' }}>
+                      Macro Case 001: AI Infrastructure Contagion, US to Ireland
+                    </h2>
+                    <p style={{ fontSize: '12px', color: '#425265', marginTop: '4px' }}>
+                      Secondary-source discovery from Eamon Quinn’s 8 Nov 2026{' '}
+                      <i>Irish News</i> article (<code>irish-news-quinn-2026-11-08</code>,
+                      retained strictly as <code>reported</code>), verified against primary
+                      SEC filings (Anthropic Form S-1 &amp; S-1/A, Nscale Form S-1, Intel Q3
+                      2026 10-Q) and primary Irish regulatory publications (CBI FSR 2026 I,
+                      Governor Gabriel Makhlouf’s 2 Nov 2026 Croke Park speech, Department of
+                      Finance July 2026 COSMO analysis, CRU/EirGrid).
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {renderEpistemicBadge('reported')}
+                    {renderEpistemicBadge('confirmed')}
+                    {renderEpistemicBadge('hypothetical')}
+                  </div>
+                </div>
+
+                {/* Executive Case TL;DR & Governance Rule */}
+                <div
+                  data-testid="macro-case-001-tldr"
+                  style={{
+                    background: '#f5f8fc',
+                    border: '1px solid #d5e0ec',
+                    borderRadius: '6px',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    fontSize: '12px',
+                    color: '#233243',
+                  }}
+                >
+                  <strong>Executive Case TL;DR &amp; Discovery Governance:</strong> Eamon
+                  Quinn’s 8 November 2026 <i>Irish News</i> article serves strictly as a{' '}
+                  <b>secondary-source discovery trigger</b> (
+                  <code>rel-quinn-irish-news-discovery-contagion-r1</code>,{' '}
+                  <code>epistemicStatus: &quot;reported&quot;</code>) and is{' '}
+                  <b>never promoted to a confirmed graph edge on its own</b>. Primary SEC and
+                  Irish official disclosures confirm: (1) Anthropic’s Form S-1/A (2 Nov 2026)
+                  discloses <b>USD 895.40B</b> in aggregate signed multi-year compute
+                  commitments (inclusive of Nscale’s <b>USD 44.60B</b> Monarch contract) and
+                  a 9M 2026 GAAP net loss of <b>-USD 104.00B</b> alongside dual-role backing
+                  from Amazon and Alphabet (up to <b>USD 40.00B</b>); (2) Ireland’s
+                  multinational tech sector accounts for <b>17.0%</b> of income tax and{' '}
+                  <b>&gt;20.0%</b> of corporate tax receipts while data centres consume{' '}
+                  <b>21.0%</b> of national electricity; and (3) Department of Finance COSMO
+                  scenarios model a <b>-1.6%</b> Irish MDD contraction under a -10% US tech
+                  equity shock and <b>-3.25%</b> under a severe -20% shock, while Governor
+                  Makhlouf judges domestic Irish retail banks &quot;not that exposed to
+                  AI&quot; directly.
+                </div>
+
+                {/* Non-Double-Counting Financial Commitment Ledger */}
+                <div
+                  className="dr-tldr-section"
+                  data-testid="macro-case-001-commitment-ledger"
+                  style={{ marginBottom: '16px' }}
+                >
+                  <h3>
+                    Non-Double-Counting Financial Commitment Ledger (Zero Sub-Commitment
+                    Duplication)
+                  </h3>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                      gap: '10px',
+                      marginBottom: '10px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #dce4ee',
+                        borderRadius: '6px',
+                        padding: '10px',
+                      }}
+                    >
+                      <small style={{ color: '#5c6b7c', fontSize: '10px' }}>
+                        DEDUPLICATED COMPUTE COMMITMENTS
+                      </small>
+                      <div
+                        style={{ fontSize: '16px', fontWeight: 700, color: '#1b3a24' }}
+                        data-testid="deduplicated-compute-usd"
+                      >
+                        {formatUsdPrincipal(
+                          commitmentLedger.deduplicatedComputeCommitmentsUsd,
+                          'USD',
+                        )}
+                      </div>
+                      <small style={{ fontSize: '10px', color: '#4d5d70' }}>
+                        Anthropic S-1/A envelope (naive sum:{' '}
+                        {formatUsdPrincipal(
+                          commitmentLedger.naiveComputeCommitmentsSumUsd,
+                          'USD',
+                        )}
+                        )
+                      </small>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #dce4ee',
+                        borderRadius: '6px',
+                        padding: '10px',
+                      }}
+                    >
+                      <small style={{ color: '#5c6b7c', fontSize: '10px' }}>
+                        DOUBLE-COUNT PREVENTED
+                      </small>
+                      <div
+                        style={{ fontSize: '16px', fontWeight: 700, color: '#8a4b0f' }}
+                        data-testid="double-count-prevented-usd"
+                      >
+                        {formatUsdPrincipal(
+                          commitmentLedger.doubleCountPreventedUsd,
+                          'USD',
+                        )}
+                      </div>
+                      <small style={{ fontSize: '10px', color: '#4d5d70' }}>
+                        Nscale Monarch $44.60B excluded from additive total
+                      </small>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #dce4ee',
+                        borderRadius: '6px',
+                        padding: '10px',
+                      }}
+                    >
+                      <small style={{ color: '#5c6b7c', fontSize: '10px' }}>
+                        SIGNED DEBT &amp; CO-INVESTMENT
+                      </small>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#192434' }}>
+                        {formatUsdPrincipal(
+                          commitmentLedger.signedDebtAndCoInvestmentUsd,
+                          'USD',
+                        )}
+                      </div>
+                      <small style={{ fontSize: '10px', color: '#4d5d70' }}>
+                        Intel Fab 34 $11.00B SCJV + Nscale $1.00B NVIDIA note
+                      </small>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #dce4ee',
+                        borderRadius: '6px',
+                        padding: '10px',
+                      }}
+                    >
+                      <small style={{ color: '#5c6b7c', fontSize: '10px' }}>
+                        SIGNED GUARANTEES &amp; BACKING CAPS
+                      </small>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#192434' }}>
+                        {formatUsdPrincipal(commitmentLedger.signedGuaranteesUsd, 'USD')} /{' '}
+                        {formatUsdPrincipal(
+                          commitmentLedger.signedEquityAndConvertibleBackingCapUsd,
+                          'USD',
+                        )}
+                      </div>
+                      <small style={{ fontSize: '10px', color: '#4d5d70' }}>
+                        Ward County $860M guarantee · Alphabet $40.00B cap
+                      </small>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5 Approved Graph Investigations */}
+                <div
+                  className="dr-tldr-section"
+                  data-testid="macro-case-001-investigations"
+                  style={{ marginBottom: '16px' }}
+                >
+                  <h3>
+                    5 Approved TypeDB Cloud Graph Investigations (Live{' '}
+                    <code>aci_macro_intelligence_staging</code>)
+                  </h3>
+                  <div className="dr-tldr-grid">
+                    {case001Investigations.map((inv) => (
+                      <div
+                        key={inv.questionId}
+                        data-testid={`case001-inv-${inv.questionId}`}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #dce4ee',
+                          borderRadius: '6px',
+                          padding: '10px 12px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '8px',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          <strong style={{ fontSize: '12px', color: '#192434' }}>
+                            {inv.question}
+                          </strong>
+                          <span className="tag green">{inv.queryType}</span>
+                        </div>
+                        <p style={{ fontSize: '11px', color: '#2f3e50', margin: '0 0 8px' }}>
+                          {inv.findingSummary}
+                        </p>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {inv.evidencedRelationshipIds.map((relId) => (
+                            <button
+                              key={relId}
+                              type="button"
+                              className="button secondary"
+                              style={{ padding: '4px 8px', fontSize: '10px' }}
+                              onClick={() => selectRelationshipForDrawer(relId)}
+                            >
+                              {relId} →
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scenario Comparison Table (Observed Baseline vs -10% Central vs -20% Severe) */}
+                <div
+                  className="dr-tldr-section"
+                  data-testid="macro-case-001-scenarios"
+                  style={{ marginBottom: '16px' }}
+                >
+                  <h3>
+                    Scenario Comparison: Observed Baseline vs Department of Finance AI
+                    Correction Scenarios
+                  </h3>
+                  <div className="table-scroll" style={{ overflowX: 'auto', maxWidth: '100%' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>SCENARIO &amp; HORIZON</th>
+                          <th>CLASSIFICATION</th>
+                          <th>US EQUITY SHOCK</th>
+                          <th>IRISH MDD IMPACT</th>
+                          <th>INVESTMENT / EXPORTS / CONSUMPTION / JOBS</th>
+                          <th>DOMESTIC BANKING &amp; CREDIT CHANNEL</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {MACRO_CASE_001_SCENARIOS.map((sc) => (
+                          <tr key={sc.scenarioId} data-testid={`scenario-row-${sc.scenarioId}`}>
+                            <td>
+                              <b>{sc.name}</b>
+                              <div style={{ fontSize: '10px', color: '#5c6979' }}>
+                                {sc.horizonLabel}
+                              </div>
+                            </td>
+                            <td>
+                              <span
+                                className={`tag ${
+                                  sc.classification === 'observed' ? 'green' : 'amber'
+                                }`}
+                              >
+                                {sc.classification}
+                              </span>
+                            </td>
+                            <td>{sc.usEquityShockPct}%</td>
+                            <td>
+                              <b>{sc.irishMddImpactPct}%</b>
+                            </td>
+                            <td style={{ fontSize: '11px' }}>
+                              {sc.irishInvestmentImpactPct !== null
+                                ? `Inv: ${sc.irishInvestmentImpactPct}% · Exp: ${sc.irishExportsImpactPct}% · Cons: ${sc.irishConsumptionImpactPct}% · Jobs: ${sc.irishEmploymentGrowthDeltaPp} pp`
+                                : 'Observed baseline (no shock applied)'}
+                            </td>
+                            <td style={{ fontSize: '11px' }}>
+                              {sc.domesticBankingDirectExposure}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 6-Class Claim Classification & Financial Commitment Distinction Table */}
+                <div
+                  className="dr-tldr-section"
+                  data-testid="macro-case-001-claims"
+                  style={{ marginBottom: '16px' }}
+                >
+                  <h3>
+                    Extracted Claims Register (6-Class Taxonomy &amp; Instrument Distinction:{' '}
+                    {MACRO_CASE_001_CLAIMS.length} Verified Claims)
+                  </h3>
+                  <div className="table-scroll" style={{ overflowX: 'auto', maxWidth: '100%' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>CLAIM ID</th>
+                          <th>CLASSIFICATION</th>
+                          <th>COMMITMENT BUCKET</th>
+                          <th>QUANTITATIVE VALUE &amp; AS-OF</th>
+                          <th>SUMMARY &amp; ASSUMPTIONS</th>
+                          <th>GRAPH PROMOTION</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {MACRO_CASE_001_CLAIMS.map((cl) => (
+                          <tr key={cl.claimId} data-testid={`claim-row-${cl.claimId}`}>
+                            <td>
+                              <code>{cl.claimId}</code>
+                            </td>
+                            <td>
+                              <span
+                                className={`tag ${
+                                  cl.classification === 'observed'
+                                    ? 'green'
+                                    : cl.classification === 'modelled_scenario' ||
+                                        cl.classification === 'reported'
+                                      ? 'amber'
+                                      : ''
+                                }`}
+                              >
+                                {cl.classification}
+                              </span>
+                            </td>
+                            <td>
+                              <code>{cl.commitmentBucket ?? 'macro_fiscal_exposure'}</code>
+                            </td>
+                            <td style={{ fontSize: '11px' }}>
+                              <b>
+                                {cl.quantitativeValue !== null
+                                  ? `${cl.quantitativeValue.toLocaleString()} ${cl.unit ?? ''}`
+                                  : 'Null (Undisclosed)'}
+                              </b>
+                              <div style={{ fontSize: '10px', color: '#5c6979' }}>
+                                As of {cl.asOfDate}
+                              </div>
+                            </td>
+                            <td style={{ fontSize: '11px' }}>
+                              {cl.title}
+                              <div style={{ fontSize: '10px', color: '#5c6979' }}>
+                                <i>Assumptions:</i> {cl.assumptionsAndBasis}
+                              </div>
+                            </td>
+                            <td>
+                              {cl.relationshipId ? (
+                                <button
+                                  type="button"
+                                  className="text-link"
+                                  onClick={() =>
+                                    selectRelationshipForDrawer(cl.relationshipId!)
+                                  }
+                                >
+                                  <code>{cl.relationshipId}</code> (
+                                  {cl.promotedToConfirmedGraph
+                                    ? 'confirmed'
+                                    : cl.classification}
+                                  )
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '10px', color: '#6b7786' }}>
+                                  Scenario / Observation only
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* As-Known-At-Date Historical Cutoff Reconstructor */}
+                <div
+                  className="dr-tldr-section"
+                  data-testid="macro-case-001-cutoff-reconstructor"
+                >
+                  <h3>
+                    As-Known-At-Date Historical Cutoff Reconstruction (Publication Clock)
+                  </h3>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                      gap: '10px',
+                    }}
+                  >
+                    {case001Cutoffs.map((cut) => (
+                      <div
+                        key={cut.cutoffDateIso}
+                        data-testid={`cutoff-card-${cut.cutoffDateIso}`}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #dce4ee',
+                          borderRadius: '6px',
+                          padding: '10px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          <strong style={{ fontSize: '12px' }}>{cut.cutoffDateIso}</strong>
+                          <span className="tag green">
+                            {cut.activeRelationshipCount} Active Edges
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '11px', color: '#39485a', margin: '0 0 8px' }}>
+                          {cut.label}
+                        </p>
+                        <div style={{ fontSize: '10px', color: '#526273', marginBottom: '8px' }}>
+                          Anthropic S-1 Known:{' '}
+                          <b>{cut.anthropicS1DisclosuresKnown ? 'YES' : 'NO'}</b> · Makhlouf
+                          Speech: <b>{cut.makhloufSpeechKnown ? 'YES' : 'NO'}</b> · Quinn
+                          Article: <b>{cut.irishNewsDiscoveryKnown ? 'YES' : 'NO'}</b>
+                        </div>
+                        <button
+                          type="button"
+                          className="button secondary"
+                          data-testid={`apply-cutoff-${cut.cutoffDateIso}`}
+                          style={{ padding: '5px 8px', fontSize: '10px', width: '100%' }}
+                          onClick={() => {
+                            setAsOfMs(cut.cutoffMs);
+                            setTemporalBasis('publication');
+                          }}
+                        >
+                          Reconstruct Graph at {cut.cutoffDateIso} →
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </section>
           )}
@@ -1108,6 +1950,128 @@ export default function MacroDataRoom({
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Durable Outbox & Reviewer Promotion Register (Stages 4 & 5) */}
+              <div
+                className="dr-tldr-section"
+                style={{ marginBottom: '16px' }}
+                data-testid="outbox-projection-register"
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: 0 }}>
+                      Convex Append-Only Graph Outbox &amp; Hosted TypeDB Cloud Sync (
+                      <code>aci_macro_intelligence_staging</code>)
+                    </h3>
+                    <p style={{ fontSize: '11px', color: '#5c6979', margin: '4px 0 0' }}>
+                      Deterministic SHA-256 <code>projectionKey</code> · Lease-protected
+                      worker · Non-blocking downtime isolation · Checkpoint replay
+                      {lastReplayAtMs
+                        ? ` · Last Replayed ${formatUtcDate(lastReplayAtMs)}`
+                        : ''}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      data-testid="simulate-outbox-failure-btn"
+                      style={{ padding: '6px 10px', fontSize: '11px' }}
+                      onClick={() => handleSimulateDeadLetter(selectedRelationship)}
+                    >
+                      Simulate Outbox Dead-Letter
+                    </button>
+                    <button
+                      type="button"
+                      className="button primary"
+                      data-testid="replay-checkpoint-btn"
+                      style={{ padding: '6px 10px', fontSize: '11px' }}
+                      onClick={handleReplayFromCheckpoint}
+                    >
+                      Replay Outbox from Checkpoint 0
+                    </button>
+                  </div>
+                </div>
+
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>SEQ</th>
+                        <th>RELATIONSHIP ID</th>
+                        <th>EPISTEMIC / CONTRACTUAL</th>
+                        <th>REVIEWER STATUS</th>
+                        <th>DETERMINISTIC PROJECTION KEY</th>
+                        <th>OUTBOX STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dataset.relationships.slice(0, 6).map((rel, idx) => {
+                        const customDecision = reviewerDecisions[rel.relationshipId];
+                        const pKey = computeDeterministicProjectionKey(
+                          'public_research',
+                          'public_research',
+                          rel,
+                        );
+                        const status =
+                          customDecision?.outboxStatus ??
+                          (rel.reviewerStatus === 'rejected'
+                            ? 'not_enqueued'
+                            : 'projected');
+                        return (
+                          <tr key={rel.relationshipId}>
+                            <td>#{idx + 1}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="text-link"
+                                onClick={() =>
+                                  selectRelationshipForDrawer(rel.relationshipId)
+                                }
+                              >
+                                <code>{rel.relationshipId}</code> (v{rel.version})
+                              </button>
+                            </td>
+                            <td>
+                              {renderEpistemicBadge(rel.epistemicStatus)} ·{' '}
+                              <span className="tag">{rel.contractualStatus}</span>
+                            </td>
+                            <td>
+                              {customDecision ? customDecision.decision : rel.reviewerStatus}
+                            </td>
+                            <td>
+                              <code>{pKey.slice(0, 24)}…</code>
+                            </td>
+                            <td>
+                              <span
+                                className={`tag ${
+                                  status === 'projected'
+                                    ? 'green'
+                                    : status === 'dead_letter'
+                                      ? 'amber'
+                                      : ''
+                                }`}
+                                data-testid={`outbox-status-${rel.relationshipId}`}
+                              >
+                                {status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Quantitative Benchmark Table */}

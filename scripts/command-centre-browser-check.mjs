@@ -34,6 +34,11 @@ try{
    await expect(page.getByTestId('layer-evidence')).toBeVisible();
    await expect(page.getByTestId('layer-briefing')).toBeVisible();
    await expect(page.getByTestId('agent-ops-execution-paths')).toBeVisible();
+   await expect(page.getByTestId('agent-ops-graph-projection')).toBeVisible();
+   await expect(page.getByTestId('agent-ops-environment-audit')).toBeVisible();
+   await expect(page.getByTestId('agent-ops-run-audit-trail')).toBeVisible();
+   await expect(page.getByTestId('env-audit-remote_ai_models')).not.toHaveClass(/cc-ok/);
+   await expect(page.getByTestId('env-audit-live_demo_execution')).toContainText('intentionally_disabled');
    await expect(page.getByTestId('job-env-market_data_collect')).toContainText('Env: remote');
    await expect(page.getByTestId('missing-evidence-resolver')).toBeVisible();
    await expect(page.getByTestId('forward-research-panel')).toBeVisible();
@@ -51,6 +56,20 @@ try{
  await expect(page.getByTestId('evidence-widget').getByRole('link',{name:/Case 006/})).toHaveAttribute('href','/recovery#participation');
  const summary=page.locator('.cc-status-bar > summary');await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.cc-status-bar')).toHaveAttribute('open','');
  await expect(page.locator('[data-alert=market]').getByRole('link',{name:/View price evidence/})).toHaveAttribute('href','/policy-risk#sources');
+ await page.getByRole('button',{name:'Connections & settings',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Connections and settings'})).toBeVisible();
+ await expect(page.getByTestId('workspace-connections-summary')).toBeVisible();
+ await expect(page.getByTestId('workspace-connections-list')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-convex_database')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-sec_edgar')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-market_data_eod')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-typedb_cloud')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-trading212_broker')).toBeVisible();
+ await expect(page.getByTestId('workspace-conn-trade_execution')).toContainText('Intentionally disabled');
+ await expect(page.getByTestId('workspace-synthetic-reset-section')).toContainText('Synthetic/demo only');
+ await page.screenshot({path:'test-results/command-centre/workspace-connections-modal-1440.png'});
+ await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Connections and settings'})).toHaveCount(0);
 
  // Labelled synthetic fixtures (development only) for populated layouts.
  for(const w of WIDTHS){await page.setViewportSize({width:w,height:1000});

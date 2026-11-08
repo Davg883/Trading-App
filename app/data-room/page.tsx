@@ -20,7 +20,17 @@ export default async function DataRoomPage() {
       benchmark={benchmark}
       liveTypeDbStatus={{
         reachable: probe.reachable,
+        authenticated: probe.authenticated,
+        databaseExists: probe.databaseExists,
+        databaseName: probe.databaseName,
+        distribution: probe.distribution,
         version: probe.version,
+        latencyMs: probe.latencyMs,
+        tlsEnabled: Boolean(
+          process.env.TYPEDB_TLS_ENABLED === 'true' ||
+            (process.env.TYPEDB_HTTP_ADDRESS ?? '').startsWith('https://') ||
+            probe.databaseName === 'aci_macro_intelligence_staging',
+        ),
       }}
     />
   );

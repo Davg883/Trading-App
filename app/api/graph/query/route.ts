@@ -53,9 +53,17 @@ export async function GET(req: NextRequest) {
       schemaVersion: dataset.schemaVersion,
       typedbServer: {
         reachable: probe.reachable,
+        authenticated: probe.authenticated,
+        databaseExists: probe.databaseExists,
+        databaseName: probe.databaseName,
+        distribution: probe.distribution,
         version: probe.version,
+        latencyMs: probe.latencyMs,
         httpEndpointConfigured: true,
-        tlsEnabled: Boolean(process.env.TYPEDB_TLS_ENABLED === 'true'),
+        tlsEnabled: Boolean(
+          process.env.TYPEDB_TLS_ENABLED === 'true' ||
+            (process.env.TYPEDB_HTTP_ADDRESS ?? '').startsWith('https://'),
+        ),
       },
       counts: {
         organisations: dataset.organisations.length,

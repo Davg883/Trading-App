@@ -74,9 +74,10 @@ export function AgentOperationsPanel({
       <dd data-testid="agent-ops-pending">{health.pendingVerificationCount} staged item{health.pendingVerificationCount===1?'':'s'}</dd>
      </div>
      <div className="cc-strip-item">
-      <dt>Model cost (today / ceiling)</dt>
+      <dt>Paid AI API usage (today / ceiling)</dt>
       <dd data-testid="agent-ops-cost">
-       Est. £{health.dailyCostGbp.estimated.toFixed(4)} · Actual £{health.dailyCostGbp.actual.toFixed(4)} / £{health.dailyCostGbp.ceiling.toFixed(2)}
+       Est. ?{health.dailyCostGbp.estimated.toFixed(4)} ? Actual ?{health.dailyCostGbp.actual.toFixed(4)} / ?{health.dailyCostGbp.ceiling.toFixed(2)}
+       <small style={{display:'block',opacity:0.75}}>Variable LLM/data API spend only; excludes base Vercel, Convex &amp; TypeDB Cloud hosting</small>
       </dd>
      </div>
      <div className="cc-strip-item">
@@ -190,12 +191,69 @@ export function AgentOperationsPanel({
     </table>
    </div>
 
+   {health.graphProjection&&(
+    <div className="cc-strip" style={{marginTop:'12px'}} data-testid="agent-ops-graph-projection">
+     <dl>
+      <div className="cc-strip-item">
+       <dt>TypeDB Cloud graph</dt>
+       <dd>
+        <code>{health.graphProjection.databaseName}</code> ({health.graphProjection.productionIsolated?'production isolated':'staging'})
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Outbox reconciliation</dt>
+       <dd data-testid="agent-ops-graph-reconciled">
+        {health.graphProjection.projectedCount} projected · seq #{health.graphProjection.lastProjectedSequence} · {health.graphProjection.reconciled?'Reconciled':'Pending sync'}
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Projection lag &amp; dead-letter (lag = max(now - oldest pending/retrying createdAtMs), 0ms when empty)</dt>
+       <dd>
+        {health.graphProjection.maxProjectionLagMs}ms lag · {health.graphProjection.deadLetterCount} dead-letter · {health.graphProjection.pendingCount} pending
+       </dd>
+      </div>
+      <div className="cc-strip-item">
+       <dt>Graph governance</dt>
+       <dd>
+        {health.graphProjection.humanReviewCount} relationship review(s) · <Link href="/data-room">Open Macro Data Room →</Link>
+       </dd>
+      </div>
+     </dl>
+    </div>
+   )}
+
+   {health.environmentAudit&&health.environmentAudit.length>0&&(
+    <div className="cc-widgets" style={{marginTop:'12px'}} data-testid="agent-ops-environment-audit">
+     {health.environmentAudit.map(svc=>{
+      const tone=
+       svc.status==='connected'
+        ?'ok'
+        :svc.status==='configured_not_tested'||svc.status==='intentionally_disabled'||svc.status==='degraded'
+         ?'warn'
+         :'alert';
+      return (
+       <article
+        key={svc.serviceId}
+        className={`cc-widget cc-${tone}`}
+        data-testid={`env-audit-${svc.serviceId}`}
+       >
+        <h3>{svc.name}</h3>
+        <p>
+         <strong data-testid={`env-audit-status-${svc.serviceId}`}>{svc.status}</strong> · <code>{svc.environmentTarget}</code> — {svc.detail}
+        </p>
+       </article>
+      );
+     })}
+    </div>
+   )}
+
    {health.providers.length>0&&(
     <div className="cc-widgets" style={{marginTop:'12px'}} data-testid="agent-ops-providers">
      {health.providers.map(p=>(
       <article
        key={p.providerId}
        className={`cc-widget cc-${p.status==='credentials_expired'||p.status==='outage'?'alert':p.status==='unconfigured'||p.status==='rate_limited'?'warn':'ok'}`}
+       data-testid={`provider-${p.providerId}`}
       >
        <h3>{p.label} ({p.category.replace('_',' ')})</h3>
        <p>
@@ -221,6 +279,57 @@ export function AgentOperationsPanel({
         <strong>{ep.deployment.replace(/_/g,' ')} ({ep.status})</strong> — {ep.detail}
        </p>
       </article>
+     ))}
+    </div>
+   )}
+
+   {health.recentRuns&&health.recentRuns.length>0&&(
+    <div style={{marginTop:'12px'}} data-testid="agent-ops-run-audit-trail">
+     <h3 style={{fontSize:'0.95rem',marginBottom:'8px'}}>Expandable run audit trail ({health.recentRuns.slice(0,8).length} most recent cloud executions)</h3>
+     {health.recentRuns.slice(0,8).map(run=>(
+      <details
+       key={run.runId}
+       className="cc-collapsible"
+       style={{marginBottom:'6px'}}
+       data-testid={`run-audit-${run.runId}`}
+      >
+       <summary>
+        <strong>{run.jobKey}</strong> · <code>{run.runId}</code> · {run.status} · {iso(run.startedAt)}
+        {run.processingDurationMs!==null?` (${run.processingDurationMs}ms)`:''} · {run.sourcesDiscovered} src / {run.evidencePromoted} promoted
+       </summary>
+       <div className="cc-strip" style={{marginTop:'6px'}}>
+        <dl>
+         <div className="cc-strip-item">
+          <dt>Window &amp; environment</dt>
+          <dd>
+           Start {iso(run.startedAt)} → Finish {run.finishedAt?iso(run.finishedAt):'in progress'} ({run.environment})
+          </dd>
+         </div>
+         <div className="cc-strip-item">
+          <dt>Cursor transition</dt>
+          <dd style={{wordBreak:'break-all'}}>
+           <code>{run.cursorBefore??'null'}</code> → <code>{run.cursorAfter??'null'}</code>
+          </dd>
+         </div>
+         <div className="cc-strip-item">
+          <dt>Records &amp; evidence</dt>
+          <dd>
+           {run.sourcesDiscovered} discovered · {run.evidenceStaged} staged · {run.evidencePromoted} promoted · {run.duplicatesSkipped} skipped · {run.pendingVerification} pending review
+          </dd>
+         </div>
+         <div className="cc-strip-item">
+          <dt>Model / collector &amp; cost</dt>
+          <dd>
+           {run.modelVersion??'deterministic-collector (non-AI)'} · {run.providerRequestsCount} HTTP req(s) · Est. £{run.estimatedCostGbp.toFixed(4)} / Actual £{(run.actualCostGbp??0).toFixed(4)}
+          </dd>
+         </div>
+        </dl>
+        <p style={{margin:'6px 0 0',fontSize:'0.85rem'}}>
+         <strong>Audit summary:</strong> {run.summary}
+         {run.errorCode?` · Error: ${run.errorCode}`:''}
+        </p>
+       </div>
+      </details>
      ))}
     </div>
    )}

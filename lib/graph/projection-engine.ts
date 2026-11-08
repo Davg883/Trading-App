@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import {
   MACRO_GRAPH_SCHEMA_VERSION,
   macroGraphDatasetSchema,
@@ -6,6 +5,7 @@ import {
   type MacroRelationship,
   type VisibilityScope,
 } from './contracts';
+import { sha256Hex } from '../remote-ops/staging-validator';
 import { validateRelationshipGovernance } from './identity-governance';
 import {
   compileEnergyAssetPutTypeQl,
@@ -98,7 +98,7 @@ export function computeDeterministicProjectionKey(
     publishedAtMs: relationship.publishedAtMs,
     receivedAtMs: relationship.receivedAtMs,
   });
-  return `proj:${crypto.createHash('sha256').update(payload).digest('hex')}`;
+  return `proj:${sha256Hex(payload)}`;
 }
 
 export function computeRetryBackoffMs(attemptCount: number, baseMs = 5_000): number {

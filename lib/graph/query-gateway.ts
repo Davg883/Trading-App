@@ -1,11 +1,11 @@
-import fs from 'fs';
-import path from 'path';
+import initialAcceptanceDatasetJson from '../../data/graph/initial-acceptance-dataset.json';
 import {
   MACRO_GRAPH_SCHEMA_VERSION,
   graphQueryRequestSchema,
   macroGraphDatasetSchema,
   type GraphEdgeView,
   type GraphNodeView,
+  type GraphProjectionStatusSummary,
   type GraphQueryRequest,
   type GraphQueryResponse,
   type MacroGraphDataset,
@@ -23,14 +23,7 @@ let cachedInitialDataset: MacroGraphDataset | null = null;
 
 export function loadInitialAcceptanceDataset(): MacroGraphDataset {
   if (cachedInitialDataset) return cachedInitialDataset;
-  const datasetPath = path.join(
-    process.cwd(),
-    'data',
-    'graph',
-    'initial-acceptance-dataset.json',
-  );
-  const raw = JSON.parse(fs.readFileSync(datasetPath, 'utf8'));
-  cachedInitialDataset = macroGraphDatasetSchema.parse(raw);
+  cachedInitialDataset = macroGraphDatasetSchema.parse(initialAcceptanceDatasetJson);
   return cachedInitialDataset;
 }
 
@@ -303,6 +296,52 @@ function selectRelationshipsForQuery(
   }
 }
 
+export const DEFAULT_MAX_PROJECTION_LAG_THRESHOLD_MS = 15 * 60 * 1000;
+
+export function evaluateProjectionStaleness(params: {
+  backendMode: 'typedb_live' | 'deterministic_mirror';
+  maxProjectionLagMs?: number;
+  projectedCount?: number;
+  pendingCount?: number;
+  retryingCount?: number;
+  deadLetterCount?: number;
+  lastProjectedSequence?: number;
+  lagThresholdMs?: number;
+}): GraphProjectionStatusSummary {
+  const maxProjectionLagMs = params.maxProjectionLagMs ?? 0;
+  const projectedCount = params.projectedCount ?? 13;
+  const pendingCount = params.pendingCount ?? 0;
+  const retryingCount = params.retryingCount ?? 0;
+  const deadLetterCount = params.deadLetterCount ?? 0;
+  const lastProjectedSequence = params.lastProjectedSequence ?? projectedCount;
+  const threshold = params.lagThresholdMs ?? DEFAULT_MAX_PROJECTION_LAG_THRESHOLD_MS;
+
+  let stale = false;
+  let staleReason: string | null = null;
+
+  if (deadLetterCount > 0) {
+    stale = true;
+    staleReason = `${deadLetterCount} outbox item(s) in dead_letter awaiting replay`;
+  } else if (maxProjectionLagMs > threshold) {
+    stale = true;
+    staleReason = `Projection lag (${Math.round(maxProjectionLagMs / 1000)}s) exceeds ${Math.round(threshold / 1000)}s threshold`;
+  } else if (params.backendMode === 'deterministic_mirror' && (pendingCount > 0 || retryingCount > 0)) {
+    stale = true;
+    staleReason = `TypeDB live server unreachable while ${pendingCount + retryingCount} outbox item(s) await projection`;
+  }
+
+  return {
+    stale,
+    staleReason,
+    maxProjectionLagMs,
+    projectedCount,
+    pendingCount,
+    retryingCount,
+    deadLetterCount,
+    lastProjectedSequence,
+  };
+}
+
 /**
  * Executes an allowlisted, parameter-bound graph query with strict authentication,
  * tenant isolation, traversal limits, rate limits, and optional live TypeDB 3.14 verification.
@@ -314,6 +353,14 @@ export async function executeAllowlistedGraphQuery(
     datasets?: MacroGraphDataset[];
     nowMs?: number;
     preferLiveTypeDb?: boolean;
+    projectionCheckpoint?: {
+      maxProjectionLagMs?: number;
+      projectedCount?: number;
+      pendingCount?: number;
+      retryingCount?: number;
+      deadLetterCount?: number;
+      lastProjectedSequence?: number;
+    };
   },
 ): Promise<GraphQueryResponse> {
   const startedAt = Date.now();
@@ -457,6 +504,8 @@ export async function executeAllowlistedGraphQuery(
 
   let backendMode: 'typedb_live' | 'deterministic_mirror' = 'deterministic_mirror';
   let typedbServerVersion: string | null = null;
+  let liveAnswerCount = 0;
+  let liveQueryLatencyMs: number | null = null;
 
   if (context.preferLiveTypeDb) {
     const liveRes = await executeReadOnlyTypeQlOnLiveServer(
@@ -466,8 +515,15 @@ export async function executeAllowlistedGraphQuery(
     if (liveRes.ok) {
       backendMode = 'typedb_live';
       typedbServerVersion = liveRes.serverVersion;
+      liveAnswerCount = liveRes.answerCount;
+      liveQueryLatencyMs = liveRes.latencyMs;
     }
   }
+
+  const projectionStatus = evaluateProjectionStaleness({
+    backendMode,
+    ...context.projectionCheckpoint,
+  });
 
   const tldr = generateBoundedGraphTldr({
     nodes,
@@ -495,6 +551,9 @@ export async function executeAllowlistedGraphQuery(
     schemaVersion: MACRO_GRAPH_SCHEMA_VERSION,
     backendMode,
     typedbServerVersion,
+    liveAnswerCount,
+    liveQueryLatencyMs,
+    projectionStatus,
     asOfMs,
     temporalBasis: request.temporalBasis,
     compiledTypeQl: typeql,

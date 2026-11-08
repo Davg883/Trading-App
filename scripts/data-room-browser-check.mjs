@@ -47,6 +47,35 @@ async function main() {
       throw new Error(`Expected live TypeDB 3.14.2 status pill, got: ${pillText}`);
     }
 
+    // Verify Macro Case 001 (US to Ireland AI Infrastructure Contagion) workspace on Executive Overview
+    await page.waitForSelector('[data-testid="macro-case-001-workspace"]');
+    await page.waitForSelector('[data-testid="macro-case-001-tldr"]');
+    await page.waitForSelector('[data-testid="macro-case-001-commitment-ledger"]');
+    await page.waitForSelector('[data-testid="macro-case-001-investigations"]');
+    await page.waitForSelector('[data-testid="macro-case-001-scenarios"]');
+    await page.waitForSelector('[data-testid="macro-case-001-claims"]');
+    await page.waitForSelector('[data-testid="macro-case-001-cutoff-reconstructor"]');
+
+    const dedupText = await page.textContent('[data-testid="deduplicated-compute-usd"]');
+    const preventedText = await page.textContent('[data-testid="double-count-prevented-usd"]');
+    if (!dedupText?.includes('USD 895.40B') || !preventedText?.includes('USD 44.60B')) {
+      throw new Error(
+        `Expected deduplicated USD 895.40B and prevented USD 44.60B, got: ${dedupText} / ${preventedText}`,
+      );
+    }
+
+    // Test historical cutoff reconstruction button (2026-07-31 vs 2026-11-08)
+    await page.click('[data-testid="apply-cutoff-2026-07-31"]');
+    const julEdgeCount = await page.textContent('[data-testid="active-edge-count"]');
+    if (julEdgeCount?.trim() !== '3') {
+      throw new Error(`Expected 3 active edges at 2026-07-31 cutoff, got: ${julEdgeCount}`);
+    }
+    await page.click('[data-testid="apply-cutoff-2026-11-08"]');
+    const novEdgeCount = await page.textContent('[data-testid="active-edge-count"]');
+    if (novEdgeCount?.trim() !== '22') {
+      throw new Error(`Expected 22 active edges at 2026-11-08 cutoff, got: ${novEdgeCount}`);
+    }
+
     // Verify all 5 views render cleanly and right-hand desktop evidence drawer updates
     await page.click('[data-testid="tab-sector_intelligence"]');
     await page.waitForSelector('[data-testid="view-sector-intelligence"]');
@@ -68,6 +97,32 @@ async function main() {
     await page.click('[data-testid="tab-evidence_room"]');
     await page.waitForSelector('[data-testid="view-evidence-room"]');
     await page.waitForSelector('[data-testid="conflict-conflict-polaris-forge-2-tenant"]');
+    await page.waitForSelector('[data-testid="outbox-projection-register"]');
+
+    // Stage 4: Reviewer promotion workflow in Evidence Drawer
+    await page.waitForSelector('[data-testid="drawer-reviewer-promotion"]');
+    await page.click('[data-testid="approve-promote-relationship-btn"]');
+    await page.waitForSelector('[data-testid="drawer-review-outcome"]');
+    const reviewOutcomeText = await page.textContent('[data-testid="drawer-review-outcome"]');
+    if (
+      !reviewOutcomeText?.includes('Decision: APPROVED') ||
+      !reviewOutcomeText?.includes('Outbox: projected')
+    ) {
+      throw new Error(`Expected approved & promoted outcome in drawer, got: ${reviewOutcomeText}`);
+    }
+
+    // Stage 5: Durable graph projection — simulate TypeDB failure -> dead_letter -> stale pill -> replay from checkpoint 0
+    await page.click('[data-testid="simulate-outbox-failure-btn"]');
+    const staleLagText = await page.textContent('[data-testid="projection-lag-pill"]');
+    if (!staleLagText?.includes('STALE')) {
+      throw new Error(`Expected projection-lag-pill to show STALE after dead_letter, got: ${staleLagText}`);
+    }
+
+    await page.click('[data-testid="replay-checkpoint-btn"]');
+    const recoveredLagText = await page.textContent('[data-testid="projection-lag-pill"]');
+    if (!recoveredLagText?.includes('23/23 Projected (0ms lag)')) {
+      throw new Error(`Expected projection-lag-pill to recover to 23/23 Projected (0ms lag) after checkpoint 0 replay, got: ${recoveredLagText}`);
+    }
 
     const desktopDrawerVisible = await page.isVisible('[data-testid="desktop-evidence-drawer"]');
     if (!desktopDrawerVisible) {
@@ -106,6 +161,7 @@ async function main() {
     await browser.close();
     server.kill();
   }
+  process.exit(0);
 }
 
 main().catch((err) => {
