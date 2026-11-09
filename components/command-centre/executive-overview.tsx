@@ -1087,12 +1087,15 @@ export function ExecutiveOverviewSections({
           (Collapsible inside Technical & Methodology Validation Drawer)
           =================================================================== */}
       <details
-        className="cc-collapsible"
+        className="g6-drawer-details"
         data-testid="methodology-validation-collapsible"
       >
-        <summary>
-          Research Methodology Validation, Weight Sensitivity &amp; Illustrative
-          Ex-Post QQQ Comparison ({validationReport.methodologyVersion})
+        <summary className="g6-drawer-summary">
+          <span>
+            Research Methodology Validation, Weight Sensitivity &amp; Illustrative
+            Ex-Post QQQ Comparison ({validationReport.methodologyVersion})
+          </span>
+          <small>Bias audit, weight sensitivity &amp; illustrative QQQ cohort comparison</small>
         </summary>
         <section
           className="cc-panel"
