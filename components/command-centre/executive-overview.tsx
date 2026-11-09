@@ -1043,6 +1043,23 @@ export function ExecutiveOverviewSections({
             className="g6-chat-response"
             data-testid="executive-chat-response"
           >
+            {chatAnswer.generationMode ===
+              'deterministic_public_evidence_synthesis' && (
+              <p
+                className="cc-note"
+                data-testid="chat-fallback-notice"
+                role="status"
+              >
+                <strong>
+                  Unauthenticated Deterministic Public-Evidence Fallback (Not
+                  Live Gemini Inference):
+                </strong>{' '}
+                This response was synthesised deterministically from approved
+                SEC &amp; TypeDB public evidence because you are not signed in.
+                Sign in with the authorised owner account to execute live Gemini
+                2.5 Flash inference.
+              </p>
+            )}
             <div className="g6-chat-response-meta">
               <strong>Question:</strong> {chatAnswer.question} ·{' '}
               <span className="g6-meta-pill">

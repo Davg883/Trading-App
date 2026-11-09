@@ -83,6 +83,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
      <div className="g6-eyebrow-row">
       <span className="g6-section-tag">SECTION B · PORTFOLIO SNAPSHOT</span>
       <span className="g6-meta-pill">Execution: Read-Only (Live {flags.live?'enabled':'disabled'} · Demo {flags.demo?'enabled':'disabled'})</span>
+      <span className="g6-meta-pill" data-testid="broker-last-sync-pill">Last Broker Sync: {snap?.summaryAt?`${iso(snap.summaryAt)} (${age(fresh.ageMs)})`:data?.connection?.lastSuccessfulSyncAt?`${iso(data.connection.lastSuccessfulSyncAt)}`:signedIn?'Not yet synchronised':'Signed out (no broker data loaded)'}</span>
      </div>
      <h1 id="account-title">Portfolio command centre</h1>
      <p>{snap?<>Source: {fixture?'synthetic fixture (not Trading 212)':`Trading 212 · ${env==='live'?'Live account (read-only)':'Demo account'}`} · summary {iso(snap.summaryAt)} <span className={`cc-fresh cc-${fresh.state}`} data-testid="freshness">{fresh.state==='stale'?`Stale · ${age(fresh.ageMs)}`:`Fresh · ${age(fresh.ageMs)}`}</span></>:configured?signedIn?'No synchronised Trading 212 account yet.':'Sign in to load your Trading 212 account.':'Account integration not configured.'}</p>
