@@ -213,12 +213,20 @@ export interface MethodologyValidationReport {
     sampleGateExplanation: string;
   };
   biasControls: {
-    lookAheadBiasPrevented: true;
+    assessmentAsOfCutoffSupported: true;
+    lookAheadBiasPrevented: boolean;
     lookAheadControlDetail: string;
     survivorshipBiasPrevented: true;
     survivorshipControlDetail: string;
     retrospectiveVsForwardSeparated: true;
     forwardRegisteredSignalsCount: number;
+    fortySixSessionComparisonAudit: {
+      isStrictPointInTimeBacktest: false;
+      classification: 'Illustrative Ex-Post Cohort Comparison (Non-Predictive)';
+      lookAheadAndPublicationAudit: string;
+      fxAssumptionAudit: string;
+      corporateActionsAudit: string;
+    };
   };
   frictionAssumptions: {
     spreadBps: number;
@@ -227,6 +235,7 @@ export interface MethodologyValidationReport {
     brokerFeeGbpPerOrder: number;
   };
   benchmarkComparisonVsQqq: {
+    comparisonClassification: 'Illustrative Ex-Post Cohort Comparison (Non-Predictive; Not Strict Point-in-Time)';
     benchmarkTicker: 'QQQ';
     windowStart: string;
     windowEnd: string;
@@ -728,25 +737,54 @@ export function evaluateCompanyResearchAssessment(
       deterministicSummary: `Cloud revenue doubled YoY ($30.71B) with 31.8% operating margin, but a $51.36B quarterly capex surge drove Q3 FCF negative (-$9.07B).`,
     };
   } else if (ticker === 'AMZN') {
-    const findObs = (metric: string, label: string) =>
+    const findObs = (
+      metric: string,
+      label: string,
+      scope: 'company' | 'AWS' = 'company',
+    ) =>
       amazonCashRaw.observations.find(
-        (o) => o.metric === metric && o.period.label === label,
+        (o) =>
+          o.metric === metric && o.period.label === label && o.scope === scope,
       )?.value ?? null;
-    const revQ3 = findObs('revenue', '2026-Q3') ?? 201944;
-    const opIncQ3 = findObs('operating_income', '2026-Q3') ?? 28320;
-    revenueUsdMillions = revQ3;
-    operatingMarginPct = Number(((opIncQ3 / revQ3) * 100).toFixed(1)); // 14.0%
-    // TTM OCF & Capex from Q3 2026 cash conversion case
-    const ttmOcf = 130692;
-    const ttmCapex = 115882;
-    const ttmFcf = ttmOcf - ttmCapex; // 14,810
-    const ttmRev = 180169 + 213386 + 181519 + 200606 + 201944 - 180169; // 2025-Q4..2026-Q3 = 797,455
-    freeCashFlowUsdMillions = ttmFcf;
-    fcfMarginPct = Number(((ttmFcf / ttmRev) * 100).toFixed(1)); // 1.9% TTM FCF/Rev (or 11.3% FCF/OCF conversion)
-    capexIntensityPct = Number(((ttmCapex / ttmRev) * 100).toFixed(1)); // 14.5% of retail+cloud revenue (88.7% of OCF)
+
+    const revQ3 = findObs('revenue', '2026-Q3')!; // 201,944M
+    const opIncQ3 = findObs('operating_income', '2026-Q3')!; // 28,076M
+    const awsRevQ3 = findObs('revenue', '2026-Q3', 'AWS')!; // 45,984M
+    const awsOpIncQ3 = findObs('operating_income', '2026-Q3', 'AWS')!; // 17,452M
+    const q3Ocf = findObs('operating_cash_flow', '2026-Q3')!; // 42,422M
+    const q3GrossCapex = findObs('gross_capex', '2026-Q3')!; // 77,259M
+    const q3NetCapex = findObs('net_capex', '2026-Q3')!; // 75,878M
+    const q3Fcf = findObs('free_cash_flow', '2026-Q3')!; // -33,456M
+
+    const ttmRev = findObs('revenue', 'TTM-2026-Q3')!; // 797,455M
+    const ttmOcf = findObs('operating_cash_flow', 'TTM-2026-Q3')!; // 168,300M
+    const ttmNetCapex = findObs('net_capex', 'TTM-2026-Q3')!; // 210,657M
+    const ttmFcf = findObs('free_cash_flow', 'TTM-2026-Q3')!; // -42,357M
+
+    const priorTtmOcf = findObs('operating_cash_flow', 'TTM-2025-Q3')!; // 130,691M
+    const priorTtmNetCapex = findObs('net_capex', 'TTM-2025-Q3')!; // 115,903M
+    const priorTtmFcf = findObs('free_cash_flow', 'TTM-2025-Q3')!; // +14,788M
+    const priorQ3Ocf = findObs('operating_cash_flow', '2025-Q3')!; // 35,525M
+    const priorQ3GrossCapex = findObs('gross_capex', '2025-Q3')!; // 35,095M
+
+    const ttmNetCapexToOcfPct = Number(
+      ((ttmNetCapex / ttmOcf) * 100).toFixed(1),
+    ); // 125.2%
+    const priorTtmNetCapexToOcfPct = Number(
+      ((priorTtmNetCapex / priorTtmOcf) * 100).toFixed(1),
+    ); // 88.7%
+    const priorQ3GrossCapexToOcfPct = Number(
+      ((priorQ3GrossCapex / priorQ3Ocf) * 100).toFixed(1),
+    ); // 98.8%
+
+    revenueUsdMillions = revQ3; // 201,944M
+    operatingMarginPct = Number(((opIncQ3 / revQ3) * 100).toFixed(1)); // 13.9%
+    freeCashFlowUsdMillions = ttmFcf; // -42,357M (TTM-2026-Q3)
+    fcfMarginPct = Number(((ttmFcf / ttmRev) * 100).toFixed(1)); // -5.3% (TTM FCF / TTM Revenue)
+    capexIntensityPct = Number(((ttmNetCapex / ttmRev) * 100).toFixed(1)); // 26.4% (TTM Net Capex / TTM Revenue)
     const score = clampScore(
       50 + operatingMarginPct * 0.42 + fcfMarginPct * 0.55 - capexIntensityPct * 0.15,
-    ); // ~54.7
+    ); // 49.0
     dimEarnings = {
       key: 'earnings_financial_health',
       label: 'Earnings & Financial Health',
@@ -760,21 +798,28 @@ export function evaluateCompanyResearchAssessment(
       observedMetrics: [
         {
           metric: '2026 Q3 GAAP Revenue & Operating Income',
-          valueDisplay: `$${revQ3.toLocaleString()}M revenue · $${opIncQ3.toLocaleString()}M operating income (${operatingMarginPct}% margin)`,
+          valueDisplay: `$${revQ3.toLocaleString()}M revenue · $${opIncQ3.toLocaleString()}M operating income (${operatingMarginPct}% GAAP margin; AWS $${awsRevQ3.toLocaleString()}M rev / $${awsOpIncQ3.toLocaleString()}M op inc)`,
           periodOrAsOf: '2026-09-30',
           sourceLabel: 'Amazon Q3 2026 SEC Exhibit 99.1',
           sourceId: 'amazon-sec-ex991',
         },
         {
-          metric: 'TTM Operating Cash Flow vs Capex',
-          valueDisplay: `$130,692M TTM OCF less $115,882M TTM capex = $14,810M FCF (11.3% OCF-to-FCF conversion)`,
+          metric: '2026 Q3 Quarterly Cash Bridge',
+          valueDisplay: `$${q3Ocf.toLocaleString()}M Q3 OCF less $${q3NetCapex.toLocaleString()}M net capex ($${q3GrossCapex.toLocaleString()}M gross less $1,381M proceeds) = -$${Math.abs(q3Fcf).toLocaleString()}M Q3 FCF (-16.6% of Q3 revenue)`,
+          periodOrAsOf: '2026-09-30',
+          sourceLabel: 'Amazon Q3 2026 SEC Exhibit 99.1',
+          sourceId: 'amazon-sec-ex991',
+        },
+        {
+          metric: 'TTM-2026-Q3 vs Prior-Year TTM-2025-Q3 Cash Conversion Reconciliation',
+          valueDisplay: `TTM-2026-Q3: $${ttmOcf.toLocaleString()}M OCF less $${ttmNetCapex.toLocaleString()}M net capex (${ttmNetCapexToOcfPct}% of TTM OCF) = -$${Math.abs(ttmFcf).toLocaleString()}M FCF (${fcfMarginPct}% of $${ttmRev.toLocaleString()}M TTM revenue) · Prior TTM-2025-Q3: $${priorTtmNetCapex.toLocaleString()}M net capex / $${priorTtmOcf.toLocaleString()}M OCF = ${priorTtmNetCapexToOcfPct}% (+$${priorTtmFcf.toLocaleString()}M FCF) · 2025-Q3 single-quarter gross capex/OCF = ${priorQ3GrossCapexToOcfPct}%`,
           periodOrAsOf: '2026-09-30',
           sourceLabel: 'Amazon Q3 2026 SEC Exhibit 99.1',
           sourceId: 'amazon-sec-ex991',
         },
       ],
       missingInputs: [],
-      deterministicSummary: `Operating income expanded to $28.3B in Q3 2026, but $115.9B of TTM capital expenditure consumes 88.7% of operating cash flow.`,
+      deterministicSummary: `2026-Q3 GAAP operating income reached $28,076M (13.9% margin on $201,944M revenue), but TTM-2026-Q3 net capex surged to $210,657M (125.2% of $168,300M TTM OCF, up from $115,903M / 88.7% in TTM-2025-Q3), turning TTM free cash flow negative at -$42,357M (-$33,456M in 2026-Q3 alone).`,
     };
   } else {
     dimEarnings = {
@@ -877,14 +922,9 @@ export function evaluateCompanyResearchAssessment(
   // -------------------------------------------------------------------------
   // Dimension 4: Macroeconomic & Sector Exposure (15% provisional weight)
   // -------------------------------------------------------------------------
-  const orgIdMap: Record<string, string> = {
-    NVDA: 'org-nvidia',
-    MSFT: 'org-microsoft',
-    GOOGL: 'org-alphabet',
-    AMZN: 'org-amazon',
-    INTC: 'org-intel',
-  };
-  const orgId = orgIdMap[ticker] ?? null;
+  const orgId =
+    (graphDatasetRaw.organisations ?? []).find((o) => o.ticker === ticker)
+      ?.orgId ?? null;
   const activeRels = (graphDatasetRaw.relationships ?? []).filter(
     (r) =>
       r.contractualStatus !== 'cancelled' &&
@@ -1092,7 +1132,7 @@ export function evaluateCompanyResearchAssessment(
         {
           metric: 'Capex Intensity & Grid Permitting',
           valueDisplay:
-            '$115.9B TTM capex (88.7% of OCF) + Dublin 350 MW EirGrid & Wilmington Ohio rezoning litigation',
+            'TTM-2026-Q3 net capex $210,657M (125.2% of $168,300M TTM OCF, -$42,357M TTM FCF; vs $115,903M / 88.7% in TTM-2025-Q3) + Dublin 350 MW EirGrid & Wilmington Ohio rezoning litigation',
           periodOrAsOf: '2026-10-29',
           sourceLabel: 'Amazon Q3 Exhibit 99.1 & CRU/EirGrid Filing',
           sourceId: 'amazon-sec-ex991',
@@ -1100,7 +1140,7 @@ export function evaluateCompanyResearchAssessment(
       ],
       missingInputs: [],
       deterministicSummary:
-        'High TTM capex absorption (88.7% of OCF) and local zoning/grid bottlenecks in Dublin and Ohio require close monitoring of AWS cash conversion.',
+        'Surge in TTM-2026-Q3 net capex to $210,657M (125.2% of TTM OCF, up from 88.7% in TTM-2025-Q3) pushed TTM FCF negative (-$42,357M), alongside Dublin and Ohio zoning/grid constraints.',
     };
   } else if (ticker === 'INTC') {
     dimRisk = {
@@ -1159,6 +1199,7 @@ export function evaluateCompanyResearchAssessment(
   const coveredWeightPct = Math.round(coveredWeightRatio * 100);
 
   // Fundamental composite uses ONLY the 6-12M Fundamental dimensions (excluding 20D tactical momentum)
+  // and requires primary SEC earnings/cash-flow coverage (`dimEarnings.status === 'evaluated'`)
   const fundamentalDims = evaluatedDims.filter(
     (d) => d.declaredHorizon === '6-12M Fundamental',
   );
@@ -1167,7 +1208,7 @@ export function evaluateCompanyResearchAssessment(
     0,
   );
   const fundamentalCompositeScore =
-    fundamentalWeightSum >= 0.25
+    dimEarnings.status === 'evaluated' && fundamentalWeightSum >= 0.25
       ? Number(
           (
             fundamentalDims.reduce(
@@ -1225,7 +1266,7 @@ export function evaluateCompanyResearchAssessment(
   > = {
     NVDA: {
       justification:
-        'Gated at INSUFFICIENT DATA because no licensed valuation multiple or 252-day adjusted price history is stored. Among verified dimensions (70% weight covered), NVIDIA ranks #1 for further research with 66.2% GAAP operating margin ($63.7B Q2 operating income) and $21.3B quarterly FCF.',
+        'Gated at INSUFFICIENT DATA because no licensed valuation multiple or 252-day adjusted price history is stored. Among verified dimensions (70% weight covered), NVIDIA ranks #1 on non-directional fundamental screening (82.3/100) with 66.2% GAAP operating margin ($63,734M FY27 Q2 operating income on $96,221M revenue) and $21,341M quarterly FCF.',
       risk:
         'Customer capex concentration across four hyperscalers, China Data Center export exclusion, and $1.86B+ of Nscale lease/convertible credit exposure (plus reported Monarch guarantee discussions).',
       whatChanges:
@@ -1239,7 +1280,7 @@ export function evaluateCompanyResearchAssessment(
     },
     MSFT: {
       justification:
-        'Gated at INSUFFICIENT DATA pending verified valuation multiples and adjusted price history. Ranks #2 for further research (70% weight covered): FY27 Q1 Azure revenue grew 48% YoY with 49.8% company operating margin and $18.6B positive FCF after $39.4B cash capex.',
+        'Gated at INSUFFICIENT DATA pending verified valuation multiples and adjusted price history. Ranks #2 on non-directional fundamental screening (73.7/100, 70% weight covered): FY27 Q1 Azure revenue grew 48% YoY ($33,165M) with 49.8% company operating margin ($45,915M on $92,279M revenue) and $18,633M positive FCF after $39,367M cash capex.',
       risk:
         'Elevated cash capex intensity (42.7% of revenue), $44.6B Nscale Monarch sub-allocation execution, and Dublin EirGrid dispatchable generation constraints.',
       whatChanges:
@@ -1251,25 +1292,11 @@ export function evaluateCompanyResearchAssessment(
         'rel-loughton-dc-active-v2-r1',
       ],
     },
-    AMZN: {
-      justification:
-        'Gated at INSUFFICIENT DATA pending valuation inputs. Verified Q3 2026 filings (70% weight covered) show $201.9B revenue and $28.3B operating income, but $115.9B of TTM capex compresses TTM free cash flow to $14.8B (11.3% of OCF).',
-      risk:
-        'Heavy capital intensity (88.7% of TTM operating cash flow absorbed by capex), dual equity/supplier exposure to Anthropic ($895.4B aggregate envelope), and Dublin/Ohio data-centre permitting delays.',
-      whatChanges:
-        'Verified valuation multiples plus evidence of TTM OCF-to-FCF conversion recovering above 25% as AWS AI capacity comes online.',
-      sources: ['amazon-sec-ex991', 'anthropic-s1a-2026-11-02', 'cru-eirgrid-dc-policy-2026'],
-      rels: [
-        'rel-anthropic-s1a-amzn-compute-r1',
-        'rel-anthropic-amzn-dual-role-r1',
-        'rel-aws-dublin-eirgrid-dep-r1',
-      ],
-    },
     GOOGL: {
       justification:
-        'Gated at INSUFFICIENT DATA pending valuation inputs. Verified Q3 2026 SEC Exhibit 99.1 (70% weight covered) shows Cloud revenue doubling YoY to $30.71B ($11.12B Cloud operating income), offset by a $51.36B quarterly capex surge that pushed Q3 FCF to -$9.07B.',
+        'Gated at INSUFFICIENT DATA pending valuation inputs. Verified Q3 2026 SEC Exhibit 99.1 (70% weight covered, screening score 61.5/100) shows Cloud revenue doubling YoY to $30.709B ($11.121B Cloud operating income) and 31.8% company operating margin ($40.576B on $127.577B revenue), offset by a $51.355B Q3 capex surge that pushed Q3 FCF to -$9.065B.',
       risk:
-        'Negative quarterly free cash flow (-$9.07B in Q3 2026) and up to $40.0B of dual-role cash/backing exposure to Anthropic.',
+        'Negative quarterly free cash flow (-$9.065B in Q3 2026) and up to $40.0B of dual-role cash/backing exposure to Anthropic.',
       whatChanges:
         'Verified valuation multiples and restoration of positive quarterly free cash flow alongside sustained >30% Google Cloud operating margins.',
       sources: ['sec-release', 'anthropic-s1-2026-10-26', 'anthropic-s1a-2026-11-02'],
@@ -1278,19 +1305,33 @@ export function evaluateCompanyResearchAssessment(
         'rel-anthropic-googl-dual-role-r1',
       ],
     },
+    AMZN: {
+      justification:
+        'Gated at INSUFFICIENT DATA pending valuation inputs. Verified Q3 2026 SEC Exhibit 99.1 (70% weight covered, screening score 57.7/100) shows $201,944M Q3 revenue and $28,076M Q3 GAAP operating income (13.9% margin; AWS $45,984M revenue +39.3% YoY), but TTM-2026-Q3 net capex surged to $210,657M (125.2% of $168,300M TTM OCF, up from $115,903M / 88.7% in TTM-2025-Q3), turning TTM FCF negative at -$42,357M (-$33,456M in 2026-Q3).',
+      risk:
+        'Severe capital intensity (TTM-2026-Q3 net capex equals 125.2% of TTM OCF and 2026-Q3 net capex equals 178.9% of Q3 OCF), dual equity/supplier exposure to Anthropic ($895.4B aggregate envelope), and Dublin/Ohio data-centre permitting delays.',
+      whatChanges:
+        'Verified valuation multiples plus restoration of positive TTM and quarterly free cash flow as AWS AI capacity comes online.',
+      sources: ['amazon-sec-ex991', 'anthropic-s1a-2026-11-02', 'cru-eirgrid-dc-policy-2026'],
+      rels: [
+        'rel-anthropic-s1a-amzn-compute-r1',
+        'rel-anthropic-amzn-dual-role-r1',
+        'rel-aws-dublin-eirgrid-dep-r1',
+      ],
+    },
     INTC: {
       justification:
-        'Gated at INSUFFICIENT DATA (45% weight covered): TypeDB documents Intel’s $11.0B Fab 34 Leixlip SCJV co-investment, but complete Q3 2026 GAAP income and cash-flow tables and valuation multiples are not yet imported.',
+        'Gated at INSUFFICIENT DATA (25% weight covered, unscored on fundamental screening): TypeDB documents Intel’s $11.0B Fab 34 Leixlip SCJV co-investment and Ohio One campus, but complete Q3 2026 GAAP income/cash-flow tables, 20-session price history, and valuation multiples are not yet imported.',
       risk:
         'High foundry capital requirements ($11.0B Leixlip SCJV) and absence of verified positive free cash flow in the current evidence store.',
       whatChanges:
-        'Importing complete Form 10-Q/10-K income, OCF, and FCF statements plus verified valuation multiples.',
+        'Importing complete Form 10-Q/10-K income, OCF, and FCF statements, >= 20 daily closes, and verified valuation multiples.',
       sources: ['intc-10q-q3-2026'],
-      rels: ['rel-intc-fab34-leixlip-scjv-r1'],
+      rels: ['rel-intc-fab34-leixlip-scjv-r1', 'rel-intc-ohio-one-control'],
     },
     AMD: {
       justification:
-        'Gated at INSUFFICIENT DATA (35% weight covered): 46 daily Nasdaq reference closes and sector policy-risk membership are stored, but primary SEC financial statement metrics and valuation multiples are absent.',
+        'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and sector policy-risk membership are stored, but primary SEC financial statement metrics and valuation multiples are absent.',
       risk:
         'Lack of primary-source quarterly revenue, margin, and cash-conversion data in the current workspace.',
       whatChanges:
@@ -1300,13 +1341,13 @@ export function evaluateCompanyResearchAssessment(
     },
     CRWV: {
       justification:
-        'Gated at INSUFFICIENT DATA (20% weight covered): only delayed Nasdaq price closes and an isolated staging graph demo (Dublin West 180 MW) exist; no audited SEC income/cash-flow or debt-schedule data is stored in production.',
+        'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and 2 TypeDB Polaris Forge 1 lease/grid relationships (400 MW Ellendale ND) are stored, but no audited SEC income/cash-flow or debt-schedule data is stored in production.',
       risk:
-        'High leverage and GPU-collateralised financing structure cannot be evaluated without primary S-1/10-Q financial tables.',
+        'High leverage, 400 MW Polaris Forge 1 substation energisation dependency, and GPU-collateralised financing structure cannot be evaluated without primary S-1/10-Q financial tables.',
       whatChanges:
         'Promoting verified S-1/10-Q financial statements and debt-maturity schedules into the production evidence store.',
-      sources: ['nasdaq-crwv'],
-      rels: [],
+      sources: ['nasdaq-crwv', 'apld-8k-2026-10-07'],
+      rels: ['rel-crwv-apld-polaris1-lease', 'rel-polaris1-grid-dependency'],
     },
   };
 
@@ -1647,8 +1688,16 @@ export function runResearchMethodologyValidation(): MethodologyValidationReport 
     ),
   }));
 
-  // 2. Point-in-Time Historical Backtest vs QQQ (weekly steps across the 46 stored sessions)
+  // 2. Illustrative Ex-Post Cohort Comparison vs QQQ (weekly steps across the 46 stored sessions)
+  // Audit Note: The 4-stock cohort (NVDA, MSFT, GOOGL, AMZN) is defined by Q3 2026 primary filings
+  // published 2026-08-26 (NVDA), 2026-10-28 (MSFT, GOOGL), and 2026-10-29 (AMZN) and received 2026-10-30..2026-11-03.
   const cohortTickers = ['NVDA', 'MSFT', 'GOOGL', 'AMZN'];
+  const filingPublicationDateByTicker: Record<string, string> = {
+    NVDA: '2026-08-26',
+    MSFT: '2026-10-28',
+    GOOGL: '2026-10-28',
+    AMZN: '2026-10-29',
+  };
   const stepIndices: number[] = [];
   for (let i = 0; i < qqqBars.length - 1; i += 5) {
     stepIndices.push(i);
@@ -1710,10 +1759,14 @@ export function runResearchMethodologyValidation(): MethodologyValidationReport 
     cohortCurveUsd.push(cumCohortUsd);
     qqqCurveUsd.push(cumQqqUsd);
 
+    const eligibleAtAnchor = cohortTickers.filter(
+      (sym) => (filingPublicationDateByTicker[sym] ?? '9999-12-31') <= q0.dateIso,
+    );
+
     windows.push({
       anchorDate: q0.dateIso,
       nextAnchorDate: q1.dateIso,
-      eligibleTickersWithPrimaryFilings: cohortTickers,
+      eligibleTickersWithPrimaryFilings: eligibleAtAnchor,
       cohortGrossReturnUsdPct: Number(grossUsd.toFixed(2)),
       cohortNetReturnGbpPct: Number(netGbp.toFixed(2)),
       qqqBenchmarkReturnUsdPct: Number(qqqRetUsd.toFixed(2)),
@@ -1741,17 +1794,28 @@ export function runResearchMethodologyValidation(): MethodologyValidationReport 
       universeSize: UNIVERSE_META.length,
       primaryFilingCoveredCount: 4,
       sampleSufficientForPredictiveClaims: false,
-      sampleGateExplanation: `Stored historical dataset contains ${sessionsCount} daily trading sessions (${startIso} to ${endIso}) across ${UNIVERSE_META.length} equities. Because ${sessionsCount} < ${RATING_THRESHOLDS.minBacktestSessionsForProductionValidation} required sessions (1 full market year) and valuation multiples are unconfigured, all ratings are classified as "${RESEARCH_METHODOLOGY_CLASSIFICATION}" and locked to INSUFFICIENT DATA in production.`,
+      sampleGateExplanation: `Stored historical dataset contains ${sessionsCount} daily trading sessions (${startIso} to ${endIso}) across ${UNIVERSE_META.length} equities. Because ${sessionsCount} < ${RATING_THRESHOLDS.minBacktestSessionsForProductionValidation} required sessions (1 full market year), valuation multiples are unconfigured, and the Sep–Oct 2026 window precedes late-October Q3 earnings releases, this 46-session comparison is strictly an Illustrative Ex-Post Cohort Comparison (Non-Predictive) and all ratings remain locked to INSUFFICIENT DATA in production.`,
     },
     biasControls: {
-      lookAheadBiasPrevented: true,
+      assessmentAsOfCutoffSupported: true,
+      lookAheadBiasPrevented: false,
       lookAheadControlDetail:
-        'Each historical step filters price bars and filings strictly by eventAt <= anchorCutoffMs and receivedAt <= anchorCutoffMs.',
+        'Single-company evaluation supports eventAt <= asOfMs and publishedAtMs <= asOfMs cutoffs, but the 46-session 4-stock cohort curve applies late-October Q3 filing membership (MSFT/GOOGL published 2026-10-28; AMZN published 2026-10-29; received 2026-10-30..2026-11-03) backward to 2026-09-01 and is therefore labelled an Illustrative Ex-Post Cohort Comparison.',
       survivorshipBiasPrevented: true,
       survivorshipControlDetail:
-        'All 7 universe tickers (including negative-FCF GOOGL Q3 and incomplete-filing INTC, AMD, CRWV) remain in the evaluated universe throughout.',
+        'All 7 universe tickers (including negative-FCF GOOGL Q3, negative-FCF AMZN TTM-2026-Q3, and incomplete-filing INTC, AMD, CRWV) remain in the evaluated universe throughout.',
       retrospectiveVsForwardSeparated: true,
       forwardRegisteredSignalsCount: 0,
+      fortySixSessionComparisonAudit: {
+        isStrictPointInTimeBacktest: false,
+        classification: 'Illustrative Ex-Post Cohort Comparison (Non-Predictive)',
+        lookAheadAndPublicationAudit:
+          'Before 2026-10-28, only NVDA (FY27 Q2 published 2026-08-26, received 2026-11-03T22:25:07Z) had a completed quarterly release in the bundle; MSFT and GOOGL Q3 releases were published 2026-10-28 and AMZN Q3 on 2026-10-29. Strict receipt-date gating yields 0 eligible cohort members prior to 2026-10-29.',
+        fxAssumptionAudit:
+          'Bank of England XUDLUSS USD/GBP observations in the stored bundle cover late October–November 2026 (Case 006 v2); September and early October 2026 steps use an indicative constant 0.7680 USD/GBP fallback rate.',
+        corporateActionsAudit:
+          'Nasdaq public reference closes carry corporateActionsReviewed = false (unadjusted_close).',
+      },
     },
     frictionAssumptions: {
       spreadBps: 10,
@@ -1760,6 +1824,8 @@ export function runResearchMethodologyValidation(): MethodologyValidationReport 
       brokerFeeGbpPerOrder: 1.0,
     },
     benchmarkComparisonVsQqq: {
+      comparisonClassification:
+        'Illustrative Ex-Post Cohort Comparison (Non-Predictive; Not Strict Point-in-Time)',
       benchmarkTicker: 'QQQ',
       windowStart: startIso,
       windowEnd: endIso,
@@ -1805,11 +1871,11 @@ export function buildExecutiveMarketBriefing(
     asOfDateIso: qqqLatest?.dateIso ?? '2026-11-05',
     dataReadinessStatus: 'ready_verified_evidence',
     sentences: {
-      marketEnvironment: `1. Market Environment: Nasdaq-100 benchmark QQQ closed at $${qqqLatest?.close.toFixed(2) ?? '647.05'} USD (${qqq1dPct !== null ? `${Number(qqq1dPct) >= 0 ? '+' : ''}${qqq1dPct}% on the latest session` : 'delayed EOD reference close'}), with Case 006 v2 classifying the post-3 November technology move as an unconfirmed single-session rebound inside a five-session consolidation window.`,
-      sectorDevelopments: `2. Major Sector Developments: Verified SEC S-1/A and 10-Q disclosures in the TypeDB knowledge graph document $895.4B of deduplicated multi-year AI compute commitments across Amazon, Alphabet, Microsoft, and Anthropic (preventing $44.6B of double-counting on Nscale’s Monarch sub-allocation).`,
-      strongestResearchOpportunities: `3. Research Priorities (Gated): No directional BUY/HOLD/SELL ratings are emitted because licensed valuation multiples are unconfigured, but NVIDIA (66.2% GAAP operating margin, $21.3B Q2 FCF, priority score ${nvda?.researchPriorityScore ?? 81.9}/100) and Microsoft (+48% YoY Azure growth, 49.8% operating margin, $18.6B Q1 FCF, priority score ${msft?.researchPriorityScore ?? 73.7}/100) lead the cohort for deeper fundamental due diligence.`,
-      highestMaterialRisks: `4. Highest Material Risks: Hyperscaler AI capital expenditure is heavily compressing free cash flow—Alphabet’s Q3 2026 FCF turned negative (-$9.07B after $51.36B Q3 capex) and Amazon’s $115.9B TTM capex absorbed 88.7% of operating cash flow—alongside US/Ireland electricity-grid constraints (350 MW AWS Dublin EirGrid dependency and New York EO 62 moratorium) and unsigned Monarch credit-support discussions.`,
-      changesSincePriorSession: `5. Changes Since Prior Session: Across the latest completed session (${qqqPrev?.dateIso ?? '2026-11-04'} → ${qqqLatest?.dateIso ?? '2026-11-05'}), all 23/23 TypeDB production relationships remain reconciled (0ms lag, Loughton v1 cancellation superseded by active v2), and all 7 tracked equities remain locked at INSUFFICIENT DATA with zero directional rating changes.`,
+      marketEnvironment: `1. Market Environment (As of ${qqqLatest?.dateIso ?? '2026-11-05'}): Nasdaq-100 benchmark QQQ closed at $${qqqLatest?.close.toFixed(2) ?? '647.05'} USD (${qqq1dPct !== null ? `${Number(qqq1dPct) >= 0 ? '+' : ''}${qqq1dPct}% vs $${qqqPrev?.close.toFixed(2) ?? '638.22'} on ${qqqPrev?.dateIso ?? '2026-11-04'}, delayed unadjusted EOD close` : 'delayed EOD reference close'}), with Case 006 v2 classifying the post-3 November technology move as an unconfirmed single-session rebound inside a five-session consolidation window.`,
+      sectorDevelopments: `2. Major Sector Developments (Filings 2026-09-18 to 2026-11-02): Verified SEC Form S-1/A (filed 2026-11-02) and Form 10-Q disclosures in the TypeDB knowledge graph document $895.4B USD of deduplicated multi-year AI compute commitments across Amazon, Alphabet, Microsoft, and Anthropic (preventing $44.6B USD of double-counting on Nscale’s Monarch sub-allocation disclosed 2026-09-18).`,
+      strongestResearchOpportunities: `3. Non-Directional Screening Priorities (Gated — Not Buy/Hold/Sell Recommendations): Zero directional ratings are emitted because licensed valuation multiples (30% weight) and 252-day split-adjusted histories are unconfigured, but NVIDIA (FY27 Q2 ended 2026-07-26: $96,221M revenue, 66.2% GAAP operating margin, $21,341M FCF; screening score ${nvda?.researchPriorityScore ?? 82.3}/100) and Microsoft (FY27 Q1 ended 2026-09-30: $92,279M revenue, +48% YoY Azure growth, 49.8% operating margin, $18,633M derived FCF; screening score ${msft?.researchPriorityScore ?? 73.7}/100) lead verified fundamental coverage.`,
+      highestMaterialRisks: `4. Highest Material Risks (Q3 2026 Ended 2026-09-30): Hyperscaler AI capital expenditure has compressed free cash flow negative—Alphabet’s 2026-Q3 FCF fell to -$9.065B USD after $51.355B Q3 capex (filed 2026-10-28), and Amazon’s TTM-2026-Q3 net capex surged to $210,657M USD (125.2% of $168,300M TTM OCF, pushing TTM FCF to -$42,357M USD vs +$14,788M USD / 88.7% net capex/OCF in TTM-2025-Q3; filed 2026-10-29)—alongside US/Ireland electricity-grid constraints (350 MW AWS Dublin EirGrid dependency and New York EO 62 moratorium) and unsigned Monarch credit-support discussions (reported 2026-10-30).`,
+      changesSincePriorSession: `5. Changes Since Prior Session (${qqqPrev?.dateIso ?? '2026-11-04'} → ${qqqLatest?.dateIso ?? '2026-11-05'}): Across the latest completed session, all 23/23 TypeDB production relationships remain reconciled (0ms lag, Loughton v1 cancellation superseded on 2026-10-19 by active v2), and all 7 tracked equities remain locked at INSUFFICIENT DATA with zero directional rating changes.`,
     },
     citedSourceIds: [
       'nvda-fy27-q2',
@@ -1821,6 +1887,22 @@ export function buildExecutiveMarketBriefing(
       'ny-eo62',
     ],
     executionAuthority: 'none',
+  };
+}
+
+/**
+ * Privacy & Governance Guard — Builds the public-research inference payload for `/api/graph/chat`,
+ * guaranteeing that private broker data (positions, balances, cash flows, valuations) is NEVER transmitted.
+ */
+export function buildExecutiveAssistantRequestPayload(question: string): {
+  question: string;
+  temporalBasis: 'publication';
+  mode: 'auto';
+} {
+  return {
+    question: question.trim(),
+    temporalBasis: 'publication',
+    mode: 'auto',
   };
 }
 
@@ -1857,9 +1939,9 @@ export function buildWhatChangedSummary(
       headline:
         'Q3 2026 filings revealed sharp divergence between software/chip cash conversion and hyperscaler capex outlays',
       priorState:
-        'Alphabet Q3 2025 generated +$24.46B FCF ($48.41B OCF less $23.95B capex); Amazon Q2 2026 generated $27.46B operating income.',
+        'Alphabet 2025-Q3 generated +$24.46B FCF ($48.41B OCF less $23.95B capex); Amazon TTM-2025-Q3 generated +$14,788M FCF ($130,691M OCF less $115,903M net capex = 88.7% of OCF; 2025-Q3 gross capex/OCF = 98.8%).',
       currentState:
-        'Alphabet Q3 2026 FCF turned negative (-$9.07B on $51.36B capex); Amazon TTM capex reached $115.88B (88.7% of OCF); Microsoft maintained +$18.63B Q1 FCF.',
+        'Alphabet 2026-Q3 FCF turned negative (-$9.065B on $51.355B capex); Amazon TTM-2026-Q3 net capex reached $210,657M (125.2% of $168,300M TTM OCF, pushing TTM FCF to -$42,357M and 2026-Q3 FCF to -$33,456M); Microsoft maintained +$18,633M FY27 Q1 FCF.',
       sourceLabel: 'SEC Exhibit 99.1 Filings (GOOGL, AMZN, MSFT)',
       href: '/earnings/amazon',
     },
@@ -1919,7 +2001,7 @@ export function buildWhatChangedSummary(
       priorState:
         'Watchlist displayed unranked delayed reference closes and retrospective case badges only.',
       currentState:
-        '5-dimension scoring active: NVDA (81.9) and MSFT (73.7) lead verified fundamental/macro sub-scores; directional BUY/HOLD/SELL remains locked pending 30% Valuation & 252-day backtest gates.',
+        '5-dimension non-directional screening active: NVDA (82.3/100) and MSFT (73.7/100) lead verified fundamental/macro sub-scores; directional BUY/HOLD/SELL remains locked pending 30% Valuation & 252-day backtest gates.',
       sourceLabel: 'Methodology aci-stock-rating-v1.0.0-exp',
       href: '/consensus',
     },

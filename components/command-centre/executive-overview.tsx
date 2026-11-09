@@ -5,6 +5,7 @@ import React, { useMemo, useState } from 'react';
 import {
   RESEARCH_METHODOLOGY_CLASSIFICATION,
   RESEARCH_METHODOLOGY_VERSION,
+  buildExecutiveAssistantRequestPayload,
   buildExecutiveMarketBriefing,
   buildWhatChangedSummary,
   evaluateUniverseResearchAssessments,
@@ -215,11 +216,7 @@ export function ExecutiveOverviewSections({
           'Content-Type': 'application/json',
           'x-aci-test-caller': 'owner_primary',
         },
-        body: JSON.stringify({
-          question: q,
-          temporalBasis: 'publication',
-          mode: 'auto',
-        }),
+        body: JSON.stringify(buildExecutiveAssistantRequestPayload(q)),
       });
       const data = await res.json();
       if (!res.ok || !data?.answer) {
@@ -481,7 +478,7 @@ export function ExecutiveOverviewSections({
               }
             >
               <option value="priority">
-                Research Priority Score (High → Low)
+                Evidence &amp; Fundamental Screening Score (Non-Directional)
               </option>
               <option value="coverage">Evidence Coverage % (High → Low)</option>
               <option value="margin">GAAP Operating Margin (High → Low)</option>
@@ -501,8 +498,8 @@ export function ExecutiveOverviewSections({
               <tr>
                 <th scope="col">Company &amp; Sector</th>
                 <th scope="col">Latest Verified Price &amp; Classification</th>
-                <th scope="col">Research Assessment &amp; Horizon</th>
-                <th scope="col">Evidence Coverage &amp; Sub-Scores</th>
+                <th scope="col">Research Assessment, Horizon &amp; Blocking Gates</th>
+                <th scope="col">Evidence Coverage &amp; Non-Directional Screening Score</th>
                 <th scope="col">Principal Justification</th>
                 <th scope="col">Key Risk / Invalidation Condition</th>
                 <th scope="col">Actions</th>
@@ -583,6 +580,13 @@ export function ExecutiveOverviewSections({
                           <strong>Date:</strong> {row.assessmentDateIso} ·{' '}
                           <code>{row.methodologyVersion}</code>
                         </small>
+                        <small
+                          className="g6-missing-box"
+                          data-testid={`blocking-reasons-${row.ticker}`}
+                        >
+                          <strong>Why directional rating is blocked:</strong>{' '}
+                          {row.evidenceCoverage.unmetGates.join(' · ')}
+                        </small>
                       </div>
                     </td>
 
@@ -605,8 +609,8 @@ export function ExecutiveOverviewSections({
                         </div>
                         <small>
                           {row.researchPriorityScore !== null
-                            ? `Verified Fundamental Priority: ${row.researchPriorityScore}/100`
-                            : 'Fundamental Priority: Unscored (missing SEC table)'}
+                            ? `Fundamental Screening Score: ${row.researchPriorityScore}/100 (Non-Directional — Not Buy/Hold/Sell)`
+                            : 'Fundamental Screening Score: Unscored (missing SEC income/cash-flow table)'}
                         </small>
                         <small>
                           {qCalc.operatingMarginPct !== null
@@ -788,7 +792,7 @@ export function ExecutiveOverviewSections({
                       Layer 1 — Deterministic Quantitative Calculation
                     </strong>
                     <p>
-                      Fundamental Priority Composite:{' '}
+                      Evidence &amp; Fundamental Screening Score (Non-Directional Due-Diligence Ranking — Not a Buy/Hold/Sell Recommendation):{' '}
                       <strong>
                         {activeCompany.layers.quantitativeCalculation
                           .fundamentalCompositeScore !== null
@@ -1076,7 +1080,7 @@ export function ExecutiveOverviewSections({
       </section>
 
       {/* ===================================================================
-          PART 4 — METHODOLOGY VALIDATION & POINT-IN-TIME BACKTEST SUMMARY
+          PART 4 — METHODOLOGY VALIDATION & ILLUSTRATIVE RETROSPECTIVE COMPARISON
           (Collapsible inside Technical & Methodology Validation Drawer)
           =================================================================== */}
       <details
@@ -1084,8 +1088,8 @@ export function ExecutiveOverviewSections({
         data-testid="methodology-validation-collapsible"
       >
         <summary>
-          Research Methodology Validation, Weight Sensitivity &amp; Point-in-Time
-          QQQ Benchmark Comparison ({validationReport.methodologyVersion})
+          Research Methodology Validation, Weight Sensitivity &amp; Illustrative
+          Ex-Post QQQ Comparison ({validationReport.methodologyVersion})
         </summary>
         <section
           className="cc-panel"
@@ -1094,7 +1098,7 @@ export function ExecutiveOverviewSections({
           <header className="cc-panel-head">
             <div>
               <h2>
-                Methodology Validation &amp; Point-in-Time Evaluation (
+                Methodology Validation &amp; Illustrative Ex-Post Cohort Comparison (
                 {validationReport.classification})
               </h2>
               <p>{validationReport.sampleSummary.sampleGateExplanation}</p>
@@ -1104,12 +1108,17 @@ export function ExecutiveOverviewSections({
           <div className="g6-validation-grid">
             <div className="g6-validation-box">
               <h3>
-                1. Retrospective Point-in-Time Comparison vs QQQ (
+                1. Illustrative Ex-Post Cohort Comparison vs QQQ — Non-Predictive (
                 {validationReport.benchmarkComparisonVsQqq.windowStart} →{' '}
                 {validationReport.benchmarkComparisonVsQqq.windowEnd})
               </h3>
               <p className="cc-note">
-                Evaluates the 4-stock Primary-Filing Verified Cohort (
+                <strong>Classification:</strong>{' '}
+                {
+                  validationReport.benchmarkComparisonVsQqq
+                    .comparisonClassification
+                }
+                . Tracks the 4-stock Primary-Filing Verified Cohort (
                 {validationReport.benchmarkComparisonVsQqq.verifiedFilingCohortTickers.join(
                   ', ',
                 )}
@@ -1123,6 +1132,33 @@ export function ExecutiveOverviewSections({
                 {validationReport.biasControls.forwardRegisteredSignalsCount}{' '}
                 forward directional signals).
               </p>
+              <ul className="g6-gate-list" data-testid="backtest-bias-audit-list">
+                <li>
+                  <strong>Look-Ahead &amp; Publication Audit:</strong>{' '}
+                  {
+                    validationReport.biasControls.fortySixSessionComparisonAudit
+                      .lookAheadAndPublicationAudit
+                  }
+                </li>
+                <li>
+                  <strong>FX Assumption Audit:</strong>{' '}
+                  {
+                    validationReport.biasControls.fortySixSessionComparisonAudit
+                      .fxAssumptionAudit
+                  }
+                </li>
+                <li>
+                  <strong>Corporate-Actions Audit:</strong>{' '}
+                  {
+                    validationReport.biasControls.fortySixSessionComparisonAudit
+                      .corporateActionsAudit
+                  }
+                </li>
+                <li>
+                  <strong>Universe Survivorship Control:</strong>{' '}
+                  {validationReport.biasControls.survivorshipControlDetail}
+                </li>
+              </ul>
               <dl className="g6-stat-dl">
                 <div>
                   <dt>Verified Cohort Gross Return (USD)</dt>

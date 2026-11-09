@@ -1,9 +1,12 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import amazonCashRaw from '../data/earnings/amazon-q3-2026-cash.json';
+import { amazonCashKpis } from '../lib/amazon-cash-conversion';
 import {
   RESEARCH_METHODOLOGY_CLASSIFICATION,
   RESEARCH_METHODOLOGY_VERSION,
+  buildExecutiveAssistantRequestPayload,
   buildExecutiveMarketBriefing,
   buildWhatChangedSummary,
   classifyAssessmentFromValidatedScores,
@@ -27,8 +30,8 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(assessments.map((a) => a.ticker)).toEqual([
       'NVDA',
       'MSFT',
-      'AMZN',
       'GOOGL',
+      'AMZN',
       'AMD',
       'CRWV',
       'INTC',
@@ -56,12 +59,22 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
       );
     }
 
-    // Verify primary SEC filing earnings scores for NVDA, MSFT, AMZN, GOOGL
+    // Verify primary SEC filing earnings & TypeDB macro scores for NVDA, MSFT, GOOGL, AMZN, INTC, AMD, CRWV
     const nvda = evaluateCompanyResearchAssessment('NVDA');
     const msft = evaluateCompanyResearchAssessment('MSFT');
-    const amzn = evaluateCompanyResearchAssessment('AMZN');
     const googl = evaluateCompanyResearchAssessment('GOOGL');
+    const amzn = evaluateCompanyResearchAssessment('AMZN');
     const intc = evaluateCompanyResearchAssessment('INTC');
+    const amd = evaluateCompanyResearchAssessment('AMD');
+    const crwv = evaluateCompanyResearchAssessment('CRWV');
+
+    expect(nvda.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(msft.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(googl.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(amzn.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(amd.evidenceCoverage.coveredWeightPct).toBe(35);
+    expect(crwv.evidenceCoverage.coveredWeightPct).toBe(35);
+    expect(intc.evidenceCoverage.coveredWeightPct).toBe(25);
 
     expect(
       nvda.layers.quantitativeCalculation.dimensions.earnings_financial_health
@@ -72,13 +85,13 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
         .score,
     ).toBe(75.6);
     expect(
-      amzn.layers.quantitativeCalculation.dimensions.earnings_financial_health
-        .score,
-    ).toBe(54.7);
-    expect(
       googl.layers.quantitativeCalculation.dimensions.earnings_financial_health
         .score,
     ).toBe(53.4);
+    expect(
+      amzn.layers.quantitativeCalculation.dimensions.earnings_financial_health
+        .score,
+    ).toBe(49);
     expect(
       intc.layers.quantitativeCalculation.dimensions.earnings_financial_health
         .score,
@@ -87,6 +100,15 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
       intc.layers.quantitativeCalculation.dimensions.earnings_financial_health
         .status,
     ).toBe('insufficient_data');
+
+    // Non-directional screening scores require SEC earnings table; INTC/AMD/CRWV remain null
+    expect(nvda.researchPriorityScore).toBe(82.3);
+    expect(msft.researchPriorityScore).toBe(73.7);
+    expect(googl.researchPriorityScore).toBe(61.5);
+    expect(amzn.researchPriorityScore).toBe(57.7);
+    expect(intc.researchPriorityScore).toBeNull();
+    expect(amd.researchPriorityScore).toBeNull();
+    expect(crwv.researchPriorityScore).toBeNull();
 
     // Verify 4 distinct epistemic layers exist on every company assessment
     expect(nvda.layers.quantitativeCalculation.revenueUsdMillions).toBe(96221);
@@ -99,6 +121,40 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(nvda.layers.humanReviewerCommentary.reviewerNote).toContain(
       'remain locked until licensed valuation multiples',
     );
+  });
+
+  it('reconciles Amazon Q3 2026 and TTM-2026-Q3 vs TTM-2025-Q3 financial metrics 100% with lib/amazon-cash-conversion.ts', () => {
+    const kpis = amazonCashKpis(
+      amazonCashRaw,
+      '2026-Q3',
+      Date.parse('2026-11-03T16:05:00Z'),
+    );
+    const amzn = evaluateCompanyResearchAssessment('AMZN');
+    const qCalc = amzn.layers.quantitativeCalculation;
+
+    // 2026-Q3 revenue = $201,944M, operating income = $28,076M -> 13.9% GAAP operating margin
+    expect(kpis.quarterly.companyRevenue.value).toBe(201944);
+    expect(kpis.quarterly.companyOperatingIncome.value).toBe(28076);
+    expect(qCalc.revenueUsdMillions).toBe(201944);
+    expect(qCalc.operatingMarginPct).toBe(13.9);
+
+    // TTM-2026-Q3 revenue = $797,455M, OCF = $168,300M, net capex = $210,657M (125.2% of OCF), FCF = -$42,357M (-5.3% of TTM revenue)
+    expect(kpis.ttm.revenue.value).toBe(797455);
+    expect(kpis.ttm.operatingCashFlow.value).toBe(168300);
+    expect(kpis.ttm.netCapex.value).toBe(210657);
+    expect(kpis.ttm.freeCashFlow.value).toBe(-42357);
+    expect(qCalc.freeCashFlowUsdMillions).toBe(-42357);
+    expect(qCalc.fcfMarginPct).toBe(-5.3);
+    expect(qCalc.capexIntensityPct).toBe(26.4);
+
+    // Confirm observedMetrics explicitly reconcile TTM-2026-Q3 (125.2%), TTM-2025-Q3 (88.7%), and 2025-Q3 gross capex/OCF (98.8%)
+    const earningsDim = qCalc.dimensions.earnings_financial_health;
+    const reconciliationMetric = earningsDim.observedMetrics.find((m) =>
+      m.metric.includes('TTM-2026-Q3 vs Prior-Year TTM-2025-Q3'),
+    );
+    expect(reconciliationMetric?.valueDisplay).toContain('125.2% of TTM OCF');
+    expect(reconciliationMetric?.valueDisplay).toContain('88.7%');
+    expect(reconciliationMetric?.valueDisplay).toContain('98.8%');
   });
 
   it('deterministically classifies BUY, HOLD, SELL, AVOID, and INSUFFICIENT DATA and ignores chatbot override attempts', () => {
@@ -199,7 +255,7 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(avoidResult.assessment).toBe('AVOID');
   });
 
-  it('runs weight sensitivity analysis across 4 schemes and point-in-time backtest vs QQQ with transaction friction', () => {
+  it('audits the 46-session comparison as an Illustrative Ex-Post Cohort Comparison and runs weight sensitivity across 4 schemes', () => {
     const report = runResearchMethodologyValidation();
     expect(report.methodologyVersion).toBe('aci-stock-rating-v1.0.0-exp');
     expect(report.weightSensitivity).toHaveLength(4);
@@ -207,40 +263,50 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
       expect(scheme.rankedTickersByPriority[0]).toBe('NVDA');
       expect(scheme.topTwoTickers).toEqual(['NVDA', 'MSFT']);
       expect(scheme.spearmanRankCorrelationVsBaseline).toBeGreaterThanOrEqual(
-        0.85,
+        0.89,
       );
       expect(scheme.directionalLabelsEmitted).toBe(0);
     }
 
-    // Point-in-time backtest vs QQQ with realistic costs (10bps spread + 5bps slippage + 15bps FX + £1 fee)
+    // Verify 46-session comparison bias audit disclosures
     expect(report.sampleSummary.tradingSessionsAvailable).toBe(46);
     expect(report.sampleSummary.requiredSessionsForProductionSignOff).toBe(252);
     expect(report.sampleSummary.sampleSufficientForPredictiveClaims).toBe(
       false,
     );
-    expect(report.frictionAssumptions.spreadBps).toBe(10);
-    expect(report.frictionAssumptions.slippageBps).toBe(5);
-    expect(report.frictionAssumptions.fxConversionBps).toBe(15);
     expect(
-      report.benchmarkComparisonVsQqq.cohortCumulativeGrossReturnUsdPct,
-    ).toBeGreaterThan(
-      report.benchmarkComparisonVsQqq.qqqCumulativeReturnUsdPct,
+      report.biasControls.fortySixSessionComparisonAudit
+        .isStrictPointInTimeBacktest,
+    ).toBe(false);
+    expect(
+      report.benchmarkComparisonVsQqq.comparisonClassification,
+    ).toBe(
+      'Illustrative Ex-Post Cohort Comparison (Non-Predictive; Not Strict Point-in-Time)',
     );
+    expect(
+      report.benchmarkComparisonVsQqq.windows[0]
+        ?.eligibleTickersWithPrimaryFilings,
+    ).toEqual(['NVDA']);
+    // At the final weekly window anchor (2026-10-28 -> 2026-11-04), NVDA (2026-08-26), MSFT (2026-10-28), and GOOGL (2026-10-28)
+    // were published on or before the anchor date, whereas AMZN (2026-10-29) published 1 day after the anchor.
+    expect(
+      report.benchmarkComparisonVsQqq.windows.at(-1)
+        ?.eligibleTickersWithPrimaryFilings,
+    ).toEqual(['NVDA', 'MSFT', 'GOOGL']);
   });
 
-  it('builds the 5-sentence Today’s Market Briefing and What Changed historical delta feed', () => {
+  it('builds the dated 5-sentence Today’s Market Briefing, What Changed delta feed, and privacy-isolated assistant payload', () => {
     const assessments = evaluateUniverseResearchAssessments();
     const briefing = buildExecutiveMarketBriefing(assessments);
 
-    expect(briefing.sentences.marketEnvironment.length).toBeGreaterThan(30);
-    expect(briefing.sentences.sectorDevelopments.length).toBeGreaterThan(30);
-    expect(
-      briefing.sentences.strongestResearchOpportunities.length,
-    ).toBeGreaterThan(30);
-    expect(briefing.sentences.highestMaterialRisks.length).toBeGreaterThan(30);
-    expect(briefing.sentences.changesSincePriorSession.length).toBeGreaterThan(
-      30,
+    expect(briefing.sentences.marketEnvironment).toContain('2026-11-04');
+    expect(briefing.sentences.sectorDevelopments).toContain('$895.4B USD');
+    expect(briefing.sentences.strongestResearchOpportunities).toContain(
+      'Not Buy/Hold/Sell Recommendations',
     );
+    expect(briefing.sentences.highestMaterialRisks).toContain('125.2%');
+    expect(briefing.sentences.highestMaterialRisks).toContain('88.7%');
+    expect(briefing.sentences.changesSincePriorSession).toContain('23/23');
     expect(briefing.citedSourceIds.length).toBeGreaterThanOrEqual(5);
 
     const changes = buildWhatChangedSummary(assessments);
@@ -250,6 +316,16 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     );
     expect(changes.some((c) => c.category === 'earnings_update')).toBe(true);
     expect(changes.some((c) => c.category === 'financing_change')).toBe(true);
+
+    // Confirm public-research assistant payload never contains private broker fields
+    const payload = buildExecutiveAssistantRequestPayload(
+      'Why did NVIDIA receive this assessment?',
+    );
+    expect(Object.keys(payload)).toEqual([
+      'question',
+      'temporalBasis',
+      'mode',
+    ]);
   });
 
   it('renders ExecutiveOverviewSections with Section A, Section B slot, Section C, Section D, and Section E cleanly and isolates portfolio holdings from research scores', () => {
@@ -285,6 +361,13 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     );
     expect(htmlWithoutHoldings).toContain('data-testid="portfolio-snapshot"');
     expect(htmlWithoutHoldings).toContain('data-testid="stock-research-table"');
+    expect(htmlWithoutHoldings).toContain('data-testid="blocking-reasons-NVDA"');
+    expect(htmlWithoutHoldings).toContain(
+      'Non-Directional — Not Buy/Hold/Sell',
+    );
+    expect(htmlWithoutHoldings).toContain(
+      'Illustrative Ex-Post Cohort Comparison vs QQQ',
+    );
     expect(htmlWithoutHoldings).toContain(
       'data-testid="company-assessment-drawer"',
     );
@@ -297,6 +380,6 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(htmlWithHoldings).toContain('Held in portfolio (isolated)');
     expect(
       evaluateCompanyResearchAssessment('NVDA').researchPriorityScore,
-    ).toBe(84.1);
+    ).toBe(82.3);
   });
 });
