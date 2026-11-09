@@ -1185,6 +1185,37 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   const userPromptText = [
     `Answer the user question strictly using the following authorised EvidenceBundleV1 JSON. Do not use any outside facts or invent any numbers.`,
+    `Return ONLY a single valid JSON object with these exact keys:`,
+    `{`,
+    `  "shortAnswer": "string (under 700 chars)",`,
+    `  "executiveTldr": ["string bullet 1", "string bullet 2", "string bullet 3"],`,
+    `  "supportingClaims": [`,
+    `    {`,
+    `      "claimId": "claim-1",`,
+    `      "statement": "string statement grounded in the cited relationship/source",`,
+    `      "distinction": "source_fact" | "deterministic_arithmetic" | "modelled_scenario" | "reported_unverified" | "interpretation",`,
+    `      "evidenceIds": ["valid docId from ALLOWED_EVIDENCE_IDS"],`,
+    `      "relationshipIds": ["valid relationshipId from ALLOWED_RELATIONSHIP_IDS"],`,
+    `      "quantitativeValue": null,`,
+    `      "unit": null,`,
+    `      "currency": null,`,
+    `      "periodOrAsOf": "${cutoffDateOnly}"`,
+    `    }`,
+    `  ],`,
+    `  "relevantRelationshipIds": ["valid relationshipId from ALLOWED_RELATIONSHIP_IDS"],`,
+    `  "contradictoryEvidence": [`,
+    `    {`,
+    `      "topic": "string",`,
+    `      "description": "string",`,
+    `      "relationshipIds": ["valid relationshipId"],`,
+    `      "evidenceIds": ["valid docId"]`,
+    `    }`,
+    `  ],`,
+    `  "missingInformation": ["string"],`,
+    `  "supportStatus": "fully_supported" | "partially_supported" | "unsupported",`,
+    `  "abstentionReason": null,`,
+    `  "suggestedFollowUpQuestions": ["question 1", "question 2", "question 3"]`,
+    `}`,
     `MANDATORY GROUNDING RULES:`,
     `- ALLOWED_EVIDENCE_IDS (every supportingClaim.evidenceIds and contradictoryEvidence.evidenceIds MUST only use IDs from this list): ${JSON.stringify(allowedEvidenceIds)}`,
     `- ALLOWED_RELATIONSHIP_IDS (every supportingClaim.relationshipIds, contradictoryEvidence.relationshipIds, and relevantRelationshipIds MUST only use IDs from this list): ${JSON.stringify(allowedRelationshipIds)}`,
@@ -1221,7 +1252,6 @@ export async function generateAndValidateEvidenceLockedAnswer(
             maxOutputTokens: 2048,
             ...(thinkingConfig ? { thinkingConfig } : {}),
             responseMimeType: 'application/json',
-            responseSchema: GEMINI_RESPONSE_SCHEMA,
           },
         }),
         new Promise<never>((_, reject) =>
@@ -1229,7 +1259,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
         ),
       ]);
 
-      const rawText = response.text ?? '';
+      const rawText = (response.text ?? '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
       const responseId =
         typeof (response as { responseId?: unknown }).responseId === 'string'
           ? (response as { responseId: string }).responseId
@@ -1242,13 +1272,78 @@ export async function generateAndValidateEvidenceLockedAnswer(
             .map((q) => q.slice(0, 235))
             .slice(0, 5)
         : [];
+      const rawClaims = Array.isArray(parsedModelJson.supportingClaims)
+        ? (parsedModelJson.supportingClaims as Array<Record<string, unknown>>).map(
+            (c, idx) => ({
+              claimId:
+                typeof c.claimId === 'string' && c.claimId.trim().length > 0
+                  ? c.claimId.slice(0, 64)
+                  : `claim-${idx + 1}`,
+              statement:
+                typeof c.statement === 'string' ? c.statement.slice(0, 595) : '',
+              distinction:
+                typeof c.distinction === 'string' &&
+                [
+                  'source_fact',
+                  'deterministic_arithmetic',
+                  'modelled_scenario',
+                  'reported_unverified',
+                  'interpretation',
+                ].includes(c.distinction)
+                  ? c.distinction
+                  : 'source_fact',
+              evidenceIds: Array.isArray(c.evidenceIds)
+                ? (c.evidenceIds as unknown[]).filter(
+                    (id): id is string => typeof id === 'string',
+                  )
+                : [],
+              relationshipIds: Array.isArray(c.relationshipIds)
+                ? (c.relationshipIds as unknown[]).filter(
+                    (id): id is string => typeof id === 'string',
+                  )
+                : [],
+              quantitativeValue:
+                typeof c.quantitativeValue === 'number' &&
+                Number.isFinite(c.quantitativeValue)
+                  ? c.quantitativeValue
+                  : null,
+              unit:
+                typeof c.unit === 'string' &&
+                ['USD', 'MW', 'percent', 'percentage_points'].includes(c.unit)
+                  ? c.unit
+                  : null,
+              currency: typeof c.currency === 'string' ? c.currency.slice(0, 12) : null,
+              periodOrAsOf:
+                typeof c.periodOrAsOf === 'string' ? c.periodOrAsOf.slice(0, 64) : null,
+            }),
+          )
+        : [];
       const rawContra = Array.isArray(parsedModelJson.contradictoryEvidence)
-        ? (parsedModelJson.contradictoryEvidence as Array<Record<string, unknown>>).filter(
-            (c) =>
-              c &&
-              typeof c === 'object' &&
-              Array.isArray(c.evidenceIds) &&
-              c.evidenceIds.length > 0,
+        ? (parsedModelJson.contradictoryEvidence as Array<Record<string, unknown>>)
+            .filter(
+              (c) =>
+                c &&
+                typeof c === 'object' &&
+                Array.isArray(c.evidenceIds) &&
+                c.evidenceIds.length > 0,
+            )
+            .map((c) => ({
+              topic: typeof c.topic === 'string' ? c.topic.slice(0, 120) : 'Topic',
+              description:
+                typeof c.description === 'string' ? c.description.slice(0, 495) : '',
+              relationshipIds: Array.isArray(c.relationshipIds)
+                ? (c.relationshipIds as unknown[]).filter(
+                    (id): id is string => typeof id === 'string',
+                  )
+                : [],
+              evidenceIds: (c.evidenceIds as unknown[]).filter(
+                (id): id is string => typeof id === 'string',
+              ),
+            }))
+        : [];
+      const rawRelIds = Array.isArray(parsedModelJson.relevantRelationshipIds)
+        ? (parsedModelJson.relevantRelationshipIds as unknown[]).filter(
+            (id): id is string => typeof id === 'string',
           )
         : [];
       const rawShortAnswer =
@@ -1279,6 +1374,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
         ...parsedModelJson,
         shortAnswer: rawShortAnswer || parsedModelJson.shortAnswer,
         executiveTldr: rawTldr.length > 0 ? rawTldr : parsedModelJson.executiveTldr,
+        supportingClaims: rawClaims,
+        relevantRelationshipIds: rawRelIds,
         missingInformation: rawMissing,
         abstentionReason: rawAbstentionReason,
         contradictoryEvidence: rawContra,
