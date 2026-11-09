@@ -14,6 +14,14 @@ import {
   type ValuationInputBundle,
 } from '../lib/research-ratings/valuation-layer';
 import {
+  SEC_XBRL_EXPANSION_VERSION,
+  evaluateUniverseG71ExpandedValuationLayer,
+  getSecXbrlCompanyRecord,
+  getSecXbrlExpansionPackage,
+  getSevenStockCoverageMatrixG71,
+  summariseG71BeforeAfterCoverage,
+} from '../lib/research-ratings/sec-xbrl-expansion';
+import {
   computeAssessmentTransitionLedger,
   createImmutableAssessmentSnapshot,
   evaluateForwardAssessmentOutcomes,
@@ -265,8 +273,15 @@ describe('Phase G.7 — Financial Data Completeness, Deterministic Valuation Lay
 
     expect(tiers[0]!.tierKey).toBe('tier_1_fundamental_research_screening');
     expect(tiers[0]!.permitsDirectionalBuyHoldSell).toBe(false);
-    expect(tiers[0]!.qualifyingTickers).toEqual(['NVDA', 'MSFT', 'GOOGL', 'AMZN']);
-    expect(tiers[0]!.blockedTickers).toEqual(['AMD', 'CRWV', 'INTC']);
+    expect(tiers[0]!.qualifyingTickers).toEqual([
+      'NVDA',
+      'MSFT',
+      'AMD',
+      'GOOGL',
+      'AMZN',
+      'CRWV',
+    ]);
+    expect(tiers[0]!.blockedTickers).toEqual(['INTC']);
 
     expect(tiers[1]!.tierKey).toBe('tier_2_valuation_supported_investment_assessment');
     expect(tiers[1]!.permitsDirectionalBuyHoldSell).toBe(false);
@@ -421,7 +436,74 @@ describe('Phase G.7 — Financial Data Completeness, Deterministic Valuation Lay
     expect(report.publicResearchInferenceExcludesPrivateBrokerData).toBe(true);
     expect(report.allScreeningNumbersHavePeriodSourceAndFormula).toBe(true);
     expect(report.incompleteProvenanceMetricsCount).toBe(0);
-    expect(report.totalAuditedScreeningMetrics).toBe(42);
+    expect(report.totalAuditedScreeningMetrics).toBe(52);
     expect(report.executionAuthority).toBe('none');
+  });
+
+  it('Stage 7 (Phase G.7.1): verifies the zero-cost SEC EDGAR XBRL expansion across all 7 stocks, staging sample verification, point-in-time cutoffs, and unadjusted-price valuation guardrails', () => {
+    const pkg = getSecXbrlExpansionPackage();
+    expect(pkg.schemaVersion).toBe(SEC_XBRL_EXPANSION_VERSION);
+    expect(pkg.stagingSampleVerification.totalSamplesChecked).toBe(16);
+    expect(pkg.stagingSampleVerification.mismatchesCount).toBe(0);
+    expect(pkg.stagingSampleVerification.allSamplesMatched).toBe(true);
+
+    // 1. Verify rawXbrlFacts and normalisedFinancialValues separation across all 7 tickers
+    for (const ticker of ['NVDA', 'MSFT', 'GOOGL', 'AMZN', 'AMD', 'CRWV', 'INTC'] as const) {
+      const { record, eligibleQuarters } = getSecXbrlCompanyRecord(ticker);
+      expect(record.rawXbrlFacts.quarterlyFlowFacts.revenue!.length).toBeGreaterThanOrEqual(4);
+      expect(eligibleQuarters.length).toBeGreaterThanOrEqual(4);
+      expect(
+        record.normalisedFinancialValues.trailingTwelveMonths.revenueUsdMillions,
+      ).toBeGreaterThan(0);
+      expect(
+        record.normalisedFinancialValues.shareCounts
+          .weightedAverageDilutedSharesMillions,
+      ).toBeGreaterThan(0);
+      expect(record.latestPublishedAtMs).toBeGreaterThan(0);
+    }
+
+    // 2. Verify point-in-time (`asOfMs`) cutoff excludes filings accepted after cutoff
+    const amdBeforeQ3 = getSecXbrlCompanyRecord('AMD', {
+      asOfMs: Date.parse('2026-10-15T00:00:00Z'),
+    });
+    expect(amdBeforeQ3.latestFilingEligibleAtCutoff).toBe(false);
+    expect(amdBeforeQ3.eligibleQuarters.at(-1)?.periodEnd).toBe('2026-06-27');
+
+    // 3. Verify before/after coverage matrix summary (18 -> 49 verified SEC primary cells + 14 reference-price valuation cells)
+    const covSummary = summariseG71BeforeAfterCoverage();
+    expect(covSummary.totalCells).toBe(84);
+    expect(covSummary.beforeByStatus.verified).toBe(18);
+    expect(covSummary.afterByStatus.verified).toBe(49);
+    expect(covSummary.verifiedCellsAdded).toBe(31);
+    expect(getSevenStockCoverageMatrixG71()).toHaveLength(84);
+
+    // 4. Verify expanded valuation layer computes Market Cap, EV, P/B, P/E, EV/Revenue, EV/EBIT, EV/FCF on reference closes while keeping allValuationMultiplesResolved = false
+    const valResults = evaluateUniverseG71ExpandedValuationLayer();
+    expect(valResults).toHaveLength(7);
+    const valByTicker = Object.fromEntries(valResults.map((r) => [r.ticker, r]));
+
+    for (const ticker of ['NVDA', 'MSFT', 'GOOGL', 'AMZN', 'AMD', 'CRWV', 'INTC'] as const) {
+      const v = valByTicker[ticker]!;
+      expect(v.allValuationMultiplesResolved).toBe(false);
+      expect(v.metrics.marketCapUsdMillions.value).toBeGreaterThan(0);
+      expect(v.metrics.marketCapUsdMillions.status).toBe(
+        'computed_unadjusted_reference_price',
+      );
+      expect(v.metrics.enterpriseValueUsdMillions.value).toBeGreaterThan(0);
+      expect(v.metrics.enterpriseValueUsdMillions.status).toBe(
+        'computed_unadjusted_reference_price',
+      );
+      expect(v.metrics.evToTtmRevenue.value).toBeGreaterThan(0);
+    }
+
+    // Loss-making / negative-FCF guards in G.7.1: INTC and CRWV suppress meaningless P/E & EV/FCF
+    expect(valByTicker.INTC!.metrics.trailingGaapPe.value).toBeNull();
+    expect(valByTicker.INTC!.metrics.trailingGaapPe.status).toBe(
+      'not_meaningful_negative_earnings',
+    );
+    expect(valByTicker.CRWV!.metrics.trailingGaapPe.value).toBeNull();
+    expect(valByTicker.CRWV!.metrics.evToTtmFcf.value).toBeNull();
+    expect(valByTicker.AMZN!.metrics.evToTtmFcf.value).toBeNull();
+    expect(valByTicker.AMZN!.metrics.evToTtmFcf.status).toBe('not_meaningful_negative_fcf');
   });
 });

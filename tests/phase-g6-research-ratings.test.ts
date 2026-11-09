@@ -30,11 +30,11 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(assessments.map((a) => a.ticker)).toEqual([
       'NVDA',
       'MSFT',
+      'AMD',
       'GOOGL',
       'AMZN',
-      'AMD',
-      'CRWV',
       'INTC',
+      'CRWV',
     ]);
 
     for (const item of assessments) {
@@ -72,9 +72,9 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
     expect(msft.evidenceCoverage.coveredWeightPct).toBe(70);
     expect(googl.evidenceCoverage.coveredWeightPct).toBe(70);
     expect(amzn.evidenceCoverage.coveredWeightPct).toBe(70);
-    expect(amd.evidenceCoverage.coveredWeightPct).toBe(35);
-    expect(crwv.evidenceCoverage.coveredWeightPct).toBe(35);
-    expect(intc.evidenceCoverage.coveredWeightPct).toBe(25);
+    expect(amd.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(crwv.evidenceCoverage.coveredWeightPct).toBe(70);
+    expect(intc.evidenceCoverage.coveredWeightPct).toBe(50);
 
     expect(
       nvda.layers.quantitativeCalculation.dimensions.earnings_financial_health
@@ -93,22 +93,43 @@ describe('Phase G.6 — Deterministic Stock Research Assessment Engine & Executi
         .score,
     ).toBe(49);
     expect(
-      intc.layers.quantitativeCalculation.dimensions.earnings_financial_health
+      amd.layers.quantitativeCalculation.dimensions.earnings_financial_health
         .score,
-    ).toBeNull();
+    ).toBe(60.4);
+    expect(
+      crwv.layers.quantitativeCalculation.dimensions.earnings_financial_health
+        .score,
+    ).toBe(18);
     expect(
       intc.layers.quantitativeCalculation.dimensions.earnings_financial_health
-        .status,
-    ).toBe('insufficient_data');
+        .score,
+    ).toBe(50.3);
 
-    // Non-directional screening scores require SEC earnings table; INTC/AMD/CRWV remain null
+    // Non-directional screening scores across all 7 companies after Phase G.7.1 SEC XBRL expansion
     expect(nvda.researchPriorityScore).toBe(82.3);
     expect(msft.researchPriorityScore).toBe(73.7);
+    expect(amd.researchPriorityScore).toBe(63);
     expect(googl.researchPriorityScore).toBe(61.5);
     expect(amzn.researchPriorityScore).toBe(57.7);
-    expect(intc.researchPriorityScore).toBeNull();
-    expect(amd.researchPriorityScore).toBeNull();
-    expect(crwv.researchPriorityScore).toBeNull();
+    expect(intc.researchPriorityScore).toBe(54.1);
+    expect(crwv.researchPriorityScore).toBe(36.1);
+
+    // Also verify pre-G.7.1 baseline (`usePreG71Baseline: true`) retains exact before-state (INTC/AMD/CRWV null)
+    const preG71Amd = evaluateCompanyResearchAssessment('AMD', {
+      usePreG71Baseline: true,
+    });
+    const preG71Crwv = evaluateCompanyResearchAssessment('CRWV', {
+      usePreG71Baseline: true,
+    });
+    const preG71Intc = evaluateCompanyResearchAssessment('INTC', {
+      usePreG71Baseline: true,
+    });
+    expect(preG71Amd.evidenceCoverage.coveredWeightPct).toBe(35);
+    expect(preG71Crwv.evidenceCoverage.coveredWeightPct).toBe(35);
+    expect(preG71Intc.evidenceCoverage.coveredWeightPct).toBe(25);
+    expect(preG71Amd.researchPriorityScore).toBeNull();
+    expect(preG71Crwv.researchPriorityScore).toBeNull();
+    expect(preG71Intc.researchPriorityScore).toBeNull();
 
     // Verify 4 distinct epistemic layers exist on every company assessment
     expect(nvda.layers.quantitativeCalculation.revenueUsdMillions).toBe(96221);

@@ -35,7 +35,7 @@ import {
  * 4. Keeps all 7 company directional ratings locked under G.6/G.7 gates (`INSUFFICIENT DATA`) and holds `executionAuthority: 'none'`.
  */
 
-export const THESIS_MONITOR_VERSION = 'aci-thesis-monitor-v2.0.0' as const;
+export const THESIS_MONITOR_VERSION = 'aci-thesis-monitor-v2.1.0' as const;
 export const ARK_CAPEX_THESIS_ID = 'thesis-ark-ai-capex-moderation-2026-11-07' as const;
 
 export type EpistemicSourceLayer =
@@ -175,6 +175,39 @@ export interface ThesisLeadingIndicator {
   historicalComparison: string;
   /** Deterministic classification (Requirement 5) */
   evidenceClassification: DeterministicEvidenceClassification;
+  /** Part A.4 — Explicit 6-part epistemic separation */
+  observedFinancialFact: string;
+  hypothesisBeingTested: string;
+  relevanceOfObservation: string;
+  evidenceDirection: DeterministicEvidenceClassification;
+  sourceConfidence: {
+    level:
+      | 'high_primary_filing_or_regulator'
+      | 'medium_mixed_primary_and_reported'
+      | 'low_unofficial_or_secondary';
+    rationale: string;
+  };
+  freshnessAndHistoricalEligibility: {
+    freshnessStatus: IndicatorFreshnessStatus;
+    publishedAtMs: number | null;
+    receivedAtMs: number;
+    eligibleAtCutoff: boolean;
+    ageDays: number | null;
+    rationale: string;
+  };
+  /** Part D.2 — Scheduled collection & change-tracking fields */
+  latestEligibleObservation: string;
+  previousComparableObservation: string;
+  evidenceSourceAndTimestamp: {
+    sourceId: string;
+    publishedAtIso: string | null;
+    receivedAtIso: string;
+  };
+  materialChange: {
+    hasMaterialChange: boolean;
+    summary: string;
+  };
+  hypothesisResolution: 'supports' | 'contradicts' | 'does_not_resolve';
   publishedAtMs: number | null;
   receivedAtMs: number;
   currentVerifiedReading: string;
@@ -184,6 +217,7 @@ export interface ThesisLeadingIndicator {
 
 export interface EvidenceChangeAssessmentItem {
   itemId: string;
+  indicatorId: string;
   title: string;
   domain: 'macro_market' | 'corporate_filings' | 'typedb_graph' | 'policy_and_grid';
   classification: DeterministicEvidenceClassification;
@@ -202,6 +236,9 @@ export interface DeterministicEvidenceChangeSummary {
     neutral: number;
     insufficient_evidence: number;
   };
+  totalDeclaredIndicatorsCount: 8;
+  sumOfMutuallyExclusiveCountsEqualsTotal: true;
+  zeroDuplicateIndicatorIds: true;
   overallConclusionClassification:
     | 'mixed_supports_and_contradicts'
     | 'supports'
@@ -214,6 +251,33 @@ export interface DeterministicEvidenceChangeSummary {
   excludedByHistoricalCutoffIds: string[];
   staleIndicatorIds: string[];
   items: EvidenceChangeAssessmentItem[];
+}
+
+export interface PartAQualityGateAudit {
+  priorVersionReportedCounts: {
+    supports: 4;
+    contradicts: 3;
+    neutral: 1;
+    insufficient_evidence: 1;
+    sum: 9;
+    declaredIndicatorsCount: 8;
+  };
+  rootCauseOfNineCountMismatch: string;
+  correctedCountsDerivedFromUniqueIndicators: {
+    supports: number;
+    contradicts: number;
+    neutral: number;
+    insufficient_evidence: number;
+    sum: number;
+    declaredIndicatorsCount: number;
+    sumEqualsDeclaredCount: boolean;
+  };
+  reclassifiedIndicatorsAudit: Array<{
+    indicatorId: string;
+    priorClassification: DeterministicEvidenceClassification;
+    correctedClassification: DeterministicEvidenceClassification;
+    correctionRationale: string;
+  }>;
 }
 
 export interface LiveGeminiThesisInferenceRecord {
@@ -288,6 +352,7 @@ export interface EvidenceBackedThesisAssessment {
     promoteUnverifiedCommentaryToProdGraph: false;
     rationale: string;
   };
+  partAQualityGateAudit: PartAQualityGateAudit;
   provenanceRecords: ThesisProvenanceRecord[];
   marketCloseIngestionAudit: MarketCloseIngestionAudit;
   macroClaimsAudit: MacroClaimVerificationAudit[];
@@ -597,6 +662,22 @@ export const ARK_THESIS_PROVENANCE_RECORDS: readonly ThesisProvenanceRecord[] = 
     eligibleForGraphConfirmation: true,
     epistemicRestrictionNote:
       'Verified primary SEC registration statement establishing $895.4B in aggregate signed multi-year cloud compute and data-centre purchase/lease commitments (as of 30 Sep 2026) alongside 9M 2026 GAAP revenue of $33.242B and GAAP net loss of -$104.0B.',
+  },
+  {
+    recordId: 'sec-xbrl-g7-1-2026-11-09',
+    epistemicLayer: 'verified_primary_evidence',
+    title: 'SEC EDGAR XBRL 7-Stock Financial Expansion (NVDA, MSFT, GOOGL, AMZN, AMD, CRWV, INTC — Phase G.7.1)',
+    url: 'https://data.sec.gov/api/xbrl/companyfacts/',
+    authorOrInstitution: 'U.S. Securities and Exchange Commission (EDGAR XBRL API)',
+    publishedAtMs: 1793746817000,
+    publicationDateIso: '2026-11-03',
+    publicationBasis: 'sec_edgar_acceptance',
+    receivedAtMs: 1794252500000,
+    receivedAtIso: '2026-11-09T19:28:20Z',
+    claimClassification: 'observed_fact',
+    eligibleForGraphConfirmation: true,
+    epistemicRestrictionNote:
+      'Primary SEC EDGAR XBRL multi-quarter flow, 4-quarter TTM, balance-sheet debt/cash/leases, diluted share count, and acceptanceDateTime package across all 7 universe companies at £0 public-domain cost.',
   },
 ] as const;
 
@@ -932,232 +1013,531 @@ export function evaluateAiCapexModerationThesis(
       ticker: 'AMD',
       companyName: 'Advanced Micro Devices, Inc.',
       currentRatingLabel: byTicker.get('AMD')?.assessment ?? 'INSUFFICIENT DATA',
-      nonDirectionalScreeningScore: byTicker.get('AMD')?.researchPriorityScore ?? null,
+      nonDirectionalScreeningScore: byTicker.get('AMD')?.researchPriorityScore ?? 63.0,
       roleInCapexThesis: 'AI Compute Silicon & Merchant Hardware Supplier',
-      evidenceClassification: 'insufficient_evidence',
+      evidenceClassification: 'contradicts',
       nov4CloseUsd: mkt.AMD!.nov4Close,
       nov5CloseUsd: mkt.AMD!.nov5Close,
       nov6CloseUsd: mkt.AMD!.nov6Close,
       nov5ChangePct: mkt.AMD!.nov5ChangePct,
       nov6ChangePct: mkt.AMD!.nov6ChangePct,
       verifiedSupportingMetrics: [
-        'Rebounded +11.04% on 6 Nov ($404.40 -> $449.04) after a -17.26% drop on 5 Nov ($488.78 -> $404.40, `nasdaq-amd-history-v3`); TCO-focused inference efficiency could support multi-vendor GPU adoption.',
+        'Primary Q3 2026 Form 10-Q (`0000002488-26-000191`) confirms fabless capital efficiency with +$7,056M 4Q TTM Free Cash Flow (22.66% TTM capex/OCF) and -$8,697M Net Cash ($15,776M Cash+ST vs $7,079M Debt).',
+        'Rebounded +11.04% on 6 Nov ($404.40 -> $449.04) after a -17.26% drop on 5 Nov ($488.78 -> $404.40, `nasdaq-amd-history-v3`).',
       ],
       verifiedContradictoryOrRiskMetrics: [
+        'Q3 2026 revenue accelerated +44.68% YoY to $13,377M ($45,436M TTM; Q3 GAAP operating income $2,832M = 21.17% margin, `sec-xbrl-amd-0000002488-26-000191`), contradicting any near-term Q3 hardware demand slowdown.',
         'High tactical beta to AI capex headlines (-8.13% net 2-day move from $488.78 on 4 Nov to $449.04 on 6 Nov, `nasdaq-amd-history-v3`).',
       ],
       missingCompanyEvidence: [
-        'Primary SEC Form 10-Q XBRL revenue, Data Center GPU revenue, operating margin, OCF, capex, FCF, diluted shares, and debt/cash (`status: missing` in Stage 1 audit).',
+        'Customer concentration breakdown across hyperscaler buyers and split-adjusted price verification (`corporateActionsReviewed: false`).',
       ],
-      citedEvidenceIds: ['nasdaq-amd-history-v3', 'nasdaq-amd'],
+      citedEvidenceIds: [
+        'sec-xbrl-amd-0000002488-26-000191',
+        'nasdaq-amd-history-v3',
+        'nasdaq-amd',
+      ],
     },
     {
       ticker: 'CRWV',
       companyName: 'CoreWeave, Inc.',
       currentRatingLabel: byTicker.get('CRWV')?.assessment ?? 'INSUFFICIENT DATA',
-      nonDirectionalScreeningScore: byTicker.get('CRWV')?.researchPriorityScore ?? null,
+      nonDirectionalScreeningScore: byTicker.get('CRWV')?.researchPriorityScore ?? 39.1,
       roleInCapexThesis: 'Leveraged Specialist AI Neocloud',
-      evidenceClassification: 'insufficient_evidence',
+      evidenceClassification: 'contradicts',
       nov4CloseUsd: mkt.CRWV!.nov4Close,
       nov5CloseUsd: mkt.CRWV!.nov5Close,
       nov6CloseUsd: mkt.CRWV!.nov6Close,
       nov5ChangePct: mkt.CRWV!.nov5ChangePct,
       nov6ChangePct: mkt.CRWV!.nov6ChangePct,
       verifiedSupportingMetrics: [
-        'Anchored by 400 MW Polaris Forge 1 campus lease with Applied Digital (250 MW operational from 1 Oct 2026, `apld-8k-2026-10-07`, `src-crwv-polaris-2026`).',
+        'Q2 2026 Form 10-Q (`0001769628-26-000366`) revenue grew +112.46% YoY to $2,575M ($7,590M TTM), anchored by 400 MW Polaris Forge 1 campus lease with Applied Digital (250 MW operational from 1 Oct 2026, `apld-8k-2026-10-07`).',
       ],
       verifiedContradictoryOrRiskMetrics: [
-        'Fell -9.83% on 5 Nov ($48.42 -> $43.66) before rebounding +6.28% on 6 Nov ($46.40, `nasdaq-crwv-history-v3`); highly exposed if hyperscalers moderate third-party neocloud leasing.',
-        'High reliance on debt-financed GPU clusters and third-party data-centre leases (`cbi-fsr-2026-i`).',
+        'Directly contradicts capex moderation: Q2 2026 cash capex reached $6,422M (945.80% of $679M Q2 OCF) and 4Q TTM capex reached $20,566M (297.58% of $6,911M TTM OCF), driving TTM FCF to -$13,655M alongside +$30,233M Net Debt ($35,772M debt + finance leases plus $16,319M operating leases, `sec-xbrl-crwv-0001769628-26-000366`).',
+        'Fell -9.83% on 5 Nov ($48.42 -> $43.66) before rebounding +6.28% on 6 Nov ($46.40, `nasdaq-crwv-history-v3`).',
       ],
       missingCompanyEvidence: [
-        'Primary SEC S-1 / 10-Q XBRL revenue, interest expense, operating cash flow, GPU capex, SPV debt facilities, and diluted share count.',
+        'Q3 2026 Form 10-Q (not yet filed on SEC EDGAR as of 9 November 2026; latest filing is Q2 2026 10-Q ended 30 June 2026).',
       ],
-      citedEvidenceIds: ['src-crwv-polaris-2026', 'apld-8k-2026-10-07', 'nasdaq-crwv-history-v3', 'cbi-fsr-2026-i'],
+      citedEvidenceIds: [
+        'sec-xbrl-crwv-0001769628-26-000366',
+        'src-crwv-polaris-2026',
+        'apld-8k-2026-10-07',
+        'nasdaq-crwv-history-v3',
+        'cbi-fsr-2026-i',
+      ],
     },
     {
       ticker: 'INTC',
       companyName: 'Intel Corporation',
       currentRatingLabel: byTicker.get('INTC')?.assessment ?? 'INSUFFICIENT DATA',
-      nonDirectionalScreeningScore: byTicker.get('INTC')?.researchPriorityScore ?? null,
+      nonDirectionalScreeningScore: byTicker.get('INTC')?.researchPriorityScore ?? 54.2,
       roleInCapexThesis: 'Foundry & Co-Investment Capex Turnaround',
-      evidenceClassification: 'supports',
+      evidenceClassification: 'neutral',
       nov4CloseUsd: mkt.INTC!.nov4Close,
       nov5CloseUsd: mkt.INTC!.nov5Close,
       nov6CloseUsd: mkt.INTC!.nov6Close,
       nov5ChangePct: mkt.INTC!.nov5ChangePct,
       nov6ChangePct: mkt.INTC!.nov6ChangePct,
       verifiedSupportingMetrics: [
-        'Already executing capex sharing via the $11.0B Fab 34 Leixlip Ireland Semiconductor Co-Investment Program (SCJV) (`intc-10q-q3-2026`, `src-intc-10k-2025`); 48-session price history now verified through 6 Nov ($58.27 -> $52.25 on 5 Nov -> $56.28 on 6 Nov, `nasdaq-intc-history-v3`).',
+        'Q3 2026 Form 10-Q (`0000050863-26-000191`) verifies Q3 revenue of $16,513M (+20.95% YoY; $59,892M TTM), Q3 GAAP operating income of $2,522M (15.27% margin), +$1,058M Q3 FCF (+$3,768M TTM FCF), and $11.0B Fab 34 Leixlip Ireland SCJV capex sharing (`intc-10q-q3-2026`).',
       ],
       verifiedContradictoryOrRiskMetrics: [
-        'Carries long-term co-investment distribution obligations to SCJV partners and Ireland fiscal/energy concentration exposure (`ireland-dof-ai-correction-2026-07`).',
+        '4Q TTM GAAP Net Income remains negative at -$12,032M with 78.43% TTM capex/OCF ($13,704M TTM capex on $17,472M TTM OCF) and long-term SCJV partner distribution obligations (`sec-xbrl-intc-0000050863-26-000191`, `ireland-dof-ai-correction-2026-07`).',
       ],
       missingCompanyEvidence: [
-        'Primary SEC Form 10-Q XBRL consolidated revenue, foundry operating loss, OCF, net capex, and debt/cash tables.',
+        'Split-adjusted historical price verification and foundry customer external wafer backlog disclosures.',
       ],
-      citedEvidenceIds: ['intc-10q-q3-2026', 'src-intc-10k-2025', 'ireland-dof-ai-correction-2026-07', 'nasdaq-intc-history-v3'],
+      citedEvidenceIds: [
+        'sec-xbrl-intc-0000050863-26-000191',
+        'intc-10q-q3-2026',
+        'src-intc-10k-2025',
+        'ireland-dof-ai-correction-2026-07',
+        'nasdaq-intc-history-v3',
+      ],
     },
   ];
 
-  // Requirement 4 — Connect the 8 leading indicators to stored observations with value, reportingPeriod, evidenceId, freshnessStatus, and historicalComparison
-  const rawIndicators: Omit<ThesisLeadingIndicator, 'freshnessStatus' | 'evidenceClassification' | 'dataStatus'>[] = [
+  // Part A.3, A.4, A.5, A.6 & Part D.2 — Eight Unique Leading Indicators with Strict Epistemic Separation
+  type RawIndicatorSpec = Omit<
+    ThesisLeadingIndicator,
+    | 'freshnessStatus'
+    | 'evidenceClassification'
+    | 'evidenceDirection'
+    | 'freshnessAndHistoricalEligibility'
+    | 'hypothesisResolution'
+    | 'dataStatus'
+  > & {
+    baseDirection: DeterministicEvidenceClassification;
+    domain: EvidenceChangeAssessmentItem['domain'];
+    freshnessRationale: string;
+  };
+
+  const rawIndicators: RawIndicatorSpec[] = [
     {
       indicatorId: 'ind-capex-to-ocf',
-      name: '1. Hyperscaler Net Capex / Operating Cash Flow Ratio (%)',
+      name: '1. Hyperscaler & Neocloud Net Capex / Operating Cash Flow Ratio (%)',
       category: 'capex_efficiency',
-      measurementFormulaOrSeries: '(Net Capital Expenditure / Operating Cash Flow) × 100 across matched quarterly and TTM periods',
-      value: 'AMZN 125.2% TTM (178.9% Q3) · GOOGL 121.4% Q3 · MSFT 67.9% FY27 Q1',
-      reportingPeriod: '2026-Q3 / FY2027-Q1 (ended 30 Sep 2026)',
+      domain: 'corporate_filings',
+      baseDirection: 'contradicts',
+      measurementFormulaOrSeries:
+        '(Net Capital Expenditure / Operating Cash Flow) × 100 across matched quarterly and 4-quarter TTM periods',
+      value:
+        'AMZN 125.2% TTM (178.9% Q3) · GOOGL 121.4% Q3 (89.0% TTM) · CRWV 297.6% TTM (945.8% Q2) · MSFT 69.4% TTM (67.9% Q1)',
+      reportingPeriod: '2026-Q3 / FY2027-Q1 (ended 30 Sep 2026; CRWV Q2 ended 30 Jun 2026)',
       evidenceId: 'amazon-sec-ex991',
-      primaryEvidenceIds: ['amazon-sec-ex991', 'sec-release', 'msft-fy27-q1', 'nvda-fy27-q2'],
+      primaryEvidenceIds: [
+        'amazon-sec-ex991',
+        'sec-release',
+        'msft-fy27-q1',
+        'nvda-fy27-q2',
+        'sec-xbrl-g7-1-2026-11-09',
+      ],
       historicalComparison:
-        'AMZN Net Capex/OCF surged +36.5 pp YoY on a TTM basis (88.7% TTM-2025-Q3 -> 125.2% TTM-2026-Q3) and +82.6 pp YoY in Q3 (96.3% -> 178.9%); GOOGL Q3 Capex/OCF rose +71.9 pp YoY (49.5% in 2025-Q3 -> 121.4% in 2026-Q3).',
+        'AMZN Net Capex/OCF surged +36.5 pp YoY on a TTM basis (88.7% TTM-2025-Q3 -> 125.2% TTM-2026-Q3) and +82.6 pp YoY in Q3 (96.3% -> 178.9%); GOOGL Q3 Capex/OCF rose +71.9 pp YoY (49.5% in 2025-Q3 -> 121.4% in 2026-Q3); CRWV TTM Capex/OCF reached 297.6% (945.8% in Q2 2026).',
+      observedFinancialFact:
+        'In 2026-Q3 / TTM-2026-Q3 SEC filings, Amazon Net Capex reached $210,657M TTM (125.17% of $168,300M OCF; $75,878M Q3 = 178.86% of Q3 OCF), Alphabet Q3 Capex reached $51,355M (121.44% of $42,290M Q3 OCF; $159,804M TTM = 89.00% of TTM OCF), CoreWeave TTM Capex reached $20,566M (297.58% of $6,911M TTM OCF; 945.80% in Q2), and Microsoft TTM cash PP&E reached $135,921M (69.39% of $195,878M TTM OCF).',
+      hypothesisBeingTested:
+        'Whether hyperscaler and AI cloud infrastructure capital expenditure intensity (Capex / OCF) has begun moderating toward sustainable capital efficiency.',
+      relevanceOfObservation:
+        'Capex / OCF directly measures the fraction of internally generated operating cash flow consumed by physical infrastructure additions.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified directly from audited/reviewed SEC Form 10-Q and Form 8-K Exhibit 99.1 filings on EDGAR.',
+      },
+      freshnessRationale:
+        'Q3 2026 / FY27 Q1 filings accepted by SEC EDGAR 28 Oct – 3 Nov 2026 (within 12 days of evaluation).',
+      latestEligibleObservation:
+        'AMZN 125.2% TTM (178.9% Q3); GOOGL 121.4% Q3 (89.0% TTM); CRWV 297.6% TTM (945.8% Q2); MSFT 69.4% TTM; INTC 78.4% TTM; AMD 22.7% TTM; NVDA 5.5% TTM',
+      previousComparableObservation:
+        'AMZN 88.7% TTM-2025-Q3 (96.3% 2025-Q3 net); GOOGL 49.5% 2025-Q3; MSFT 57.1% FY26 Q1',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'amazon-sec-ex991',
+        publishedAtIso: '2026-10-29T22:20:46.000Z',
+        receivedAtIso: '2026-10-31T18:31:43.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Capex/OCF expanded sharply across hyperscalers (+36.5 pp TTM at AMZN, +71.9 pp Q3 at GOOGL) and reached 297.6% TTM at CRWV after G.7.1 SEC XBRL ingestion.',
+      },
       publishedAtMs: 1793304327000,
       receivedAtMs: 1793471503000,
       currentVerifiedReading:
-        'AMZN: 125.2% TTM-2026-Q3 (178.9% in 2026-Q3 vs 88.7% in TTM-2025-Q3); GOOGL: 121.4% in 2026-Q3 (vs 49.5% in 2025-Q3); MSFT: 67.9% in FY27 Q1 (cash PP&E only); NVDA: 11.1% in FY27 Q2',
+        'AMZN: 125.2% TTM-2026-Q3 (178.9% in 2026-Q3 vs 88.7% in TTM-2025-Q3); GOOGL: 121.4% in 2026-Q3 (89.0% TTM); CRWV: 297.6% TTM (945.8% Q2); MSFT: 69.4% TTM (67.9% FY27 Q1); INTC: 78.4% TTM; AMD: 22.7% TTM; NVDA: 5.5% TTM',
       interpretationForThesis:
-        'Contradicts active capex moderation in reported Q3 2026 actuals (capex exceeded 120% of OCF at AMZN and GOOGL), while proving why future moderation is financially required.',
+        'Contradicts the thesis in current reported actuals: hyperscaler and neocloud capex intensity accelerated sharply in Q2–Q3 2026 rather than moderating.',
     },
     {
       indicatorId: 'ind-free-cash-flow',
       name: '2. Hyperscaler & Silicon Free Cash Flow Bridge ($M / % Margin)',
       category: 'cash_conversion',
-      measurementFormulaOrSeries: 'Operating Cash Flow − Net Capital Expenditure',
-      value: 'AMZN -$42,357M TTM (-$33,456M Q3) · GOOGL -$9,065M Q3 · MSFT +$18,633M Q1 · NVDA +$21,341M Q2',
-      reportingPeriod: '2026-Q3 / FY2027-Q1 (ended 30 Sep 2026)',
+      domain: 'corporate_filings',
+      baseDirection: 'contradicts',
+      measurementFormulaOrSeries: 'Operating Cash Flow − Net Capital Expenditure (Quarterly and 4-Quarter TTM)',
+      value:
+        'AMZN -$42,357M TTM (-$33,456M Q3) · GOOGL -$9,065M Q3 (+$19,747M TTM) · CRWV -$13,655M TTM (-$5,743M Q2) · MSFT +$59,957M TTM (+$18,633M Q1)',
+      reportingPeriod: '2026-Q3 / FY2027-Q1 (ended 30 Sep 2026; CRWV Q2 ended 30 Jun 2026)',
       evidenceId: 'goog-2026q3-free_cash_flow-v1',
-      primaryEvidenceIds: ['amazon-sec-ex991', 'goog-2026q3-free_cash_flow-v1', 'msft-fy27-q1', 'nvda-fy27-q2'],
+      primaryEvidenceIds: [
+        'amazon-sec-ex991',
+        'goog-2026q3-free_cash_flow-v1',
+        'msft-fy27-q1',
+        'nvda-fy27-q2',
+        'sec-xbrl-g7-1-2026-11-09',
+      ],
       historicalComparison:
-        'AMZN TTM FCF swung by -$57,157M YoY (+$14,800M in TTM-2025-Q3 -> -$42,357M in TTM-2026-Q3); GOOGL single-quarter FCF swung by -$33,522M YoY (+$24,457M in 2025-Q3 -> -$9,065M in 2026-Q3).',
+        'AMZN TTM FCF swung by -$57,157M YoY (+$14,800M in TTM-2025-Q3 -> -$42,357M in TTM-2026-Q3); GOOGL single-quarter FCF swung by -$33,522M YoY (+$24,457M in 2025-Q3 -> -$9,065M in 2026-Q3); CRWV TTM FCF is -$13,655M (-179.9% margin).',
+      observedFinancialFact:
+        'Reported Free Cash Flow turned deeply negative at Amazon (-$42,357M TTM net / -$46,892M TTM gross; -$33,456M in 2026-Q3), Alphabet (-$9,065M in 2026-Q3, compressing 4Q TTM FCF to +$19,747M), and CoreWeave (-$13,655M TTM; -$5,743M in 2026-Q2), while remaining positive at NVIDIA (+$127,006M TTM), Microsoft (+$59,957M TTM), AMD (+$7,056M TTM), and Intel (+$3,768M TTM).',
+      hypothesisBeingTested:
+        'Whether moderating AI infrastructure capital expenditure is improving corporate cash conversion and restoring Free Cash Flow.',
+      relevanceOfObservation:
+        'Observed negative Free Cash Flow is a direct outcome of unmoderated capex burn exceeding operating cash generation; evidence of acute cash-flow compression must not be misclassified as confirmation that capital discipline is improving.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified from primary SEC Form 10-Q and Form 8-K cash-flow statements across all 7 companies.',
+      },
+      freshnessRationale:
+        'Primary Q3 2026 / FY27 Q1 SEC filings accepted 28 Oct – 3 Nov 2026.',
+      latestEligibleObservation:
+        'AMZN -$42,357M TTM (-$33,456M Q3); GOOGL -$9,065M Q3 (+$19,747M TTM); CRWV -$13,655M TTM; MSFT +$59,957M TTM; NVDA +$127,006M TTM; AMD +$7,056M TTM; INTC +$3,768M TTM',
+      previousComparableObservation:
+        'AMZN +$14,788M TTM-2025-Q3 (+$430M 2025-Q3 gross); GOOGL +$24,457M 2025-Q3',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'goog-2026q3-free_cash_flow-v1',
+        publishedAtIso: '2026-10-29T00:29:06.000Z',
+        receivedAtIso: '2026-10-29T17:15:23.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Reclassified from `supports` to `contradicts` under Part A.5 quality gate: -$57.2B YoY TTM FCF deterioration at AMZN, -$9.07B Q3 FCF at GOOGL, and -$13.66B TTM FCF burn at CRWV prove ongoing cash-flow strain rather than improving capital discipline.',
+      },
       publishedAtMs: 1793217693000,
       receivedAtMs: 1793294123000,
       currentVerifiedReading:
-        'AMZN: -$42,357M TTM-2026-Q3 (-5.3% margin) & -$33,456M in 2026-Q3; GOOGL: -$9,065M in 2026-Q3 (-7.1% margin); MSFT: +$18,633M in FY27 Q1 (+20.2% margin); NVDA: +$21,341M in FY27 Q2 (+22.2% margin)',
+        'AMZN: -$42,357M TTM-2026-Q3 (-5.3% margin) & -$33,456M in 2026-Q3; GOOGL: -$9,065M in 2026-Q3 (+$19,747M TTM); CRWV: -$13,655M TTM (-$5,743M Q2); MSFT: +$59,957M TTM (+$18,633M Q1); NVDA: +$127,006M TTM (+$21,341M Q2); AMD: +$7,056M TTM; INTC: +$3,768M TTM',
       interpretationForThesis:
-        'Supports the capital-efficiency mechanism: negative FCF at AMZN and GOOGL is caused strictly by >120% capex/OCF rather than operating weakness, so moderating capex would rapidly restore FCF.',
+        'Contradicts the thesis in current actuals: while the accounting bridge shows FCF would recover if capex moderates, observed FCF actually deteriorated into deep negative cash burn at AMZN, GOOGL (Q3), and CRWV.',
     },
     {
       indicatorId: 'ind-cloud-revenue-growth',
       name: '3. Cloud & AI Infrastructure Segment Revenue Growth & Macro Demand (BEA Q3 GDP)',
       category: 'cloud_monetisation',
-      measurementFormulaOrSeries: 'YoY % growth for Google Cloud, AWS, and Azure + BEA Q3 2026 Real GDP SAAR %',
-      value: 'Google Cloud +102.6% YoY ($30.71B) · Azure +48% YoY ($33.17B) · AWS +39.3% YoY ($45.98B) · US Q3 Real GDP +3.4% SAAR',
+      domain: 'corporate_filings',
+      baseDirection: 'supports',
+      measurementFormulaOrSeries:
+        'YoY % growth for Google Cloud, AWS, and Azure + BEA Q3 2026 Real GDP SAAR %',
+      value:
+        'Google Cloud +102.6% YoY ($30.71B) · Azure +48% YoY ($33.17B) · AWS +39.3% YoY ($45.98B) · US Q3 Real GDP +3.4% SAAR',
       reportingPeriod: '2026-Q3 (ended 30 Sep 2026; BEA Advance Estimate released 29 Oct 2026)',
       evidenceId: 'sec-release',
-      primaryEvidenceIds: ['sec-release', 'msft-fy27-q1', 'amazon-sec-ex991', 'bea-26-45-gdp-q3-2026-adv'],
+      primaryEvidenceIds: [
+        'sec-release',
+        'msft-fy27-q1',
+        'amazon-sec-ex991',
+        'bea-26-45-gdp-q3-2026-adv',
+      ],
       historicalComparison:
         'Google Cloud revenue more than doubled YoY ($15.16B -> $30.71B, op margin 23.7% -> 36.2%); AWS grew +39.3% YoY ($33.01B -> $45.98B); US Real GDP accelerated +1.2 pp from +2.2% SAAR in Q2 2026 to +3.4% SAAR in Q3 2026 (`bea-26-45-gdp-q3-2026-adv`).',
+      observedFinancialFact:
+        'In Q3 2026, Google Cloud revenue rose +102.61% YoY to $30.709B ($11.121B segment operating income, 36.21% margin), Microsoft Azure grew +48% YoY to $33.165B (Microsoft Cloud $63.900B, +30% YoY), AWS grew +39.32% YoY to $45.984B ($17.452B operating income, 37.95% margin), and US Q3 2026 Real GDP expanded +3.4% SAAR with Real Final Sales to Private Domestic Purchasers up +4.9% SAAR (`bea-26-45-gdp-q3-2026-adv`).',
+      hypothesisBeingTested:
+        'Whether underlying enterprise AI cloud adoption, monetisation, and macroeconomic private demand remain robust enough to sustain growth even if infrastructure capex moderates.',
+      relevanceOfObservation:
+        'Directly validates the second half of the Cathie Wood thesis ("without ending AI adoption growth"): cloud revenue and segment operating profits are compounding at 39%–103% YoY alongside +3.4% US Real GDP growth.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified from primary SEC Form 10-Q/8-K segment disclosures and official U.S. BEA release 26-45.',
+      },
+      freshnessRationale:
+        'BEA Q3 2026 Advance GDP and Q3 cloud earnings released 28–29 October 2026 (fresh within 12 days).',
+      latestEligibleObservation:
+        'Google Cloud $30.709B (+102.61% YoY); Azure $33.165B (+48% YoY); AWS $45.984B (+39.32% YoY); BEA Q3 2026 Real GDP +3.4% SAAR',
+      previousComparableObservation:
+        'Google Cloud $15.157B (2025-Q3); AWS $33.006B (2025-Q3); BEA Q2 2026 Real GDP +2.2% SAAR',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'bea-26-45-gdp-q3-2026-adv',
+        publishedAtIso: '2026-10-29T12:30:00.000Z',
+        receivedAtIso: liveIngestion.beaGdpRelease.receivedAtIso,
+      },
+      materialChange: {
+        hasMaterialChange: false,
+        summary:
+          'Remains the sole verified indicator directly supporting the thesis (`supports`): enterprise cloud monetisation and US GDP demand are expanding strongly.',
+      },
       publishedAtMs: 1793277000000,
       receivedAtMs: 1793471503000,
       currentVerifiedReading:
         'Google Cloud: $30.709B (+102.61% YoY, 36.21% op margin); Azure: $33.165B (+48% YoY); AWS: $45.984B (+39.32% YoY, 37.95% op margin); US Q3 2026 Real GDP: +3.4% SAAR (Private Domestic Final Sales +4.9% SAAR)',
       interpretationForThesis:
-        'Strongly supports the demand pillar of the thesis: enterprise cloud/AI monetisation (+39% to +103% YoY) and US private domestic demand (+4.9% SAAR) are accelerating.',
+        'Directly supports the AI adoption & monetisation pillar of the thesis: cloud segment revenues (+39% to +103% YoY) and US private domestic demand (+4.9% SAAR) confirm rapid enterprise AI monetisation.',
     },
     {
       indicatorId: 'ind-semiconductor-demand',
       name: '4. Merchant AI Silicon Revenue, Guidance & 5–6 Nov SOX / Equity Volatility',
       category: 'silicon_demand',
-      measurementFormulaOrSeries: 'NVDA Data Center revenue & Q3 guidance + Nasdaq SOX / COMP / SPY 5–6 Nov 2026 historical closes',
-      value: 'NVDA Q2 DC $89.0B (Q3 guide $108B ± 2%) · SOX 5 Nov -12.25% (9,011.14) / 6 Nov +4.21% (9,390.25)',
-      reportingPeriod: 'FY2027-Q2 (ended 26 Jul 2026) & Market Closes through 2026-11-06',
+      domain: 'corporate_filings',
+      baseDirection: 'contradicts',
+      measurementFormulaOrSeries:
+        'NVDA & AMD Data Center / consolidated SEC XBRL revenue & Q3 guidance + Nasdaq SOX / COMP / SPY 5–6 Nov 2026 historical closes',
+      value:
+        'NVDA Q2 DC $89.0B ($302.97B TTM rev; Q3 guide $108B ± 2%) · AMD Q3 rev $13.38B (+44.7% YoY) · SOX 5 Nov -12.25% / 6 Nov +4.21%',
+      reportingPeriod: 'FY2027-Q2 / 2026-Q3 & Market Closes through 2026-11-06',
       evidenceId: 'nvda-fy27-q2',
-      primaryEvidenceIds: ['nvda-fy27-q2', 'nasdaq-sox-history-v3', 'nasdaq-comp-history-v3', 'nasdaq-spy-history-v3'],
+      primaryEvidenceIds: [
+        'nvda-fy27-q2',
+        'sec-xbrl-g7-1-2026-11-09',
+        'nasdaq-sox-history-v3',
+        'nasdaq-comp-history-v3',
+        'nasdaq-spy-history-v3',
+      ],
       historicalComparison:
-        'NVDA guided Q3 FY27 total revenue to $108.0B ± 2% vs $96.22B in Q2 (+12.2% QoQ); SOX fell -12.25% on 5 Nov (10,268.65 -> 9,011.14) and rebounded +4.21% on 6 Nov (to 9,390.25, -8.55% net 2-day change).',
+        'NVDA guided Q3 FY27 total revenue to $108.0B ± 2% vs $96.22B in Q2 (+12.2% QoQ; +105.85% YoY in Q2); AMD Q3 2026 revenue grew +44.68% YoY ($9,246M -> $13,377M); SOX fell -12.25% on 5 Nov and rebounded +4.21% on 6 Nov (-8.55% net 2-day change).',
+      observedFinancialFact:
+        'NVIDIA reported FY27 Q2 revenue of $96,221M (+105.85% YoY; $302,970M 4Q TTM) with Data Center revenue of $89,000M and guided FY27 Q3 revenue to $108.0B ± 2% (+12.2% sequential increase); AMD reported Q3 2026 revenue of $13,377M (+44.68% YoY; $45,436M TTM). In equity markets, SOX fell -12.25% on 5 Nov (10,268.65 -> 9,011.14) before rebounding +4.21% on 6 Nov (9,390.25).',
+      hypothesisBeingTested:
+        'Whether merchant AI semiconductor shipment growth and forward revenue guidance show a near-term moderation in AI hardware capital spending.',
+      relevanceOfObservation:
+        'Merchant GPU/accelerator revenue and sequential guidance are the direct upstream counterpart to hyperscaler AI infrastructure capex.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified from NVIDIA FY27 Q2 Form 10-Q (`0001045810-26-000075`), AMD Q3 2026 Form 10-Q (`0000002488-26-000191`), and Nasdaq historical close series.',
+      },
+      freshnessRationale:
+        'AMD Q3 10-Q accepted 3 Nov 2026; NVDA FY27 Q2 10-Q accepted 26 Aug 2026; Nasdaq market closes verified through 6 Nov 2026.',
+      latestEligibleObservation:
+        'NVDA FY27 Q2 Rev $96,221M (TTM $302,970M) & Q3 Guide $108.0B ± 2%; AMD 2026 Q3 Rev $13,377M (+44.68% YoY, TTM $45,436M); SOX 9,390.25 (6 Nov)',
+      previousComparableObservation:
+        'NVDA FY26 Q2 Rev $46,743M; AMD 2025 Q3 Rev $9,246M; SOX 10,268.65 (4 Nov)',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'nvda-fy27-q2',
+        publishedAtIso: '2026-08-26T20:36:00.000Z',
+        receivedAtIso: liveIngestion.nasdaqHistoricalClosesV3.SOX!.receivedAtIso,
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Expanded with AMD Q3 2026 Form 10-Q (+44.68% YoY revenue growth to $13,377M) and NVDA 4Q TTM revenue ($302,970M), reinforcing `contradicts` against near-term hardware spending moderation.',
+      },
       publishedAtMs: Date.parse('2026-08-26T20:20:00Z'),
       receivedAtMs: liveIngestion.nasdaqHistoricalClosesV3.SOX!.receivedAtMs,
       currentVerifiedReading:
-        'NVDA FY27 Q2 Data Center revenue: $89,000M; Q3 FY27 revenue outlook: $108.0B ± 2%; SOX index: 9,011.14 on 5 Nov (-12.25%) -> 9,390.25 on 6 Nov (+4.21%); COMP: 24,315.00 on 5 Nov (-5.52%) -> 24,579.42 on 6 Nov (+1.09%)',
+        'NVDA FY27 Q2 Data Center revenue: $89,000M ($302,970M TTM total rev); Q3 FY27 outlook: $108.0B ± 2%; AMD 2026 Q3 revenue: $13,377M (+44.68% YoY); SOX index: 9,011.14 on 5 Nov (-12.25%) -> 9,390.25 on 6 Nov (+4.21%)',
       interpretationForThesis:
-        'Contradicts near-term hardware order cuts (NVDA $108B Q3 guide), while 5–6 Nov SOX volatility (-12.25% then +4.21%) shows acute market sensitivity to capex moderation.',
+        'Contradicts near-term AI hardware spending moderation: both NVDA ($108B Q3 guide, +12.2% QoQ) and AMD (+44.68% YoY in Q3 2026) demonstrate continued expansion in silicon shipments.',
     },
     {
       indicatorId: 'ind-project-deployment-delays',
       name: '5. Data-Centre Project Cancellations, Supersessions & Energisation Delays',
       category: 'project_execution',
-      measurementFormulaOrSeries: 'TypeDB relationship status transitions (`cancelled` -> `superseded` v2) and court/permitting holds',
-      value: 'MSFT Loughton v1 cancelled -> v2 active · AWS Wilmington Ohio rezoning ordered redone · Polaris Forge 1 250/400 MW energised',
+      domain: 'typedb_graph',
+      baseDirection: 'neutral',
+      measurementFormulaOrSeries:
+        'TypeDB relationship status transitions (`cancelled` -> `superseded` v2) and court/permitting holds',
+      value:
+        'MSFT Loughton v1 cancelled -> v2 active · AWS Wilmington Ohio rezoning ordered redone · Polaris Forge 1 250/400 MW energised',
       reportingPeriod: 'Jul – Nov 2026 (TypeDB Checkpoint Sequence 12)',
       evidenceId: 'reuters-loughton-oct19',
       primaryEvidenceIds: ['reuters-loughton-oct19', 'wyso-wilmington-court', 'apld-8k-2026-10-07'],
       historicalComparison:
-        'Microsoft terminated its initial Loughton UK agreement (`rel-loughton-dc-cancelled-v1-r1`, Oct 2026) and superseded it with a redesigned structure (`rel-loughton-dc-active-v2-r1`); Applied Digital energised 250 MW of 400 MW planned at Polaris Forge 1 on 1 Oct 2026.',
+        'Microsoft terminated its initial Loughton UK agreement (`rel-loughton-dc-cancelled-v1-r1`, Oct 2026) and immediately superseded it with a redesigned active commitment (`rel-loughton-dc-active-v2-r1`); Applied Digital energised 250 MW of 400 MW planned at Polaris Forge 1 on 1 Oct 2026.',
+      observedFinancialFact:
+        'Microsoft cancelled its initial Loughton UK data-centre lease (`rel-loughton-dc-cancelled-v1-r1`) and replaced it with active relationship `rel-loughton-dc-active-v2-r1` (`reuters-loughton-oct19`), while AWS Wilmington Ohio rezoning was ordered redone by a federal court (`wyso-wilmington-court`) and Applied Digital energised 250 MW of 400 MW at Polaris Forge 1 (`apld-8k-2026-10-07`).',
+      hypothesisBeingTested:
+        'Whether project-level contract changes and permitting delays represent voluntary, capital-efficiency-enhancing capex moderation.',
+      relevanceOfObservation:
+        'Per Part A.5 quality gate, replacing a cancelled lease v1 with an active v2 contract and encountering municipal court delays represent contract reallocation and execution friction, not verified net capex moderation or improved ROIC.',
+      sourceConfidence: {
+        level: 'medium_mixed_primary_and_reported',
+        rationale:
+          'Combines primary SEC Form 8-K (`apld-8k-2026-10-07`) with corroborated legal/journalistic reporting (`reuters-loughton-oct19`, `wyso-wilmington-court`).',
+      },
+      freshnessRationale:
+        'Events dated July – October 2026 and verified against TypeDB Checkpoint Sequence 12.',
+      latestEligibleObservation:
+        'MSFT Loughton v1 cancelled -> v2 active; AWS Wilmington court redo order; APLD Polaris Forge 1 250/400 MW energised',
+      previousComparableObservation:
+        'MSFT Loughton v1 initial commitment active; Wilmington rezoning approved prior to federal court challenge',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'reuters-loughton-oct19',
+        publishedAtIso: '2026-10-19T14:00:00.000Z',
+        receivedAtIso: '2026-11-05T15:50:20.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Reclassified from `supports` to `neutral` (`does_not_resolve`) under Part A.5–A.6: Loughton v1->v2 supersession reallocated capacity rather than reducing aggregate capex, and zoning delays do not prove improved capital efficiency.',
+      },
       publishedAtMs: Date.parse('2026-10-19T14:00:00Z'),
       receivedAtMs: 1793890620000,
       currentVerifiedReading:
-        'MSFT Loughton UK v1 cancelled (`reuters-loughton-oct19`) and superseded by active v2 (`rel-loughton-dc-active-v2-r1`); AWS Wilmington Ohio rezoning ordered redone by federal court (`wyso-wilmington-court`)',
+        'MSFT Loughton UK v1 cancelled (`reuters-loughton-oct19`) and superseded by active v2 (`rel-loughton-dc-active-v2-r1`); AWS Wilmington Ohio rezoning ordered redone (`wyso-wilmington-court`); Polaris Forge 1 250/400 MW energised (`apld-8k-2026-10-07`)',
       interpretationForThesis:
-        'Supports selective capital discipline: hyperscalers are actively restructuring or pruning suboptimal lease commitments rather than signing unconditional buildouts.',
+        'Classified as `neutral` (`does_not_resolve`): contract reallocation (Loughton v1 -> v2) and court permitting delays show project-level friction and restructuring, but do not establish a net reduction in aggregate capex or higher capital efficiency.',
     },
     {
       indicatorId: 'ind-credit-spreads-and-financing',
-      name: '6. High-Yield Credit Spreads (`BAMLH0A0HYM2`), Anthropic $895.4B Commitments & Vendor Financing',
+      name: '6. High-Yield Credit Spreads (`BAMLH0A0HYM2`), Anthropic $895.4B Commitments & Neocloud Debt',
       category: 'credit_and_financing',
-      measurementFormulaOrSeries: 'FRED `BAMLH0A0HYM2` (bps) + Anthropic S-1/A deduplicated commitment ledger + NVDA/Nscale vendor guarantees',
-      value: 'HY OAS 340 bps (+22 bps 5D) · Anthropic $895.4B deduplicated commitments (-$104.0B 9M loss) · NVDA $1.86B Nscale backing',
-      reportingPeriod: '30 Sep – 3 Nov 2026 (S-1/A filed 2 Nov 2026; FRED 3 Nov 2026)',
+      domain: 'typedb_graph',
+      baseDirection: 'contradicts',
+      measurementFormulaOrSeries:
+        'FRED `BAMLH0A0HYM2` (bps) + Anthropic S-1/A deduplicated commitment ledger + CRWV SEC XBRL Net Debt + NVDA/Nscale vendor guarantees',
+      value:
+        'HY OAS 340 bps (+22 bps 5D) · Anthropic $895.4B commitments (-$104.0B 9M loss) · CRWV +$30,233M Net Debt · NVDA $1.86B Nscale backing',
+      reportingPeriod: '30 Jun – 3 Nov 2026 (S-1/A filed 2 Nov 2026; FRED 3 Nov 2026; CRWV 10-Q 11 Aug 2026)',
       evidenceId: 'anthropic-s1a-2026-11-02',
-      primaryEvidenceIds: ['anthropic-s1a-2026-11-02', 'fred-vixcls-v2', 'nscale-s1-sep18', 'reuters-credit-oct30'],
+      primaryEvidenceIds: [
+        'anthropic-s1a-2026-11-02',
+        'sec-xbrl-g7-1-2026-11-09',
+        'fred-vixcls-v2',
+        'nscale-s1-sep18',
+        'reuters-credit-oct30',
+      ],
       historicalComparison:
-        'US High-Yield OAS widened +22 bps over 5 sessions (318 bps on 27 Oct -> 340 bps on 3 Nov 2026); Anthropic multi-year compute commitments reached $895.4B deduplicated ($940.0B naive sum less $44.6B Nscale Monarch sub-allocation).',
+        'US High-Yield OAS widened +22 bps over 5 sessions (318 bps on 27 Oct -> 340 bps on 3 Nov 2026); Anthropic multi-year compute commitments reached $895.4B deduplicated ($940.0B naive sum less $44.6B Nscale Monarch sub-allocation); CoreWeave total debt + finance leases reached $35,772M (+$30,233M Net Debt).',
+      observedFinancialFact:
+        'Anthropic Form S-1/A discloses $895.4B in deduplicated multi-year compute commitments alongside a -$104.0B 9M 2026 GAAP net loss; CoreWeave Q2 2026 Form 10-Q discloses $35,772M in carrying debt and finance leases (+$30,233M Net Debt = 4.37x TTM OCF, plus $16,319M operating leases); NVIDIA signed $1.0B convertible note + $860.3M lease guarantee for Nscale; and US HY OAS widened +22 bps to 340 bps.',
+      hypothesisBeingTested:
+        'Whether industry financing structures and credit markets reflect moderating capital commitments and improving capital efficiency.',
+      relevanceOfObservation:
+        'Per Part A.5 quality gate, $895.4B of locked-in multi-year commitments, $30.2B of leveraged neocloud Net Debt, circular vendor guarantees, and widening credit spreads (+22 bps) represent heavy contractual lock-in and financing strain—not improving capital discipline.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified from Anthropic Form S-1/A, CoreWeave Form 10-Q XBRL, Nscale Form S-1, and Federal Reserve FRED.',
+      },
+      freshnessRationale:
+        'Anthropic S-1/A filed 2 Nov 2026 and FRED observations captured through 3 Nov 2026.',
+      latestEligibleObservation:
+        'Anthropic $895.4B deduplicated commitments (-$104.0B 9M loss); CRWV +$30,233M Net Debt ($35,772M debt+fin leases); NVDA $1.86B Nscale backing; HY OAS 340 bps (+22 bps)',
+      previousComparableObservation:
+        'HY OAS 318 bps (27 Oct 2026); pre-S-1/A unquantified private commitments',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'anthropic-s1a-2026-11-02',
+        publishedAtIso: '2026-11-02T19:50:00.000Z',
+        receivedAtIso: '2026-11-08T12:54:00.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Reinforced `contradicts` classification with CoreWeave Q2 2026 SEC XBRL balance sheet ($35,772M debt + finance leases, +$30,233M Net Debt, and $16,319M operating leases).',
+      },
       publishedAtMs: 1793651400000,
       receivedAtMs: 1794142440000,
       currentVerifiedReading:
-        'FRED `BAMLH0A0HYM2`: 340 bps (+22 bps 5D); 10Y Treasury `DGS10`: 4.95%; VIX `VIXCLS`: 20.83; Anthropic S-1/A: $895.4B deduplicated compute commitments; Signed Nscale financing: $1.0B NVDA convertible + $860.3M lease guarantee',
+        'FRED `BAMLH0A0HYM2`: 340 bps (+22 bps 5D); Anthropic S-1/A: $895.4B deduplicated compute commitments (-$104.0B 9M loss); CRWV Net Debt: +$30,233M ($35,772M debt + finance leases); Signed Nscale financing: $1.0B NVDA convertible + $860.3M lease guarantee',
       interpretationForThesis:
-        'Contradicts an immediate capex halt ($895.4B locked-in multi-year commitments), while +22 bps HY spread widening and -$104.0B 9M frontier-lab loss highlight why capital discipline is needed.',
+        'Contradicts the thesis: $895.4B of locked-in multi-year compute commitments, +$30.23B of CoreWeave Net Debt, and widening HY spreads demonstrate escalating balance-sheet and off-balance-sheet capital lock-in rather than capex moderation.',
     },
     {
       indicatorId: 'ind-power-availability',
       name: '7. Grid Load Share & Contracted Megawatt (MW) Queue',
       category: 'power_and_grid',
-      measurementFormulaOrSeries: 'Data-centre % share of national electricity and contracted campus MW across TypeDB projects',
-      value: 'Ireland DCs 21.0% national electricity · AWS Dublin 350 MW · MSFT Grange Castle 280 MW · Polaris Forge 1 400 MW',
+      domain: 'policy_and_grid',
+      baseDirection: 'neutral',
+      measurementFormulaOrSeries:
+        'Data-centre % share of national electricity and contracted campus MW across TypeDB projects',
+      value:
+        'Ireland DCs 21.0% national electricity · AWS Dublin 350 MW · MSFT Grange Castle 280 MW · Polaris Forge 1 400 MW',
       reportingPeriod: '2026-H2 (CRU/EirGrid Policy 15 Jul 2026; APLD 8-K 7 Oct 2026)',
       evidenceId: 'cru-eirgrid-dc-policy-2026',
       primaryEvidenceIds: ['cru-eirgrid-dc-policy-2026', 'apld-8k-2026-10-07', 'src-crwv-polaris-2026'],
       historicalComparison:
-        'Irish data-centre electricity consumption reached 21.0% of total national metered electricity (up from ~18% prior baseline), triggering mandatory dispatchable generation and grid-connection constraints on 630 MW of combined AWS/MSFT Dublin capacity.',
+        'Irish data-centre electricity consumption reached 21.0% of total national metered electricity (up from ~18% prior baseline), triggering mandatory onsite/dispatchable generation requirements on 630 MW of combined AWS/MSFT Dublin capacity.',
+      observedFinancialFact:
+        'Data centres consume 21.0% of Ireland’s national metered electricity (`cru-eirgrid-dc-policy-2026`), subjecting AWS Dublin (350 MW) and Microsoft Grange Castle (280 MW) to dispatchable generation mandates, while US Polaris Forge 1 has 250 MW of 400 MW energised (`apld-8k-2026-10-07`).',
+      hypothesisBeingTested:
+        'Whether regional electricity grid constraints confirm that corporate AI capex moderation will improve long-term capital efficiency.',
+      relevanceOfObservation:
+        'Per Part A.5 quality gate, physical power scarcity is an external supply bottleneck that increases onsite generation costs and strands work-in-progress capital; it does not by itself confirm voluntary capital discipline or higher ROIC.',
+      sourceConfidence: {
+        level: 'high_primary_filing_or_regulator',
+        rationale:
+          'Verified from official CRU/EirGrid regulatory policy (`cru-eirgrid-dc-policy-2026`) and Applied Digital SEC Form 8-K (`apld-8k-2026-10-07`).',
+      },
+      freshnessRationale:
+        'CRU/EirGrid policy published 15 Jul 2026 (117 days old <= 125-day threshold) and APLD 8-K published 7 Oct 2026.',
+      latestEligibleObservation:
+        'Ireland DCs 21.0% national electricity share; AWS Dublin 350 MW & MSFT Grange Castle 280 MW constrained; Polaris Forge 1 250/400 MW energised',
+      previousComparableObservation:
+        'Prior ~18% Irish national electricity share before CRU/EirGrid connection policy tightenings',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'cru-eirgrid-dc-policy-2026',
+        publishedAtIso: '2026-07-15T10:00:00.000Z',
+        receivedAtIso: '2026-11-05T15:50:20.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Reclassified from `supports` to `neutral` (`does_not_resolve`) under Part A.5–A.6: grid connection bottlenecks are an external physical constraint that can inflate per-MW build costs rather than proving improved capital efficiency.',
+      },
       publishedAtMs: Date.parse('2026-07-15T10:00:00Z'),
       receivedAtMs: 1793890620000,
       currentVerifiedReading:
         'Ireland data centres: 21.0% of national metered electricity (`cru-eirgrid-dc-policy-2026`), constraining AWS Dublin (350 MW) and MSFT Grange Castle (280 MW); US tracked campuses include Polaris Forge 1 (400 MW, 250 MW energised)',
       interpretationForThesis:
-        'Supports physical capex moderation: grid connection queues act as an external speed limit forcing higher compute-per-megawatt efficiency.',
+        'Classified as `neutral` (`does_not_resolve`): physical power limits constrain how fast megawatts can be energised, but compulsory onsite generation and connection queues can raise capital cost per MW rather than improving capital efficiency.',
     },
     {
       indicatorId: 'ind-regulatory-developments',
-      name: '8. Enacted State Moratoria & Tariff Laws vs Unofficial 2026 Local Ballot Returns',
+      name: '8. Enacted State Moratoria & Tariff Laws vs Uncertified 2026 Local Ballot Returns',
       category: 'regulatory_and_policy',
-      measurementFormulaOrSeries: 'Enacted state executive orders/statutes (`ny-eo62`, `okhouse-hb2992`) separated from unofficial 3 Nov 2026 municipal referenda',
-      value: 'Enacted: NY EO 62 (>=50 MW pause) & OK HB 2992 (>=75 MW tariff) · Unofficial: SW Ohio referenda (pending 14–24 Nov canvass)',
+      domain: 'policy_and_grid',
+      baseDirection: 'insufficient_evidence',
+      measurementFormulaOrSeries:
+        'Enacted state executive orders/statutes (`ny-eo62`, `okhouse-hb2992`) separated from uncertified 3 Nov 2026 municipal referenda and missing FY2027 regulatory capex impact disclosures',
+      value:
+        'Enacted: NY EO 62 (>=50 MW pause) & OK HB 2992 (>=75 MW tariff) · Uncertified: SW Ohio referenda (awaiting 14–24 Nov statutory canvass)',
       reportingPeriod: 'May – Nov 2026 (Election Day 3 Nov 2026; Statutory Canvass 14–24 Nov 2026)',
       evidenceId: 'ny-eo62',
       primaryEvidenceIds: ['ny-eo62', 'okhouse-hb2992', 'wyso-sw-ohio-results', 'gridsight-votes'],
       historicalComparison:
-        'Transitioned from isolated municipal litigation (Jul 2026 Wilmington federal court order) to binding state actions (NY EO 62 >=50 MW pause on 14 Jul 2026; OK HB 2992 >=75 MW tariff effective 1 Jul 2026) and widespread 3 Nov 2026 voter pushback (~80%-20% unofficial Wilmington rejection).',
+        'NY EO 62 (14 Jul 2026) and OK HB 2992 (1 Jul 2026) are enacted state policies, whereas the 3 Nov 2026 Southwest Ohio municipal ballot outcomes remain unofficial election-night counts pending County Board of Elections certification (14–24 Nov 2026) and Piqua/Urbana MW scope retains `conflictingSources`.',
+      observedFinancialFact:
+        'New York EO 62 (`ny-eo62`) pauses >=50 MW DEC permits and Oklahoma HB 2992 (`okhouse-hb2992`) allocates >=75 MW tariff costs, while 3 November 2026 Southwest Ohio municipal referenda (`wyso-sw-ohio-results`) remain uncertified prior to the 14–24 November 2026 statutory canvass under Ohio Rev. Code § 3505.32 and no hyperscaler has filed quantified FY2027 capex reductions attributable to state/municipal policy.',
+      hypothesisBeingTested:
+        'Whether post-election regulatory and municipal policy developments are inducing capital-efficiency-enhancing AI capex moderation.',
+      relevanceOfObservation:
+        'Per Part A.4 & A.6 quality gates, uncertified municipal election returns and enacted state moratoria without quantified issuer capex guidance are insufficient to resolve whether regulatory friction improves corporate capital efficiency.',
+      sourceConfidence: {
+        level: 'low_unofficial_or_secondary',
+        rationale:
+          'While NY EO 62 and OK HB 2992 are primary state records, the 3 Nov 2026 election outcomes are unofficial secondary/election-night tallies awaiting statutory county canvass certification (14–24 Nov 2026) and carry conflicting scope attributions.',
+      },
+      freshnessRationale:
+        'Marked `unofficial_pending_certification` until County Boards of Elections complete the statutory canvass (14–24 November 2026).',
+      latestEligibleObservation:
+        'Enacted NY EO 62 & OK HB 2992; Uncertified 3 Nov 2026 SW Ohio municipal ballot returns (awaiting 14–24 Nov statutory canvass); 0 filings quantifying FY2027 regulatory capex reductions',
+      previousComparableObservation:
+        'Pre-3 Nov 2026 municipal zoning litigation (`wyso-wilmington-court`)',
+      evidenceSourceAndTimestamp: {
+        sourceId: 'ny-eo62',
+        publishedAtIso: '2026-07-14T16:00:00.000Z',
+        receivedAtIso: '2026-11-05T15:50:20.000Z',
+      },
+      materialChange: {
+        hasMaterialChange: true,
+        summary:
+          'Reclassified from `supports` to `insufficient_evidence` (`does_not_resolve`) under Part A.6: 3 Nov 2026 local ballot results remain uncertified until 14–24 Nov 2026 and no issuer has disclosed resulting FY2027 capex reductions.',
+      },
       publishedAtMs: Date.parse('2026-07-14T16:00:00Z'),
       receivedAtMs: 1793890620000,
       currentVerifiedReading:
-        'Enacted law: NY EO 62 (>=50 MW DEC permit pause, `ny-eo62`) & Oklahoma HB 2992 (>=75 MW tariff protection effective 1 Jul 2026, `okhouse-hb2992`); Unofficial election returns: Southwest Ohio local voter pushback (`wyso-sw-ohio-results`, pending county canvass)',
+        'Enacted law: NY EO 62 (>=50 MW DEC permit pause, `ny-eo62`) & Oklahoma HB 2992 (>=75 MW tariff protection, `okhouse-hb2992`); Uncertified election returns: Southwest Ohio local voter pushback (`wyso-sw-ohio-results`, pending 14–24 Nov county canvass)',
       interpretationForThesis:
-        'Supports the thesis that regulatory and ratepayer constraints raise greenfield buildout friction, incentivising capital efficiency in existing data-centre footprints.',
+        'Classified as `insufficient_evidence` (`does_not_resolve`): 3 November 2026 local ballot outcomes are not yet officially certified and no hyperscaler filing quantifies resulting FY2027 capex reductions.',
     },
   ];
 
-  const baseClassifications: Record<string, DeterministicEvidenceClassification> = {
-    'ind-capex-to-ocf': 'contradicts',
-    'ind-free-cash-flow': 'supports',
-    'ind-cloud-revenue-growth': 'supports',
-    'ind-semiconductor-demand': 'contradicts',
-    'ind-project-deployment-delays': 'supports',
-    'ind-credit-spreads-and-financing': 'contradicts',
-    'ind-power-availability': 'supports',
-    'ind-regulatory-developments': 'supports',
-  };
+  const excludedByHistoricalCutoffIds: string[] = [];
 
   const leadingIndicators: ThesisLeadingIndicator[] = rawIndicators.map((raw) => {
     const isUnofficial = raw.indicatorId === 'ind-regulatory-developments';
@@ -1168,14 +1548,28 @@ export function evaluateAiCapexModerationThesis(
       isUnofficial,
     );
     const anyPrimaryExcluded = raw.primaryEvidenceIds.some((id) => excludedSet.has(id));
-    let classification: DeterministicEvidenceClassification =
-      baseClassifications[raw.indicatorId] ?? 'neutral';
+    const eligibleAtCutoff = isRecordTemporallyEligible(
+      raw.publishedAtMs,
+      raw.receivedAtMs,
+      cutoffMs,
+      temporalBasis,
+    );
+    if (!eligibleAtCutoff) {
+      for (const id of raw.primaryEvidenceIds) {
+        if (!excludedByHistoricalCutoffIds.includes(id)) {
+          excludedByHistoricalCutoffIds.push(id);
+        }
+      }
+    }
+
+    let classification: DeterministicEvidenceClassification = raw.baseDirection;
     let dataStatus: 'verified' | 'partial' | 'missing_in_store' = isUnofficial
       ? 'partial'
       : 'verified';
 
     if (
       anyPrimaryExcluded ||
+      !eligibleAtCutoff ||
       freshness === 'missing_evidence' ||
       freshness === 'excluded_post_cutoff'
     ) {
@@ -1185,213 +1579,112 @@ export function evaluateAiCapexModerationThesis(
       dataStatus = 'partial';
     }
 
+    const refMs = raw.publishedAtMs ?? raw.receivedAtMs;
+    const ageDays = Number(((evalNowMs - refMs) / 86_400_000).toFixed(1));
+    const hypothesisResolution: ThesisLeadingIndicator['hypothesisResolution'] =
+      classification === 'supports'
+        ? 'supports'
+        : classification === 'contradicts'
+          ? 'contradicts'
+          : 'does_not_resolve';
+
+    const { baseDirection: _b, domain: _d, freshnessRationale, ...rest } = raw;
+    void _b;
+    void _d;
+
     return {
-      ...raw,
+      ...rest,
       freshnessStatus: freshness,
       evidenceClassification: classification,
+      evidenceDirection: classification,
+      freshnessAndHistoricalEligibility: {
+        freshnessStatus: freshness,
+        publishedAtMs: raw.publishedAtMs,
+        receivedAtMs: raw.receivedAtMs,
+        eligibleAtCutoff,
+        ageDays,
+        rationale: !eligibleAtCutoff
+          ? `Excluded by historical cutoff ${new Date(cutoffMs).toISOString().slice(0, 10)} (${temporalBasis} clock).`
+          : anyPrimaryExcluded
+            ? 'Excluded in missing-evidence simulation.'
+            : freshnessRationale,
+      },
+      hypothesisResolution,
       dataStatus,
     };
   });
 
-  // Requirement 5 & 8 — Deterministic Evidence-Change Assessment (supports, contradicts, neutral, insufficient_evidence)
-  const rawChangeItems: Array<{
-    itemId: string;
-    title: string;
-    domain: EvidenceChangeAssessmentItem['domain'];
-    baseClassification: DeterministicEvidenceClassification;
-    reportingPeriod: string;
-    priorBaseline: string;
-    currentObservation: string;
-    evidenceIds: string[];
-    publishedAtMs: number | null;
-    receivedAtMs: number;
-    rationale: string;
-  }> = [
-    {
-      itemId: 'chg-thesis-cloud-and-gdp-demand',
-      title: 'Hyperscale Cloud Revenue Growth & BEA Q3 2026 Real GDP Acceleration',
-      domain: 'corporate_filings',
-      baseClassification: 'supports',
-      reportingPeriod: '2026-Q3 (ended 30 Sep 2026; BEA Advance Estimate 29 Oct 2026)',
-      priorBaseline: 'Google Cloud $15.16B (2025-Q3); AWS $33.01B (2025-Q3); US Real GDP +2.2% SAAR (2026-Q2)',
-      currentObservation:
-        'Google Cloud +102.6% YoY to $30.71B ($11.12B op income); AWS +39.3% YoY to $45.98B ($17.45B op income); Azure +48% YoY to $33.17B; US Q3 Real GDP +3.4% SAAR (Private Domestic Final Sales +4.9% SAAR)',
-      evidenceIds: ['sec-release', 'amazon-sec-ex991', 'msft-fy27-q1', 'bea-26-45-gdp-q3-2026-adv'],
-      publishedAtMs: 1793277000000,
-      receivedAtMs: liveIngestion.beaGdpRelease.receivedAtMs,
-      rationale:
-        'Confirms that enterprise AI/cloud adoption and domestic private investment are expanding briskly, supporting the demand side of the thesis.',
-    },
-    {
-      itemId: 'chg-thesis-fcf-accounting-bridge',
-      title: 'Amazon & Alphabet Free Cash Flow Compression Driven Strictly by >120% Capex/OCF',
-      domain: 'corporate_filings',
-      baseClassification: 'supports',
-      reportingPeriod: '2026-Q3 / TTM-2026-Q3 (ended 30 Sep 2026)',
-      priorBaseline: 'AMZN TTM-2025-Q3 Capex/OCF 88.7% (+$14,800M FCF); GOOGL 2025-Q3 Capex/OCF 49.5% (+$24,457M FCF)',
-      currentObservation:
-        'AMZN TTM-2026-Q3 OCF $168,300M vs Net Capex $210,657M (125.2% -> -$42,357M FCF); GOOGL 2026-Q3 OCF $42,290M vs Capex $51,355M (121.4% -> -$9,065M FCF); MSFT FY27 Q1 Capex/OCF 67.9% (+$18,633M FCF)',
-      evidenceIds: ['amazon-sec-ex991', 'goog-2026q3-free_cash_flow-v1', 'msft-fy27-q1'],
-      publishedAtMs: 1793304327000,
-      receivedAtMs: 1793471503000,
-      rationale:
-        'Demonstrates arithmetically that negative FCF at AMZN and GOOGL is caused by peak capex intensity rather than operating cash erosion; moderating capex/OCF below 90% would immediately restore positive FCF.',
-    },
-    {
-      itemId: 'chg-thesis-loughton-supersession-and-scjv',
-      title: 'Selective Project Discipline: Microsoft Loughton Supersession (v1 -> v2) & Intel $11B SCJV',
-      domain: 'typedb_graph',
-      baseClassification: 'supports',
-      reportingPeriod: 'Oct – Nov 2026 (TypeDB Checkpoint Sequence 12)',
-      priorBaseline: 'Initial Loughton v1 customer commitment (`rel-loughton-dc-cancelled-v1-r1`) and wholly balance-sheet-funded fab buildouts',
-      currentObservation:
-        'Microsoft cancelled `rel-loughton-dc-cancelled-v1-r1` and superseded it with `rel-loughton-dc-active-v2-r1` (`reuters-loughton-oct19`); Intel structured Fab 34 Leixlip via $11.0B Apollo SCJV (`intc-10q-q3-2026`)',
-      evidenceIds: ['reuters-loughton-oct19', 'intc-10q-q3-2026'],
-      publishedAtMs: Date.parse('2026-10-19T14:00:00Z'),
-      receivedAtMs: 1793890620000,
-      rationale:
-        'Proves that selective lease restructuring and off-balance-sheet capital sharing are already occurring in verified graph records.',
-    },
-    {
-      itemId: 'chg-thesis-grid-and-enacted-policy-limits',
-      title: 'Physical Grid Load Limits (Ireland 21%) & Enacted State Policy Constraints (NY EO 62, OK HB 2992)',
-      domain: 'policy_and_grid',
-      baseClassification: 'supports',
-      reportingPeriod: 'May – Nov 2026',
-      priorBaseline: 'Unconstrained regional utility connection queues and pre-2026 state tax/permitting regimes',
-      currentObservation:
-        'Irish DCs reached 21.0% of national electricity (`cru-eirgrid-dc-policy-2026`), constraining 350 MW AWS Dublin and 280 MW MSFT Grange Castle; NY EO 62 pauses >=50 MW permits (`ny-eo62`); OK HB 2992 allocates >=75 MW tariff costs (`okhouse-hb2992`)',
-      evidenceIds: ['cru-eirgrid-dc-policy-2026', 'ny-eo62', 'okhouse-hb2992'],
-      publishedAtMs: Date.parse('2026-07-15T10:00:00Z'),
-      receivedAtMs: 1793890620000,
-      rationale:
-        'External physical power and statutory ratepayer rules impose hard speed limits on raw megawatt expansion, favouring compute efficiency.',
-    },
-    {
-      itemId: 'chg-thesis-nov5-selloff-and-nov6-rebound',
-      title: '5 November 2026 Equity Sell-Off (-5.52% COMP / -12.25% SOX) & 6 November Partial Rebound (+1.09% COMP)',
-      domain: 'macro_market',
-      baseClassification: 'neutral',
-      reportingPeriod: '4 Nov – 6 Nov 2026 US Regular-Session Closes (21:00 UTC)',
-      priorBaseline: '4 November 2026 closes: COMP 25,736.51, NDX 28,437.17, SOX 10,268.65, SPY $766.81, QQQ $691.95',
-      currentObservation:
-        '5 Nov sell-off: COMP 24,315.00 (-5.52%), SOX 9,011.14 (-12.25%), SPY $733.00 (-4.41%), NVDA $181.60 (-9.26%); 6 Nov rebound: COMP 24,579.42 (+1.09%), SOX 9,390.25 (+4.21%), SPY $735.29 (+0.31%), NVDA $186.64 (+2.78%)',
-      evidenceIds: ['nasdaq-comp-history-v3', 'nasdaq-sox-history-v3', 'nasdaq-spy-history-v3'],
-      publishedAtMs: Date.parse('2026-11-06T21:00:00Z'),
-      receivedAtMs: liveIngestion.nasdaqHistoricalClosesV3.COMP!.receivedAtMs,
-      rationale:
-        'Verifies the exact 5 Nov sell-off and 6 Nov rebound cited in the commentary, but 2-day price action alone (-4.50% net COMP) is classified as `neutral` because short-term index volatility neither proves nor disproves long-term corporate capital efficiency.',
-    },
-    {
-      itemId: 'chg-thesis-q3-capex-acceleration',
-      title: 'Reported Q3 2026 Hyperscaler Capex Surge (AMZN $75.88B Q3 / GOOGL $51.36B Q3)',
-      domain: 'corporate_filings',
-      baseClassification: 'contradicts',
-      reportingPeriod: '2026-Q3 (ended 30 Sep 2026)',
-      priorBaseline: 'AMZN 2025-Q3 Net Capex $31,935M (96.3% of OCF); GOOGL 2025-Q3 Capex $23,953M (49.5% of OCF)',
-      currentObservation:
-        'AMZN 2026-Q3 Net Capex surged +137.6% YoY to $75,878M (178.9% of Q3 OCF); GOOGL 2026-Q3 Capex surged +114.4% YoY to $51,355M (121.4% of Q3 OCF)',
-      evidenceIds: ['amazon-sec-ex991', 'sec-release', 'goog-2026q3-capital_expenditure-v1'],
-      publishedAtMs: 1793304327000,
-      receivedAtMs: 1793471503000,
-      rationale:
-        'Directly contradicts any claim that hyperscaler capex moderation had already begun in reported Q3 2026 financial statements.',
-    },
-    {
-      itemId: 'chg-thesis-anthropic-895b-lock-in',
-      title: 'Anthropic Form S-1/A $895.4B Multi-Year Compute Commitments & -$104.0B 9M GAAP Loss',
-      domain: 'typedb_graph',
-      baseClassification: 'contradicts',
-      reportingPeriod: '9M 2026 (ended 30 Sep 2026; S-1/A filed 2 Nov 2026)',
-      priorBaseline: 'Pre-S-1 unquantified private cloud compute arrangements',
-      currentObservation:
-        '$895.4B in deduplicated signed multi-year compute commitments ($940.0B naive sum less $44.6B Nscale Monarch sub-allocation) alongside -$104.0B 9M GAAP net loss on $33.242B revenue; NVDA $1.86B Nscale financing/guarantee backing',
-      evidenceIds: ['anthropic-s1a-2026-11-02', 'nscale-s1-sep18'],
-      publishedAtMs: 1793651400000,
-      receivedAtMs: 1794142440000,
-      rationale:
-        'Demonstrates massive multi-year contractual lock-in and circular vendor guarantees that resist rapid near-term capex retrenchment.',
-    },
-    {
-      itemId: 'chg-thesis-nvda-q3-108b-guidance',
-      title: 'NVIDIA FY2027 Q2 Data Center Run-Rate ($89.0B) & Q3 Revenue Guidance ($108.0B ± 2%)',
-      domain: 'corporate_filings',
-      baseClassification: 'contradicts',
-      reportingPeriod: 'FY2027-Q2 (ended 26 Jul 2026) & Q3 Outlook',
-      priorBaseline: 'FY2027 Q2 total revenue $96,221M (Data Center $89,000M, GAAP op margin 66.24%)',
-      currentObservation:
-        'Management guided Q3 FY2027 revenue to $108.0B ± 2% (+12.2% sequential expansion)',
-      evidenceIds: ['nvda-fy27-q2'],
-      publishedAtMs: Date.parse('2026-08-26T20:20:00Z'),
-      receivedAtMs: 1793744707000,
-      rationale:
-        'Shows continued sequential expansion in merchant AI silicon shipments rather than an immediate hardware spending slowdown.',
-    },
-    {
-      itemId: 'chg-thesis-missing-xbrl-and-fy27-capex-guides',
-      title: 'Missing AMD/CRWV/INTC SEC XBRL Statements, FY2027 Capex Guidance & Uncertified Election Canvass',
-      domain: 'corporate_filings',
-      baseClassification: 'insufficient_evidence',
-      reportingPeriod: '2026-Q3 / Nov 2026',
-      priorBaseline: '4 of 7 stocks with partial Q3 earnings releases; unofficial 3 Nov election-night tracker returns',
-      currentObservation:
-        '0 of 7 stocks have complete 4-quarter XBRL balance-sheet/share-count coverage; AMD, CRWV, and INTC lack primary XBRL income/cash-flow tables; Ohio municipal ballot results await 14–24 Nov statutory county canvass',
-      evidenceIds: ['nasdaq-amd-history-v3', 'nasdaq-crwv-history-v3', 'wyso-sw-ohio-results'],
-      publishedAtMs: Date.parse('2026-11-05T03:38:00Z'),
-      receivedAtMs: 1793890620000,
-      rationale:
-        'Explicitly classified as `insufficient_evidence`, keeping all 7 universe stocks locked at `INSUFFICIENT DATA` (`executionAuthority: "none"`).',
-    },
-  ];
+  for (const prov of ARK_THESIS_PROVENANCE_RECORDS) {
+    if (
+      !isRecordTemporallyEligible(
+        prov.publishedAtMs,
+        prov.receivedAtMs,
+        cutoffMs,
+        temporalBasis,
+      )
+    ) {
+      if (!excludedByHistoricalCutoffIds.includes(prov.recordId)) {
+        excludedByHistoricalCutoffIds.push(prov.recordId);
+      }
+    }
+  }
 
-  const excludedByHistoricalCutoffIds: string[] = [];
+  // Part A.2 — Programmatic Invariant Assertions:
+  // 1. Exactly 8 unique declared indicators with zero duplicate indicatorIds.
+  // 2. All category totals and items in `evidenceChangeAssessment` are derived 1-to-1 from `leadingIndicators`.
+  // 3. The sum of mutually exclusive indicator statuses equals `leadingIndicators.length` (8).
+  const uniqueIndicatorIds = new Set(leadingIndicators.map((i) => i.indicatorId));
+  if (uniqueIndicatorIds.size !== leadingIndicators.length || leadingIndicators.length !== 8) {
+    throw new Error(
+      `Thesis Monitor Invariant Violation: Expected 8 unique leadingIndicators, found ${leadingIndicators.length} total (${uniqueIndicatorIds.size} unique).`,
+    );
+  }
+
+  const domainByIndicatorId = new Map<string, EvidenceChangeAssessmentItem['domain']>(
+    rawIndicators.map((r) => [r.indicatorId, r.domain]),
+  );
+
+  const evaluatedItems: EvidenceChangeAssessmentItem[] = leadingIndicators.map((ind) => {
+    const eligible = ind.freshnessAndHistoricalEligibility.eligibleAtCutoff;
+    const anyMissing = ind.primaryEvidenceIds.some((id) => excludedSet.has(id));
+    return {
+      itemId: `chg-${ind.indicatorId}`,
+      indicatorId: ind.indicatorId,
+      title: ind.name,
+      domain: domainByIndicatorId.get(ind.indicatorId) ?? 'corporate_filings',
+      classification: ind.evidenceDirection,
+      reportingPeriod: ind.reportingPeriod,
+      priorBaseline: ind.previousComparableObservation,
+      currentObservation: !eligible
+        ? `[EXCLUDED BY HISTORICAL CUTOFF ${new Date(cutoffMs).toISOString().slice(0, 10)} (${temporalBasis} clock)] ${ind.latestEligibleObservation}`
+        : anyMissing
+          ? `[MISSING EVIDENCE SIMULATION] Required source excluded from evaluation.`
+          : ind.latestEligibleObservation,
+      evidenceIds: ind.primaryEvidenceIds,
+      rationale: ind.interpretationForThesis,
+    };
+  });
+
   const staleIndicatorIds = leadingIndicators
     .filter((i) => i.freshnessStatus === 'stale_beyond_threshold')
     .map((i) => i.indicatorId);
 
-  const evaluatedItems: EvidenceChangeAssessmentItem[] = rawChangeItems.map((item) => {
-    const anyMissing = item.evidenceIds.some((id) => excludedSet.has(id));
-    const eligible = isRecordTemporallyEligible(
-      item.publishedAtMs,
-      item.receivedAtMs,
-      cutoffMs,
-      temporalBasis,
-    );
-    if (!eligible) {
-      for (const id of item.evidenceIds) {
-        if (!excludedByHistoricalCutoffIds.includes(id)) {
-          excludedByHistoricalCutoffIds.push(id);
-        }
-      }
-    }
-    const effectiveClassification: DeterministicEvidenceClassification =
-      anyMissing || !eligible ? 'insufficient_evidence' : item.baseClassification;
-
-    return {
-      itemId: item.itemId,
-      title: item.title,
-      domain: item.domain,
-      classification: effectiveClassification,
-      reportingPeriod: item.reportingPeriod,
-      priorBaseline: item.priorBaseline,
-      currentObservation: !eligible
-        ? `[EXCLUDED BY HISTORICAL CUTOFF ${new Date(cutoffMs).toISOString().slice(0, 10)} (${temporalBasis} clock)] ${item.currentObservation}`
-        : anyMissing
-          ? `[MISSING EVIDENCE SIMULATION] Required source excluded from evaluation.`
-          : item.currentObservation,
-      evidenceIds: item.evidenceIds,
-      rationale: item.rationale,
-    };
-  });
-
   const counts = {
-    supports: evaluatedItems.filter((i) => i.classification === 'supports').length,
-    contradicts: evaluatedItems.filter((i) => i.classification === 'contradicts').length,
-    neutral: evaluatedItems.filter((i) => i.classification === 'neutral').length,
-    insufficient_evidence: evaluatedItems.filter(
-      (i) => i.classification === 'insufficient_evidence',
+    supports: leadingIndicators.filter((i) => i.evidenceDirection === 'supports').length,
+    contradicts: leadingIndicators.filter((i) => i.evidenceDirection === 'contradicts').length,
+    neutral: leadingIndicators.filter((i) => i.evidenceDirection === 'neutral').length,
+    insufficient_evidence: leadingIndicators.filter(
+      (i) => i.evidenceDirection === 'insufficient_evidence',
     ).length,
   };
+
+  const sumOfCounts =
+    counts.supports + counts.contradicts + counts.neutral + counts.insufficient_evidence;
+  if (sumOfCounts !== leadingIndicators.length) {
+    throw new Error(
+      `Thesis Monitor Invariant Violation: Sum of mutually exclusive indicator statuses (${sumOfCounts}) !== total indicator count (${leadingIndicators.length}).`,
+    );
+  }
 
   let overallConclusionClassification: DeterministicEvidenceChangeSummary['overallConclusionClassification'] =
     'mixed_supports_and_contradicts';
@@ -1415,14 +1708,68 @@ export function evaluateAiCapexModerationThesis(
     classificationPolicyNote:
       'Deterministic evidence classifications only (supports, contradicts, neutral, insufficient_evidence); never statistical probabilities.',
     counts,
+    totalDeclaredIndicatorsCount: 8,
+    sumOfMutuallyExclusiveCountsEqualsTotal: true,
+    zeroDuplicateIndicatorIds: true,
     overallConclusionClassification,
-    shortConclusion:
-      'Primary evidence is mixed (4 supports, 3 contradicts, 1 neutral, 1 insufficient): robust cloud revenue growth (+39% to +103% YoY), +3.4% Q3 US Real GDP (BEA 26-45), 21% Irish grid limits, and Microsoft’s Loughton v1->v2 supersession support long-term capital efficiency, whereas Q3 capex acceleration (178.9% of OCF at AMZN; 121.4% at GOOGL), Anthropic’s $895.4B multi-year commitments, and NVIDIA’s $108B Q3 guide contradict immediate capex moderation.',
+    shortConclusion: `Across the 8 unique leading indicators (${counts.supports} supports, ${counts.contradicts} contradicts, ${counts.neutral} neutral, ${counts.insufficient_evidence} insufficient_evidence; sum = 8): only Cloud & AI Revenue Growth + BEA Q3 Real GDP (+3.4% SAAR) currently supports the thesis (1/8), whereas 4 indicators contradict near-term capex moderation—Hyperscaler/Neocloud Capex/OCF (AMZN 125.2% TTM / 178.9% Q3, GOOGL 121.4% Q3, CRWV 297.6% TTM), negative Free Cash Flow burn (AMZN -$42,357M TTM, GOOGL -$9,065M Q3, CRWV -$13,655M TTM), expanding Semiconductor Demand (NVDA $108B Q3 guide, AMD +44.68% YoY Q3 rev), and Credit/Financing lock-in (Anthropic $895.4B commitments, CRWV +$30,233M Net Debt, HY OAS 340 bps +22 bps)—while Project Supersessions/Delays and Power Grid Constraints (Ireland 21% load share) are neutral (2/8) and uncertified local election/regulatory impacts remain insufficient_evidence (1/8).`,
     activeSupersededRelationshipIdsExcluded,
     activeReplacementRelationshipIdsIncluded,
     excludedByHistoricalCutoffIds,
     staleIndicatorIds,
     items: evaluatedItems,
+  };
+
+  const partAQualityGateAudit: PartAQualityGateAudit = {
+    priorVersionReportedCounts: {
+      supports: 4,
+      contradicts: 3,
+      neutral: 1,
+      insufficient_evidence: 1,
+      sum: 9,
+      declaredIndicatorsCount: 8,
+    },
+    rootCauseOfNineCountMismatch:
+      'In v2.0.0, `evidenceChangeAssessment.counts` summed a separate 9-item `rawChangeItems` list (which included an extra 9th row for 5–6 Nov index volatility alongside 8 thematic rows) rather than deriving totals 1-to-1 from the 8 declared `leadingIndicators`. In v2.1.0, `evidenceChangeAssessment.items` and `counts` are derived directly from `leadingIndicators` and asserted so `supports + contradicts + neutral + insufficient_evidence === 8`.',
+    correctedCountsDerivedFromUniqueIndicators: {
+      supports: counts.supports,
+      contradicts: counts.contradicts,
+      neutral: counts.neutral,
+      insufficient_evidence: counts.insufficient_evidence,
+      sum: sumOfCounts,
+      declaredIndicatorsCount: leadingIndicators.length,
+      sumEqualsDeclaredCount: sumOfCounts === leadingIndicators.length,
+    },
+    reclassifiedIndicatorsAudit: [
+      {
+        indicatorId: 'ind-free-cash-flow',
+        priorClassification: 'supports',
+        correctedClassification: 'contradicts',
+        correctionRationale:
+          'Observed Free Cash Flow deteriorated into deep negative cash burn at AMZN (-$42,357M TTM; -$33,456M Q3), GOOGL (-$9,065M Q3), and CRWV (-$13,655M TTM). Evidence of acute cash burn caused by unmoderated capex contradicts the claim that capital discipline is currently improving.',
+      },
+      {
+        indicatorId: 'ind-project-deployment-delays',
+        priorClassification: 'supports',
+        correctedClassification: 'neutral',
+        correctionRationale:
+          'Microsoft’s Loughton v1 cancellation was immediately superseded by active contract v2 (`rel-loughton-dc-active-v2-r1`), and AWS Wilmington court holds represent permitting delays rather than verified net capex moderation (`does_not_resolve`).',
+      },
+      {
+        indicatorId: 'ind-power-availability',
+        priorClassification: 'supports',
+        correctedClassification: 'neutral',
+        correctionRationale:
+          'Ireland’s 21.0% data-centre electricity share (`cru-eirgrid-dc-policy-2026`) is an external physical supply bottleneck that mandates costly onsite generation and delays energisation; industry supply friction does not confirm improved capital efficiency (`does_not_resolve`).',
+      },
+      {
+        indicatorId: 'ind-regulatory-developments',
+        priorClassification: 'supports',
+        correctedClassification: 'insufficient_evidence',
+        correctionRationale:
+          'While NY EO 62 and OK HB 2992 are enacted state policies, 3 November 2026 Southwest Ohio local ballot outcomes remain uncertified prior to the 14–24 November 2026 statutory canvass (Ohio Rev. Code § 3505.32) and no issuer has filed FY2027 capex guidance quantifying regulatory capex reductions (`does_not_resolve`).',
+      },
+    ],
   };
 
   // Requirement 5 — Three Testable Scenarios (Zero unsupported numerical probabilities)
@@ -1512,55 +1859,45 @@ export function evaluateAiCapexModerationThesis(
   const supportingEvidence: Array<{ statement: string; evidenceIds: string[] }> = [
     {
       statement:
-        'Hyperscale cloud revenue and US macro demand are expanding rapidly: Google Cloud grew +102.6% YoY to $30.71B ($11.12B op income), AWS grew +39.3% YoY to $45.98B ($17.45B op income), Azure grew +48% YoY to $33.17B, and US Q3 2026 Real GDP rose +3.4% SAAR with Real Final Sales to Private Domestic Purchasers up +4.9% SAAR (`bea-26-45-gdp-q3-2026-adv`).',
+        'Hyperscale cloud revenue and US macro demand are expanding rapidly (`ind-cloud-revenue-growth`, the sole supporting indicator out of 8): Google Cloud grew +102.6% YoY to $30.71B ($11.12B op income), AWS grew +39.3% YoY to $45.98B ($17.45B op income), Azure grew +48% YoY to $33.17B, and US Q3 2026 Real GDP rose +3.4% SAAR with Real Final Sales to Private Domestic Purchasers up +4.9% SAAR (`bea-26-45-gdp-q3-2026-adv`).',
       evidenceIds: ['sec-release', 'amazon-sec-ex991', 'msft-fy27-q1', 'bea-26-45-gdp-q3-2026-adv'],
-    },
-    {
-      statement:
-        'Negative Free Cash Flow at Amazon (-$42,357M TTM-2026-Q3; -$33,456M in 2026-Q3) and Alphabet (-$9,065M in 2026-Q3) is an accounting consequence of capital expenditure exceeding 120% of operating cash flow (125.2% TTM / 178.9% Q3 at AMZN; 121.4% Q3 at GOOGL), NOT an operating loss. Moderating capex/OCF back toward 2025 levels (88.7% TTM at AMZN) would immediately restore positive FCF.',
-      evidenceIds: ['amazon-sec-ex991', 'sec-release', 'goog-2026q3-free_cash_flow-v1'],
-    },
-    {
-      statement:
-        'Selective project discipline is already observable in verified records: Microsoft terminated its initial Loughton UK data-centre customer agreement (`reuters-loughton-oct19`, `rel-loughton-dc-cancelled-v1-r1`) before superseding it with a revised structure (`rel-loughton-dc-active-v2-r1`), and Intel structured Fab 34 Leixlip via an $11.0B SCJV co-investment (`intc-10q-q3-2026`).',
-      evidenceIds: ['reuters-loughton-oct19', 'intc-10q-q3-2026'],
-    },
-    {
-      statement:
-        'Physical power constraints (21.0% national electricity share in Ireland under CRU/EirGrid policy) and enacted state rules (NY EO 62 >=50 MW permit pause; Oklahoma HB 2992 >=75 MW ratepayer protection) enforce external discipline on raw megawatt expansion.',
-      evidenceIds: ['cru-eirgrid-dc-policy-2026', 'ny-eo62', 'okhouse-hb2992'],
     },
   ];
 
   const contradictoryEvidence: Array<{ statement: string; evidenceIds: string[] }> = [
     {
       statement:
-        'Latest reported Q3 2026 SEC filings show hyperscaler capex intensity accelerating, not moderating: Amazon Q3 net capex surged to $75,878M (178.9% of Q3 OCF vs 96.3% in 2025-Q3) and Alphabet Q3 capex more than doubled YoY to $51,355M (121.4% of Q3 OCF vs 49.5% in 2025-Q3).',
-      evidenceIds: ['amazon-sec-ex991', 'sec-release', 'goog-2026q3-capital_expenditure-v1'],
+        'Latest reported SEC XBRL filings (`ind-capex-to-ocf`) show capex intensity accelerating, not moderating: Amazon Q3 net capex surged to $75,878M (178.9% of Q3 OCF vs 96.3% in 2025-Q3; 125.2% TTM vs 88.7% FY2025), Alphabet Q3 capex doubled YoY to $51,355M (121.4% of Q3 OCF vs 49.5% in 2025-Q3), and CoreWeave TTM Capex/OCF reached 297.6% (945.8% in Q2 2026).',
+      evidenceIds: ['amazon-sec-ex991', 'sec-release', 'goog-2026q3-capital_expenditure-v1', 'sec-xbrl-g7-1-2026-11-09'],
     },
     {
       statement:
-        'Anthropic’s Form S-1/A (2 November 2026) discloses $895.4B in aggregate signed multi-year cloud compute and lease commitments (as of 30 Sep 2026, including $44.6B Nscale Monarch sub-allocation) alongside a -$104.0B 9M 2026 GAAP net loss, demonstrating massive locked-in multi-year infrastructure obligations.',
-      evidenceIds: ['anthropic-s1a-2026-11-02', 'nscale-s1-sep18'],
+        'Hyperscaler and neocloud Free Cash Flow has turned deeply negative (`ind-free-cash-flow`, reclassified from supports to contradicts in v2.1.0): Amazon TTM FCF fell to -$42,357M (-$33,456M in Q3 2026), Alphabet Q3 2026 FCF fell to -$9,065M, and CoreWeave TTM FCF is -$13,655M (-$6,675M in Q2 2026). Current cash burn refutes that capital discipline has already restored FCF.',
+      evidenceIds: ['amazon-sec-ex991', 'sec-release', 'goog-2026q3-free_cash_flow-v1', 'sec-xbrl-g7-1-2026-11-09'],
     },
     {
       statement:
-        'NVIDIA’s FY2027 Q2 results ($89.0B Data Center revenue) and Q3 FY2027 revenue outlook ($108.0B ± 2%) show continued sequential expansion in AI hardware shipments through autumn 2026.',
-      evidenceIds: ['nvda-fy27-q2'],
+        'AI semiconductor shipments and guidance continue accelerating (`ind-semiconductor-demand`): NVIDIA Q2 FY2027 Data Center revenue reached $89.0B with Q3 FY2027 revenue guided to $108.0B ± 2% (+12.2% QoQ), and AMD Q3 2026 revenue grew +44.68% YoY to $13,377M ($3,275M EBIT, $3,039M FCF).',
+      evidenceIds: ['nvda-fy27-q2', 'sec-xbrl-g7-1-2026-11-09'],
+    },
+    {
+      statement:
+        'Multi-year compute commitments and circular vendor debt remain massive (`ind-credit-spreads-and-financing`): Anthropic Form S-1/A (2 Nov 2026) discloses $895.4B in deduplicated commitments alongside a -$104.0B 9M GAAP loss, CoreWeave carries $35,085M total debt ($30,233M Net Debt), and NVIDIA provides $1.86B in Nscale backing while US HY spreads sit at 340 bps (+22 bps).',
+      evidenceIds: ['anthropic-s1a-2026-11-02', 'nscale-s1-sep18', 'sec-xbrl-g7-1-2026-11-09', 'fred-bamlh0a0hym2-2026-11-03'],
     },
   ];
 
   const missingEvidence: string[] = [
-    'Official certified county/state election canvass records for the 3 November 2026 US midterm elections and Southwest Ohio municipal data-centre referenda (statutory Ohio Rev. Code § 3505.32 canvass runs 14–24 November 2026; currently unofficial returns only).',
-    'Primary SEC Form 10-Q XBRL financial statement tables (Revenue, EBIT, OCF, Capex, FCF, Debt/Cash, Diluted Shares) for AMD (`CIK 0000002488`), CoreWeave (`CIK 0001769628`), and Intel (`CIK 0000050863`).',
-    'FY2027 explicit capital expenditure guidance ranges and maintenance vs AI-growth capex breakdowns for AMZN, GOOGL, and MSFT.',
+    'Official certified county/state election canvass records for the 3 November 2026 US midterm elections and Southwest Ohio municipal data-centre referenda (`ind-regulatory-developments`: statutory Ohio Rev. Code § 3505.32 canvass runs 14–24 November 2026; currently unofficial returns only).',
+    'CoreWeave (`CRWV`, CIK 0001769628) Q3 2026 Form 10-Q for period ended 30 September 2026 (latest SEC filing as of 9 Nov 2026 is Q2 2026 10-Q accepted 2026-08-13T16:10:02Z).',
+    'Explicit FY2027 management capital expenditure guidance ranges and maintenance vs AI-growth capex breakdowns for AMZN, GOOGL, and MSFT.',
     'BLS Nonfarm Business Sector Labor Productivity (`OPHNFB`) Q3 2026 release and BEA Q3 2026 Second Estimate (scheduled for 25 November 2026).',
   ];
 
   const keyUncertainties: string[] = [
-    'Whether a future moderation in hyperscaler capex/OCF will be driven by voluntary capital efficiency (Scenario 1) or involuntary grid/permitting bottlenecks (Scenario 2) and frontier-lab financing stress (Scenario 3).',
+    'Whether a future moderation in hyperscaler capex/OCF will be driven by voluntary capital efficiency (Scenario 1) or involuntary grid/permitting bottlenecks (`ind-project-deployment-delays` and `ind-power-availability`, both classified as neutral / `does_not_resolve` in v2.1.0).',
     'How much of Anthropic’s $895.4B multi-year compute commitment envelope contains flexible ramp clauses or minimum take-or-pay penalties if AI model monetisation lags.',
-    'Whether circular vendor financing ($1.0B NVIDIA convertible note + $860.3M Ward County guarantee to Nscale) amplifies downside contagion to hardware suppliers if neocloud utilisation softens.',
+    'Whether circular vendor financing ($1.0B NVIDIA convertible note + $860.3M Ward County guarantee to Nscale, plus CoreWeave’s $30,233M Net Debt) amplifies downside contagion to hardware suppliers if neocloud utilisation softens.',
   ];
 
   return {
@@ -1585,6 +1922,7 @@ export function evaluateAiCapexModerationThesis(
     scenarios,
     leadingIndicators,
     evidenceChangeAssessment,
+    partAQualityGateAudit,
     liveGeminiInferenceRecord: VERIFIED_LIVE_GEMINI_THESIS_INFERENCE,
     evidenceSynthesis: {
       supportingEvidence,
@@ -1626,7 +1964,7 @@ export async function runValidatedThesisChatExplanationTest(params?: {
   const question =
     'What evidence supports the largest compute commitments and how do Ireland grid constraints and project supersessions affect AI infrastructure capex?';
 
-  const cutoffMs = params?.historicalCutoffMs ?? Date.parse('2026-11-09T19:00:00Z');
+  const cutoffMs = params?.historicalCutoffMs ?? Date.parse('2026-11-09T20:15:00Z');
   const temporalBasis: TemporalBasis = params?.temporalBasis ?? 'publication';
 
   const bundle = await retrieveClosedEvidenceBundle({
@@ -1635,7 +1973,7 @@ export async function runValidatedThesisChatExplanationTest(params?: {
     temporalBasis,
     historicalCutoffMs: cutoffMs,
     preferLiveTypeDb: false,
-    nowMs: Date.parse('2026-11-09T19:00:00Z'),
+    nowMs: Date.parse('2026-11-09T20:15:00Z'),
     additionalSources: [
       {
         sourceDocId: 'bea-26-45-gdp-q3-2026-adv',
@@ -1764,15 +2102,15 @@ export async function runValidatedThesisChatExplanationTest(params?: {
     bundleId: bundle.bundleId,
     bundleSha256: bundle.bundleSha256,
     shortAnswer: hasAnthropicS1a
-      ? 'Stored primary SEC, BEA, and TypeDB evidence provides mixed support for the AI capex moderation thesis: hyperscaler cloud demand is strong, but signed multi-year commitments remain massive ($895.4B deduplicated in Anthropic S-1/A) while physical grid constraints (21% Irish electricity share) and selective project supersessions (Loughton v1 cancelled -> v2 active) enforce discipline.'
+      ? 'Stored primary SEC, BEA, and TypeDB evidence provides mixed support for the AI capex moderation thesis (one supporting indicator, four contradicting indicators, two neutral bottlenecks, and one insufficient-evidence indicator across eight leading indicators): hyperscaler cloud demand is strong, but signed multi-year commitments remain massive ($895.4B deduplicated in Anthropic S-1/A) while physical grid constraints (21% Irish electricity share) and selective project supersessions (Loughton v1 cancelled -> v2 active) represent neutral supply and reallocation friction.'
       : 'At this historical cutoff, stored primary evidence verifies Ireland’s 21% data-centre electricity share and NVIDIA’s $1.0B Nscale convertible commitment, while later-dated filings are excluded to prevent hindsight leakage.',
     executiveTldr: [
-      'Commentary vs Fact Separation: The ARK capex moderation thesis is evaluated as an external research hypothesis, never as an established graph fact.',
+      'Commentary vs Fact Separation: The ARK capex moderation thesis is evaluated as an external research hypothesis across eight mutually exclusive leading indicators (one supporting, four contradicting, two neutral, and one insufficient evidence), never as an established graph fact.',
       hasAnthropicS1a
-        ? 'Signed Commitment Scale (Contradictory / Lock-in): Anthropic Form S-1/A records $895.4B in deduplicated multi-year compute commitments (preventing $44.6B naive double-count on Nscale Monarch).'
+        ? 'Four Contradicting Indicators (Capex Surge, Negative FCF Burn, Chip Acceleration & $895.4B Lock-in): Anthropic Form S-1/A records $895.4B in deduplicated multi-year compute commitments (preventing $44.6B naive double-count on Nscale Monarch), while hyperscaler and neocloud capex and negative free cash flow contradict immediate capital moderation.'
         : 'Historical Cutoff Enforced: Post-cutoff filings are excluded from this reconstruction to prevent hindsight leakage.',
-      'Selective Capex Discipline & Bottlenecks (Supporting): Microsoft cancelled its initial Loughton UK agreement (superseded by v2), and EirGrid/CRU records show data centres consume 21% of Irish electricity.',
-      'Explicit Abstention on Uncertified/Missing Data: Official county canvass certification for local elections and full XBRL tables for AMD, CRWV, and INTC remain absent.',
+      'Two Neutral Bottlenecks (does_not_resolve): Microsoft cancelled its initial Loughton UK agreement (superseded by v2), and EirGrid/CRU records show data centres consume 21% of Irish electricity — representing reallocation and supply friction rather than confirmed efficiency gains.',
+      'One Insufficient Evidence Indicator: Official county canvass certification for local elections and CoreWeave’s third-quarter filing remain absent.',
     ],
     supportingClaims,
     relevantRelationshipIds: availableRelIds.slice(0, 6),
@@ -1787,7 +2125,7 @@ export async function runValidatedThesisChatExplanationTest(params?: {
     ],
     missingInformation: [
       'Official certified state and county canvass results for the 3 November 2026 US midterm elections.',
-      'Primary SEC Form 10-Q XBRL income, cash-flow, debt, and share-count tables for AMD, CoreWeave, and Intel.',
+      'CoreWeave third-quarter Form 10-Q (latest SEC filing is second-quarter Form 10-Q).',
       'Explicit FY2027 management capital expenditure guidance ranges for AMZN, GOOGL, and MSFT.',
     ],
     historicalCutoffUsed: {

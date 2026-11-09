@@ -108,16 +108,46 @@ describe('AI Capital Intelligence — Cathie Wood Thesis Monitor: Live Integrati
     expect(elections.electionPolicySeparationNote).toContain('unofficial_pending_statutory_canvass');
   });
 
-  it('4. connects all 8 leading indicators to stored observations with value, reportingPeriod, evidenceId, freshnessStatus, and historicalComparison', () => {
+  it('4. connects all 8 leading indicators to stored observations and separates observedFinancialFact, hypothesisBeingTested, relevanceOfObservation, evidenceDirection, sourceConfidence, freshnessAndHistoricalEligibility, and Part D observation fields', () => {
     const assessment = evaluateAiCapexModerationThesis();
 
     expect(assessment.leadingIndicators).toHaveLength(8);
+    const seenIds = new Set<string>();
     for (const ind of assessment.leadingIndicators) {
+      expect(seenIds.has(ind.indicatorId)).toBe(false);
+      seenIds.add(ind.indicatorId);
+
       expect(ind.value.length).toBeGreaterThan(5);
       expect(ind.reportingPeriod.length).toBeGreaterThan(4);
       expect(ind.evidenceId.length).toBeGreaterThan(3);
       expect(ind.primaryEvidenceIds.length).toBeGreaterThan(0);
       expect(ind.historicalComparison.length).toBeGreaterThan(15);
+
+      // Part A.4 explicit separation
+      expect(ind.observedFinancialFact.length).toBeGreaterThan(10);
+      expect(ind.hypothesisBeingTested.length).toBeGreaterThan(10);
+      expect(ind.relevanceOfObservation.length).toBeGreaterThan(10);
+      expect(ind.evidenceDirection).toBe(ind.evidenceClassification);
+      expect(ind.sourceConfidence.rationale.length).toBeGreaterThan(10);
+      expect(ind.freshnessAndHistoricalEligibility.rationale.length).toBeGreaterThan(10);
+
+      // Part D.2 fresh observation comparison fields
+      expect(ind.latestEligibleObservation.length).toBeGreaterThan(10);
+      expect(ind.previousComparableObservation.length).toBeGreaterThan(10);
+      expect(ind.evidenceSourceAndTimestamp.sourceId.length).toBeGreaterThan(3);
+      expect(ind.materialChange.summary.length).toBeGreaterThan(10);
+      expect(['supports', 'contradicts', 'does_not_resolve']).toContain(
+        ind.hypothesisResolution,
+      );
+
+      // Neutral and insufficient_evidence must never resolve as 'supports'
+      if (
+        ind.evidenceDirection === 'neutral' ||
+        ind.evidenceDirection === 'insufficient_evidence'
+      ) {
+        expect(ind.hypothesisResolution).toBe('does_not_resolve');
+      }
+
       expect([
         'fresh_verified',
         'lagged_verified',
@@ -132,16 +162,52 @@ describe('AI Capital Intelligence — Cathie Wood Thesis Monitor: Live Integrati
     }
   });
 
-  it('5. implements deterministic non-probabilistic evidence-change classifications (supports, contradicts, neutral, insufficient_evidence)', () => {
+  it('5. derives category totals strictly from the 8 unique indicator records (1 supports + 4 contradicts + 2 neutral + 1 insufficient_evidence = 8) and audits Part A reclassifications', () => {
     const assessment = evaluateAiCapexModerationThesis();
     const changeSummary = assessment.evidenceChangeAssessment;
 
     expect(changeSummary.classificationPolicyNote).toContain('never statistical probabilities');
     expect(changeSummary.overallConclusionClassification).toBe('mixed_supports_and_contradicts');
-    expect(changeSummary.counts.supports).toBe(4);
-    expect(changeSummary.counts.contradicts).toBe(3);
-    expect(changeSummary.counts.neutral).toBe(1);
+    expect(changeSummary.totalDeclaredIndicatorsCount).toBe(8);
+    expect(changeSummary.sumOfMutuallyExclusiveCountsEqualsTotal).toBe(true);
+    expect(changeSummary.zeroDuplicateIndicatorIds).toBe(true);
+    expect(changeSummary.items).toHaveLength(8);
+
+    // Exact corrected v2.1.0 breakdown: 1 supports, 4 contradicts, 2 neutral, 1 insufficient_evidence = 8
+    expect(changeSummary.counts.supports).toBe(1);
+    expect(changeSummary.counts.contradicts).toBe(4);
+    expect(changeSummary.counts.neutral).toBe(2);
     expect(changeSummary.counts.insufficient_evidence).toBe(1);
+    expect(
+      changeSummary.counts.supports +
+        changeSummary.counts.contradicts +
+        changeSummary.counts.neutral +
+        changeSummary.counts.insufficient_evidence,
+    ).toBe(assessment.leadingIndicators.length);
+
+    // Verify specific Part A.5 indicator directions
+    const byId = new Map(assessment.leadingIndicators.map((i) => [i.indicatorId, i]));
+    expect(byId.get('ind-cloud-revenue-growth')!.evidenceDirection).toBe('supports');
+    expect(byId.get('ind-capex-to-ocf')!.evidenceDirection).toBe('contradicts');
+    expect(byId.get('ind-free-cash-flow')!.evidenceDirection).toBe('contradicts');
+    expect(byId.get('ind-semiconductor-demand')!.evidenceDirection).toBe('contradicts');
+    expect(byId.get('ind-credit-spreads-and-financing')!.evidenceDirection).toBe('contradicts');
+    expect(byId.get('ind-project-deployment-delays')!.evidenceDirection).toBe('neutral');
+    expect(byId.get('ind-power-availability')!.evidenceDirection).toBe('neutral');
+    expect(byId.get('ind-regulatory-developments')!.evidenceDirection).toBe(
+      'insufficient_evidence',
+    );
+
+    // Verify Part A quality gate audit record
+    expect(assessment.partAQualityGateAudit.priorVersionReportedCounts.sum).toBe(9);
+    expect(
+      assessment.partAQualityGateAudit.correctedCountsDerivedFromUniqueIndicators.sum,
+    ).toBe(8);
+    expect(
+      assessment.partAQualityGateAudit.correctedCountsDerivedFromUniqueIndicators
+        .sumEqualsDeclaredCount,
+    ).toBe(true);
+    expect(assessment.partAQualityGateAudit.reclassifiedIndicatorsAudit).toHaveLength(4);
 
     for (const scenario of assessment.scenarios) {
       expect(scenario.probabilityAssignment).toBeNull();

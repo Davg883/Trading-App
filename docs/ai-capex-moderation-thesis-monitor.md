@@ -1,12 +1,38 @@
-# AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Capex Moderation (Live Integration Acceptance `v2.0.0`)
+# AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Capex Moderation (Phase G.7.1 Quality Gate `v2.1.0`)
 
 - **Thesis Identifier**: `thesis-ark-ai-capex-moderation-2026-11-07`
-- **Engine Module**: [`lib/research-ratings/thesis-monitor.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/thesis-monitor.ts) (`aci-thesis-monitor-v2.0.0`)
+- **Engine Module**: [`lib/research-ratings/thesis-monitor.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/thesis-monitor.ts) (`aci-thesis-monitor-v2.1.0`)
+- **SEC XBRL Expansion Module**: [`lib/research-ratings/sec-xbrl-expansion.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/sec-xbrl-expansion.ts) (`aci-sec-xbrl-g7-1-v1.0.0`)
 - **Live Ingestion Package**: [`data/thesis-monitor/november-7-2026-live-ingestion.json`](file:///c:/GPT%205%20CODEX/Trading%20app/data/thesis-monitor/november-7-2026-live-ingestion.json) (`thesis-monitor-live-ingestion-2026-11-09-v1`)
 - **Market Radar UI Component**: [`components/command-centre/executive-overview.tsx`](file:///c:/GPT%205%20CODEX/Trading%20app/components/command-centre/executive-overview.tsx) (`data-testid="market-radar-thesis-monitor"`)
-- **Verification Test Suite**: [`tests/ai-capex-moderation-thesis-monitor.test.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/tests/ai-capex-moderation-thesis-monitor.test.ts) (`8/8` deterministic tests passing)
+- **Verification Test Suite**: [`tests/ai-capex-moderation-thesis-monitor.test.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/tests/ai-capex-moderation-thesis-monitor.test.ts) & [`tests/phase-g7-1-sec-xbrl-and-thesis-gate.test.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/tests/phase-g7-1-sec-xbrl-and-thesis-gate.test.ts) (`22/22` deterministic tests passing)
 - **Primary Subject Commentary**: [ARK Invest — "In The Know" with Cathie Wood (7 November 2026)](https://www.ark-invest.com/videos/market-commentary/november-2026-in-the-know-cathie-wood)
-- **Execution Authority**: `none` (All 7 universe stocks remain gated at `INSUFFICIENT DATA` under Phase G.6 / G.7 data-quality gates)
+- **Execution Authority**: `none` (All 7 universe stocks remain gated at `INSUFFICIENT DATA` under Phase G.6 / G.7 / G.7.1 data-quality gates)
+
+---
+
+## Section 0 — Part A Quality Gate Correction (`v2.0.0` -> `v2.1.0`)
+
+### 1. Root Cause of the `4 + 3 + 1 + 1 = 9` Arithmetic Error Across `8` Declared Indicators
+In `v2.0.0`, `evidenceChangeAssessment.counts` was computed not from the `8` unique records in `leadingIndicators` (`5 supports + 3 contradicts = 8`), but by counting two separate hardcoded arrays (`supportingItems`: `4` items; `contradictoryItems`: `3` items) and appending `2` extra ad-hoc summary items (`1 neutral` index volatility item + `1 insufficient_evidence` XBRL gap item) that did not exist as leading indicators (`4 + 3 + 1 + 1 = 9` across `8` declared indicators).
+
+### 2. Arithmetic Invariant Enforced in `v2.1.0` (`deriveCategoryCountsFromUniqueIndicators`)
+In `aci-thesis-monitor-v2.1.0`, `deriveCategoryCountsFromUniqueIndicators(leadingIndicators)` deduplicates by `indicatorId`, asserts zero duplicate IDs (`duplicateIndicatorIdsRemoved: 0`), derives all category totals directly from the `8` unique indicator records, and enforces the strict invariant:
+$$\text{supports} (1) + \text{contradicts} (4) + \text{neutral} (2) + \text{insufficient\_evidence} (1) = 8 = \text{totalDeclaredIndicators}$$
+
+### 3. Reassessment of Each Indicator Against the Precise Cathie Wood Thesis
+The registered thesis states: *"A near-term moderation or discipline in hyperscaler AI infrastructure capital expenditure would improve free-cash-flow conversion and long-term return on invested capital without halting enterprise AI adoption or cloud revenue growth."*
+
+| # | Indicator ID | `v2.0.0` Status | `v2.1.0` Status | Direction Audit & Reassessment Rationale |
+| --- | --- | --- | --- | --- |
+| **1** | `ind-capex-to-ocf` | `contradicts` | **`contradicts`** | Hyperscaler Capex/OCF accelerated (`AMZN 125.2% TTM / 178.9% Q3`, `GOOGL 121.4% Q3`, `CRWV 217.5% Q3`) rather than moderating. |
+| **2** | `ind-free-cash-flow` | `supports` | **`contradicts`** | Negative FCF (`AMZN -$42,357M TTM`, `GOOGL -$9,065M Q3`, `CRWV -$2,950M Q3`, `INTC -$1,140M Q3`) proves severe cash-flow strain from unmoderated capex, directly contradicting the claim that capex moderation is occurring or improving FCF conversion. |
+| **3** | `ind-cloud-revenue-growth` | `supports` | **`supports`** | `Google Cloud +102.6% YoY ($30.71B)`, `Azure +48% YoY`, `AWS +39.3% YoY`, `AMD +45.4% YoY`, `CRWV +134.9% YoY`, and `US Q3 Real GDP +3.4% SAAR` directly support the durable enterprise AI adoption half of the thesis. |
+| **4** | `ind-semiconductor-demand` | `contradicts` | **`contradicts`** | `NVDA` Q2 Data Center revenue (`$89.0B`, Q3 guide `$108.0B ± 2%`) and `AMD` Q3 revenue (`$10.35B`, `+45.4% YoY`) confirm accelerating physical silicon orders rather than near-term capex moderation. |
+| **5** | `ind-project-deployment-delays` | `supports` | **`neutral`** | Project supersessions (`MSFT Loughton v1 -> v2`) and zoning pauses (`AWS Wilmington`) reflect involuntary permitting/engineering friction, not voluntary capital discipline (`does_not_resolve`). |
+| **6** | `ind-credit-spreads-and-financing` | `contradicts` | **`contradicts`** | Widening HY OAS (`340 bps`, `+22 bps` 5D) alongside Anthropic's `$895.4B` deduplicated multi-year compute commitments and CoreWeave's `$14.21B` debt load contradict near-term capex moderation. |
+| **7** | `ind-power-availability` | `supports` | **`neutral`** | EirGrid `21.0%` national electricity load share (`630 MW` Dublin capacity) is an external physical utility bottleneck rather than voluntary capital efficiency (`does_not_resolve`). |
+| **8** | `ind-regulatory-developments` | `supports` | **`insufficient_evidence`** | Enacted state orders (`NY EO 62`, `OK HB 2992`) impose external compliance costs while 3 Nov 2026 SW Ohio municipal ballot returns remain uncertified until `14–24 Nov 2026` under Ohio Rev. Code § 3505.32 (`does_not_resolve`). |
 
 ---
 
@@ -78,68 +104,46 @@ Captured in [`data/thesis-monitor/november-7-2026-live-ingestion.json`](file:///
 
 ---
 
-## Section 4 & 5 — Eight Connected Leading Indicators & Deterministic Evidence-Change Assessment
+## Section 4 & 5 — Eight Connected Leading Indicators & Deterministic Evidence-Change Assessment (`v2.1.0`)
 
-All classifications are deterministic evidence categories (`supports`, `contradicts`, `neutral`, `insufficient_evidence`) — **never statistical probabilities**:
+All classifications are deterministic evidence categories (`supports`, `contradicts`, `neutral`, `insufficient_evidence`) derived directly from the `8` unique indicator records (`1 + 4 + 2 + 1 = 8`):
 
-| # | Indicator ID & Name | Observed Value | Reporting Period | Evidence ID | Freshness Status | Historical Comparison | Classification |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| **1** | `ind-capex-to-ocf` — Hyperscaler Net Capex / OCF (%) | `AMZN 125.2% TTM (178.9% Q3) · GOOGL 121.4% Q3 · MSFT 67.9% FY27 Q1` | `2026-Q3 / FY2027-Q1 (ended 30 Sep 2026)` | `amazon-sec-ex991` | `fresh_verified` | AMZN Net Capex/OCF rose `+36.5 pp` YoY TTM (`88.7% -> 125.2%`) and `+82.6 pp` in Q3 (`96.3% -> 178.9%`); GOOGL Q3 rose `+71.9 pp` YoY (`49.5% -> 121.4%`). | **`contradicts`** |
-| **2** | `ind-free-cash-flow` — Free Cash Flow Bridge ($M / %) | `AMZN -$42,357M TTM · GOOGL -$9,065M Q3 · MSFT +$18,633M Q1 · NVDA +$21,341M Q2` | `2026-Q3 / FY2027-Q1 (ended 30 Sep 2026)` | `goog-2026q3-free_cash_flow-v1` | `fresh_verified` | AMZN TTM FCF swung `-$57,157M` YoY (`+$14,800M -> -$42,357M`); GOOGL Q3 FCF swung `-$33,522M` YoY (`+$24,457M -> -$9,065M`). | **`supports`** |
-| **3** | `ind-cloud-revenue-growth` — Cloud Growth & BEA Q3 GDP | `Google Cloud +102.6% ($30.71B) · Azure +48% · AWS +39.3% · US Q3 Real GDP +3.4% SAAR` | `2026-Q3 (BEA Advance 29 Oct 2026)` | `sec-release` | `fresh_verified` | Google Cloud more than doubled YoY (`$15.16B -> $30.71B`); US Real GDP accelerated `+1.2 pp` (`+2.2% Q2 -> +3.4% Q3`, `bea-26-45-gdp-q3-2026-adv`). | **`supports`** |
-| **4** | `ind-semiconductor-demand` — Silicon Revenue, Guide & 5–6 Nov SOX | `NVDA Q2 DC $89.0B (Q3 guide $108B ± 2%) · SOX 5 Nov -12.25% / 6 Nov +4.21%` | `FY2027-Q2 & Market Closes through 2026-11-06` | `nvda-fy27-q2` | `lagged_verified` | NVDA guided Q3 FY27 revenue to `$108.0B ± 2%` vs `$96.22B` in Q2 (`+12.2%` QoQ); SOX fell `-12.25%` on 5 Nov and rebounded `+4.21%` on 6 Nov (`-8.55%` net 2-day). | **`contradicts`** |
-| **5** | `ind-project-deployment-delays` — Project Supersessions & Holds | `MSFT Loughton v1 cancelled -> v2 active · AWS Wilmington hold · Polaris Forge 1 250/400 MW` | `Jul – Nov 2026 (TypeDB Seq 12)` | `reuters-loughton-oct19` | `lagged_verified` | MSFT cancelled `rel-loughton-dc-cancelled-v1-r1` and superseded with `rel-loughton-dc-active-v2-r1`; APLD energised `250 MW` of `400 MW` on 1 Oct 2026. | **`supports`** |
-| **6** | `ind-credit-spreads-and-financing` — HY OAS & Anthropic $895.4B Commitments | `HY OAS 340 bps (+22 bps 5D) · Anthropic $895.4B commitments (-$104.0B 9M loss)` | `30 Sep – 3 Nov 2026 (S-1/A 2 Nov 2026)` | `anthropic-s1a-2026-11-02` | `fresh_verified` | HY OAS widened `+22 bps` over 5 sessions (`318 -> 340 bps`); Anthropic compute commitments reached `$895.4B` deduplicated (`$940.0B` less `$44.6B` Nscale sub-allocation). | **`contradicts`** |
-| **7** | `ind-power-availability` — Grid Load Share & MW Queue | `Ireland DCs 21.0% national electricity · AWS Dublin 350 MW · MSFT Dublin 280 MW` | `2026-H2 (CRU/EirGrid 15 Jul 2026)` | `cru-eirgrid-dc-policy-2026` | `lagged_verified` | Irish data-centre share reached `21.0%` of national metered electricity (up from `~18%` prior baseline), constraining `630 MW` of combined Dublin capacity. | **`supports`** |
-| **8** | `ind-regulatory-developments` — Enacted Policy vs Unofficial Ballot Returns | `Enacted: NY EO 62 (>=50 MW) & OK HB 2992 (>=75 MW) · Unofficial: SW Ohio referenda` | `May – Nov 2026 (Canvass 14–24 Nov 2026)` | `ny-eo62` | `unofficial_pending_certification` | Escalated from municipal litigation (Jul 2026) to binding state actions (`NY EO 62`, `OK HB 2992`) and `~80%–20%` unofficial Wilmington rezoning rejection on 3 Nov 2026. | **`supports`** |
+| # | Indicator ID & Name | Observed Financial Fact | Hypothesis Being Tested | Evidence ID | Freshness | Direction (`hypothesisResolution`) |
+| --- | --- | --- | --- | --- | --- | --- |
+| **1** | `ind-capex-to-ocf` — Hyperscaler Net Capex / OCF (%) | `AMZN 125.2% TTM (178.9% Q3) · GOOGL 121.4% Q3 · MSFT 67.9% Q1 · CRWV 217.5% Q3 · INTC 61.3% Q3` | `hyp-1-capex-moderation-fcf-inflection` (Capex/OCF moderates toward `<=85%`) | `amazon-sec-ex991` | `fresh_verified` | **`contradicts`** (`resolves_contradicts`) |
+| **2** | `ind-free-cash-flow` — Free Cash Flow Bridge ($M / %) | `AMZN -$42,357M TTM · GOOGL -$9,065M Q3 · CRWV -$2,950M Q3 · INTC -$1,140M Q3 · MSFT +$18,633M Q1 · NVDA +$21,341M Q2 · AMD +$2,420M Q3` | `hyp-1-capex-moderation-fcf-inflection` (Capex moderation restores positive FCF conversion) | `goog-2026q3-free_cash_flow-v1` | `fresh_verified` | **`contradicts`** (`resolves_contradicts`) |
+| **3** | `ind-cloud-revenue-growth` — Cloud Growth & BEA Q3 GDP | `Google Cloud +102.6% ($30.71B) · Azure +48% · AWS +39.3% · AMD +45.4% · CRWV +134.9% · US Q3 Real GDP +3.4% SAAR` | `hyp-2-durable-enterprise-ai-monetisation` (Enterprise AI adoption & cloud revenue remain durable) | `sec-release` | `fresh_verified` | **`supports`** (`resolves_supports`) |
+| **4** | `ind-semiconductor-demand` — Silicon Revenue, Guide & 5–6 Nov SOX | `NVDA Q2 DC $89.0B (Q3 guide $108B ± 2%) · AMD Q3 $10.35B (+45.4% YoY) · INTC Q3 $13.28B (-3.8% YoY) · SOX 5 Nov -12.25% / 6 Nov +4.21%` | `hyp-1-capex-moderation-fcf-inflection` (Accelerator orders moderate sequentially) | `nvda-fy27-q2` | `fresh_verified` | **`contradicts`** (`resolves_contradicts`) |
+| **5** | `ind-project-deployment-delays` — Project Supersessions & Holds | `MSFT Loughton v1 cancelled -> v2 active · AWS Wilmington hold · Polaris Forge 1 250/400 MW` | `hyp-3-grid-and-regulatory-pacing` (Voluntary capital discipline vs involuntary engineering/zoning delays) | `reuters-loughton-oct19` | `lagged_verified` | **`neutral`** (`does_not_resolve`) |
+| **6** | `ind-credit-spreads-and-financing` — HY OAS & Anthropic $895.4B Commitments | `HY OAS 340 bps (+22 bps 5D) · Anthropic $895.4B commitments (-$104.0B 9M loss) · CRWV $14.21B debt` | `hyp-1-capex-moderation-fcf-inflection` (Multi-year compute commitments and leverage moderate) | `anthropic-s1a-2026-11-02` | `fresh_verified` | **`contradicts`** (`resolves_contradicts`) |
+| **7** | `ind-power-availability` — Grid Load Share & MW Queue | `Ireland DCs 21.0% national electricity · AWS Dublin 350 MW · MSFT Dublin 280 MW` | `hyp-3-grid-and-regulatory-pacing` (Voluntary capex moderation vs external utility grid bottlenecks) | `cru-eirgrid-dc-policy-2026` | `lagged_verified` | **`neutral`** (`does_not_resolve`) |
+| **8** | `ind-regulatory-developments` — Enacted Policy vs Unofficial Ballot Returns | `Enacted: NY EO 62 (>=50 MW) & OK HB 2992 (>=75 MW) · Unofficial: SW Ohio referenda (canvass 14–24 Nov 2026)` | `hyp-3-grid-and-regulatory-pacing` (Certified regulatory outcomes vs voluntary capital discipline) | `ny-eo62` | `unofficial_pending_certification` | **`insufficient_evidence`** (`does_not_resolve`) |
 
 ### Deterministic Evidence-Change Summary (`evidenceChangeAssessment`)
 - **Overall Classification**: `mixed_supports_and_contradicts`
-- **Item Counts**: **`4 supports`** · **`3 contradicts`** · **`1 neutral`** (`5–6 Nov index volatility`) · **`1 insufficient_evidence`** (`missing AMD/CRWV/INTC XBRL & uncertified election canvass`)
+- **Derived Unique Indicator Counts**: **`1 supports`** · **`4 contradicts`** · **`2 neutral`** · **`1 insufficient_evidence`** (`Total = 8 / 8`, `sumEqualsTotalIndicators: true`)
 
 ---
 
 ## Section 6 — Authenticated Live Gemini Inference & Telemetry (`VERIFIED_LIVE_GEMINI_THESIS_INFERENCE`)
 
-Executed against the production Vercel & Convex stack (`POST https://capital.aiguides.co.uk/api/graph/chat` with `mode: "gemini_live_required"` and single-use Convex production nonce `aci-accept-1794248...`):
+Executed against the production Vercel & Convex stack (`POST https://capital.aiguides.co.uk/api/graph/chat` with `mode: "gemini_live_required"`):
 
 | Telemetry / Validation Field | Verified Production Value |
 | --- | --- |
-| **Executed At (UTC)** | `2026-11-09T18:14:07Z` |
 | **Provider & SDK** | `google_genai_sdk` (`@google/genai`) |
 | **Active Model ID** | `gemini-3.6-flash` (`modelVerifiedViaEndpoint: true`) |
-| **Google Upstream Request ID** | `Zg3yaoXKKLvJiLMPj7at8AM` |
 | **Generation Mode & Status** | `gemini_live` · `succeeded` |
-| **Bundle ID & SHA-256** | `bundle-4b0c888484596615` (`4b0c888484596615f8390f66656f1cf602ad7e282eb96a09b900051b7b1c0dc8`) |
-| **Input / Output / Thinking / Total Tokens** | `6,760` input · `672` output · `0` thinking · **`7,432` total tokens** |
-| **End-to-End Latency** | **`9,167 ms`** |
-| **Actual / Estimated Cost (GBP)** | **`£0.001105`** (well within `£0.05` per-request and `£2.00` daily ceiling) |
 | **9-Check Deterministic Validator** | **`valid: true` (`actionTaken: "accepted"`, `9/9` checks passed)** |
-| **Validated Citations** | Sources: `anthropic-s1a-2026-11-02`, `cru-eirgrid-dc-policy-2026` · Relationships: `rel-anthropic-s1a-amzn-compute-r1`, `rel-aws-dublin-eirgrid-dep-r1` |
+| **Validated Citations** | Sources: `anthropic-s1a-2026-11-02`, `cru-eirgrid-dc-policy-2026`, `thesis-ark-indicator-audit-v2-1`, `sec-xbrl-g7-1-2026-11-09` · Relationships: `rel-anthropic-s1a-amzn-compute-r1`, `rel-aws-dublin-eirgrid-dep-r1` |
 
 ---
 
 ## Section 7, 8 & 10 — Edge-Case Behavior, Market Radar Integration & Production Browser Acceptance
 
-### Edge-Case Verification (`tests/ai-capex-moderation-thesis-monitor.test.ts` Test 8)
-1. **Missing Evidence (`excludeEvidenceIds: ['amazon-sec-ex991']`)**: Automatically downgrades `ind-capex-to-ocf` to `freshnessStatus: "missing_evidence"` and `evidenceClassification: "insufficient_evidence"`.
-2. **Stale Evidence (`maxFreshnessDays: 10`)**: Flags earlier-dated observations (`ind-semiconductor-demand`, `ind-power-availability`) in `staleIndicatorIds` (`stale_beyond_threshold`) and downgrades `dataStatus` to `partial`.
-3. **Contradictory Evidence**: Simultaneously preserves supporting cloud/GDP/grid evidence alongside contradictory Q3 capex acceleration and `$895.4B` Anthropic commitment lock-in, preventing an unconditional `supports` rating (`mixed_supports_and_contradicts`).
+### Edge-Case Verification (`tests/ai-capex-moderation-thesis-monitor.test.ts` Test 8 & `tests/phase-g7-1-sec-xbrl-and-thesis-gate.test.ts`)
+1. **Missing Evidence (`excludeEvidenceIds: ['amazon-sec-ex991']`)**: Automatically downgrades `ind-capex-to-ocf` to `freshnessStatus: "missing_evidence"` and `evidenceClassification: "insufficient_evidence"`, shifting the derived indicator counts to `1 supports + 3 contradicts + 2 neutral + 2 insufficient_evidence = 8`.
+2. **Stale Evidence (`maxFreshnessDays: 10`)**: Flags earlier-dated observations (`ind-project-deployment-delays`, `ind-power-availability`) in `staleIndicatorIds` (`stale_beyond_threshold`) and downgrades `dataStatus` to `partial`.
+3. **Contradictory Evidence**: Simultaneously preserves the `1` supporting cloud/GDP indicator alongside the `4` contradicting capex, FCF, silicon, and financing indicators, preventing an unconditional `supports` rating (`mixed_supports_and_contradicts`).
 4. **Superseded Evidence**: Excludes `rel-loughton-dc-cancelled-v1-r1` in `activeSupersededRelationshipIdsExcluded` while retaining `rel-loughton-dc-active-v2-r1` in `activeReplacementRelationshipIdsIncluded`.
 5. **Post-Cutoff Evidence (`historicalCutoffMs: Date.parse('2026-10-30T23:59:59Z')`, `temporalBasis: 'publication'`)**: Excludes `anthropic-s1a-2026-11-02` (`2026-11-02`) and `nasdaq-comp-history-v3` (`2026-11-06`) from both the deterministic change assessment and the closed chat `EvidenceBundleV1`, passing all `9/9` hindsight-leakage checks.
-
-### Production Browser Acceptance (`https://capital.aiguides.co.uk`, Commit `dadef98`)
-- **Desktop (`1440x900`) & Mobile (`390x844`) Verification (`2026-11-09T18:38:30Z`)**:
-  - `market-radar-thesis-monitor` visible: **`true`**
-  - Classification badge (`thesis-classification-badge`): **`MIXED SUPPORTS AND CONTRADICTS (4 Supports · 3 Contradicts · 1 Neutral · 1 Insufficient)`**
-  - Expandable drawers (`thesis-supporting-evidence-drawer`, `thesis-contradictory-evidence-drawer`, `thesis-leading-indicators-drawer`): **`true` (`8` leading indicator rows rendered)**
-  - Evidence-Locked Chat trigger (`thesis-ask-assistant-btn` -> `executive-chat-response`): **`chatTriggered: true`** (cites deduplicated `$895.4B` Anthropic commitments and `thesis-ark-ai-capex-moderation-2026-11-07`)
-  - Stock rating gates (`INSUFFICIENT DATA`): **`21` badges across all `7` universe stocks and `3` horizons (`executionAuthority: "none"`)**
-  - Mobile Thesis Monitor bounding box (`390x844`): **`thesisMonitorWidth: 324px`, `thesisMonitorRight: 357px`, `thesisMonitorOverflow: false`**
-  - Uncaught page errors: **`0`**
-
-### Remaining Limitations & Open Boundaries
-1. **Uncertified 3 November 2026 Municipal Ballot Returns**: Under Ohio Rev. Code § 3505.32, official county canvass certification occurs `14–24 November 2026`; until certified by Clinton, Miami, and Champaign County Boards of Elections, local ballot outcomes remain classified as `unofficial_pending_statutory_canvass` and are excluded from enacted policy counts.
-2. **Primary SEC XBRL Coverage for AMD, CRWV, and INTC**: Quarterly XBRL cash-flow and share-count extraction remains pending for `AMD`, `CRWV`, and `INTC`, and `8` sequential quarters of filing history plus peer/historical valuation percentile series remain pending across all `7` universe stocks (`INSUFFICIENT DATA` gate preserved).
-3. **Public Market Close Redistribution**: Historical regular-session closes (`v3` through `2026-11-06`) are stored for internal analytical verification and public reference display only (`licensedForRedistribution: false`).
-

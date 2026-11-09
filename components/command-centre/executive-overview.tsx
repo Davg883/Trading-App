@@ -1006,9 +1006,9 @@ export function ExecutiveOverviewSections({
               <span>
                 Supporting Primary Evidence (
                 {thesisMonitor.evidenceSynthesis.supportingEvidence.length} Verified
-                Observations)
+                Observation)
               </span>
-              <small>Cloud growth, Q3 BEA GDP +3.4%, FCF bridge, Loughton v2 &amp; grid limits</small>
+              <small>Hyperscale cloud growth (+102.6% GCP, +48% Azure, +39.3% AWS) &amp; BEA Q3 Real GDP +3.4%</small>
             </summary>
             <ul className="g6-gate-list" style={{ padding: '0.75rem 1rem' }}>
               {thesisMonitor.evidenceSynthesis.supportingEvidence.map((item, idx) => (
@@ -1033,7 +1033,7 @@ export function ExecutiveOverviewSections({
                 {thesisMonitor.evidenceSynthesis.contradictoryEvidence.length} Verified
                 Observations)
               </span>
-              <small>Q3 capex surge, Anthropic $895.4B lock-in &amp; NVDA $108B Q3 guide</small>
+              <small>Capex/OCF surge, negative FCF cash burn, NVDA/AMD chip acceleration &amp; $895.4B lock-in</small>
             </summary>
             <ul className="g6-gate-list" style={{ padding: '0.75rem 1rem' }}>
               {thesisMonitor.evidenceSynthesis.contradictoryEvidence.map((item, idx) => (
@@ -1054,9 +1054,9 @@ export function ExecutiveOverviewSections({
           >
             <summary className="g6-drawer-summary">
               <span>
-                8 Leading Indicators, 5–6 Nov Market Closes &amp; BEA Q3 2026 GDP
+                8 Leading Indicators ({thesisMonitor.evidenceChangeAssessment.counts.supports} Supports + {thesisMonitor.evidenceChangeAssessment.counts.contradicts} Contradicts + {thesisMonitor.evidenceChangeAssessment.counts.neutral} Neutral + {thesisMonitor.evidenceChangeAssessment.counts.insufficient_evidence} Insufficient = {thesisMonitor.evidenceChangeAssessment.totalDeclaredIndicatorsCount})
               </span>
-              <small>Value, reporting period, evidence ID, freshness &amp; historical comparison</small>
+              <small>Observed fact, hypothesis tested, direction, confidence, freshness &amp; comparable baseline</small>
             </summary>
             <div
               className="cc-table-wrap"
@@ -1065,16 +1065,20 @@ export function ExecutiveOverviewSections({
               <table className="cc-table">
                 <thead>
                   <tr>
-                    <th scope="col">Indicator</th>
-                    <th scope="col">Observed Value &amp; Period</th>
-                    <th scope="col">Classification &amp; Freshness</th>
-                    <th scope="col">Historical Comparison &amp; Evidence ID</th>
+                    <th scope="col">Indicator &amp; Hypothesis Tested</th>
+                    <th scope="col">Observed Financial Fact &amp; Period</th>
+                    <th scope="col">Direction, Resolution &amp; Confidence</th>
+                    <th scope="col">Comparable Baseline &amp; Evidence ID</th>
                   </tr>
                 </thead>
                 <tbody>
                   {thesisMonitor.leadingIndicators.map((ind) => (
                     <tr key={ind.indicatorId} data-testid={`thesis-ind-${ind.indicatorId}`}>
-                      <th scope="row">{ind.name}</th>
+                      <th scope="row">
+                        <strong>{ind.name}</strong>
+                        <br />
+                        <small>{ind.hypothesisBeingTested}</small>
+                      </th>
                       <td>
                         <strong>{ind.value}</strong>
                         <br />
@@ -1082,13 +1086,14 @@ export function ExecutiveOverviewSections({
                       </td>
                       <td>
                         <span className="g6-meta-pill">
-                          {ind.evidenceClassification.toUpperCase()}
-                        </span>
+                          {ind.evidenceDirection.toUpperCase()}
+                        </span>{' '}
+                        <small>({ind.hypothesisResolution})</small>
                         <br />
-                        <small>{ind.freshnessStatus}</small>
+                        <small>{ind.freshnessStatus} · {ind.sourceConfidence.level}</small>
                       </td>
                       <td>
-                        <small>{ind.historicalComparison}</small>
+                        <small>{ind.previousComparableObservation}</small>
                         <br />
                         <code>{ind.evidenceId}</code>
                       </td>

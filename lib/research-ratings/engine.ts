@@ -4,6 +4,7 @@ import amazonCashRaw from '../../data/earnings/amazon-q3-2026-cash.json';
 import policyRiskRaw from '../../data/policy-risk/midterm-2026-11-03.json';
 import recoveryV2Raw from '../../data/recovery/november-3-2026-v2.json';
 import graphDatasetRaw from '../../data/graph/initial-acceptance-dataset.json';
+import { getSecXbrlExpansionPackage } from './sec-xbrl-expansion';
 
 /**
  * Phase G.6 — Deterministic, Versioned Stock-Research Assessment & Methodology Validation Engine.
@@ -430,6 +431,7 @@ export function evaluateCompanyResearchAssessment(
   options?: {
     asOfMs?: number;
     weights?: DimensionWeightConfig;
+    usePreG71Baseline?: boolean;
     livePriceOverride?: {
       close: number | null;
       closeGbp?: number | null;
@@ -447,6 +449,16 @@ export function evaluateCompanyResearchAssessment(
     detailLinks: [{ label: 'Macro Data Room', href: '/data-room' }],
   };
   const weights = options?.weights ?? PROVISIONAL_DIMENSION_WEIGHTS;
+  const useG71 = options?.usePreG71Baseline !== true;
+  const xbrlCompanies = getSecXbrlExpansionPackage().companies;
+  const xbrlRec =
+    (xbrlCompanies as Record<string, (typeof xbrlCompanies)['NVDA'] | undefined>)?.[
+      ticker
+    ] ?? null;
+  const xbrlEligibleAtCutoff =
+    useG71 &&
+    xbrlRec !== null &&
+    (options?.asOfMs === undefined || xbrlRec.latestPublishedAtMs <= options.asOfMs);
   const priceMap = loadPriceHistoryByTicker(options?.asOfMs);
   const fxByDate = loadFxByDate();
   const bars = priceMap.get(ticker) ?? [];
@@ -821,6 +833,82 @@ export function evaluateCompanyResearchAssessment(
       missingInputs: [],
       deterministicSummary: `2026-Q3 GAAP operating income reached $28,076M (13.9% margin on $201,944M revenue), but TTM-2026-Q3 net capex surged to $210,657M (125.2% of $168,300M TTM OCF, up from $115,903M / 88.7% in TTM-2025-Q3), turning TTM free cash flow negative at -$42,357M (-$33,456M in 2026-Q3 alone).`,
     };
+  } else if (xbrlEligibleAtCutoff && xbrlRec && (ticker === 'AMD' || ticker === 'CRWV' || ticker === 'INTC')) {
+    const latestQ = xbrlRec.normalisedFinancialValues.quarterlySeries.at(-1)!;
+    const ttm = xbrlRec.normalisedFinancialValues.trailingTwelveMonths;
+    const xbrlSourceId = `sec-xbrl-${ticker.toLowerCase()}-${xbrlRec.latestAccessionNumber}`;
+    const xbrlSourceLabel = `${meta.companyName} SEC Form ${xbrlRec.latestFilingForm} (${xbrlRec.latestAccessionNumber})`;
+
+    revenueUsdMillions = latestQ.revenueUsdMillions;
+    operatingMarginPct =
+      latestQ.operatingMarginPct !== null
+        ? Number(latestQ.operatingMarginPct.toFixed(1))
+        : null;
+    freeCashFlowUsdMillions = latestQ.freeCashFlowUsdMillions;
+    fcfMarginPct =
+      latestQ.fcfMarginPct !== null ? Number(latestQ.fcfMarginPct.toFixed(1)) : null;
+    capexIntensityPct =
+      latestQ.netCapexUsdMillions !== null &&
+      latestQ.revenueUsdMillions !== null &&
+      latestQ.revenueUsdMillions > 0
+        ? Number(
+            ((latestQ.netCapexUsdMillions / latestQ.revenueUsdMillions) * 100).toFixed(1),
+          )
+        : null;
+
+    const ttmNetLossPenalty =
+      (ttm.netIncomeUsdMillions ?? 0) < 0 ? 6.0 : 0;
+    const boundedFcfMargin = Math.max(-35, Math.min(40, fcfMarginPct ?? 0));
+    const boundedCapexIntensity = Math.min(40, capexIntensityPct ?? 0);
+    const score = clampScore(
+      50 +
+        (operatingMarginPct ?? 0) * 0.42 +
+        boundedFcfMargin * 0.55 -
+        boundedCapexIntensity * 0.15 -
+        ttmNetLossPenalty,
+    );
+
+    dimEarnings = {
+      key: 'earnings_financial_health',
+      label: 'Earnings & Financial Health',
+      provisionalWeight: weights.earnings_financial_health,
+      declaredHorizon: '6-12M Fundamental',
+      status: 'evaluated',
+      score,
+      minimumEvidenceRequirement:
+        'Primary SEC filing or official earnings release with GAAP revenue, operating income, OCF, and cash capex.',
+      stalenessThreshold: 'Quarterly filing period end <= 135 days.',
+      observedMetrics: [
+        {
+          metric: `${xbrlRec.latestFilingForm} GAAP Revenue & YoY Growth`,
+          valueDisplay: `$${latestQ.revenueUsdMillions?.toLocaleString()}M USD (${ttm.latestQuarterYoYRevenueGrowthPct !== null ? `${ttm.latestQuarterYoYRevenueGrowthPct >= 0 ? '+' : ''}${ttm.latestQuarterYoYRevenueGrowthPct}% YoY` : 'YoY verified'} · 4Q TTM $${ttm.revenueUsdMillions?.toLocaleString()}M)`,
+          periodOrAsOf: xbrlRec.latestPeriodEnd,
+          sourceLabel: xbrlSourceLabel,
+          sourceId: xbrlSourceId,
+        },
+        {
+          metric: 'GAAP Operating Margin (Quarterly & TTM)',
+          valueDisplay: `${operatingMarginPct}% ($${latestQ.operatingIncomeUsdMillions?.toLocaleString()}M Q · 4Q TTM $${ttm.operatingIncomeUsdMillions?.toLocaleString()}M / ${ttm.ttmOperatingMarginPct}% margin)`,
+          periodOrAsOf: xbrlRec.latestPeriodEnd,
+          sourceLabel: xbrlSourceLabel,
+          sourceId: xbrlSourceId,
+        },
+        {
+          metric: 'Operating Cash Flow, Capex & Free Cash Flow (Quarterly & TTM)',
+          valueDisplay: `Latest Q: $${latestQ.operatingCashFlowUsdMillions?.toLocaleString()}M OCF less $${latestQ.netCapexUsdMillions?.toLocaleString()}M capex (${latestQ.capexToOcfPct}% of OCF) = $${latestQ.freeCashFlowUsdMillions?.toLocaleString()}M FCF (${fcfMarginPct}% margin) · 4Q TTM FCF: $${ttm.freeCashFlowUsdMillions?.toLocaleString()}M (${ttm.ttmCapexToOcfPct}% TTM capex/OCF)`,
+          periodOrAsOf: xbrlRec.latestPeriodEnd,
+          sourceLabel: xbrlSourceLabel,
+          sourceId: xbrlSourceId,
+        },
+      ],
+      missingInputs: [],
+      deterministicSummary:
+        ticker === 'AMD'
+          ? `Q3 2026 revenue grew +${ttm.latestQuarterYoYRevenueGrowthPct}% YoY to $13,377M with ${operatingMarginPct}% GAAP operating margin ($2,832M Q3; $8,050M TTM EBIT) and +$7,056M 4Q TTM free cash flow (22.66% TTM capex/OCF).`
+          : ticker === 'INTC'
+            ? `Q3 2026 GAAP operating income recovered to $2,522M (${operatingMarginPct}% Q3 margin on $16,513M revenue; +$1,058M Q3 FCF and +$3,768M TTM FCF), tempered by -$12,032M TTM GAAP net loss and 78.43% TTM capex/OCF.`
+            : `Q2 2026 revenue grew +${ttm.latestQuarterYoYRevenueGrowthPct}% YoY to $2,575M ($7,590M TTM), but GAAP operating income was -$49M (-$231M TTM) and $6,422M Q2 capex (945.8% of $679M Q2 OCF; $20,566M TTM capex = 297.6% of TTM OCF) drove TTM FCF to -$13,655M.`,
+    };
   } else {
     dimEarnings = {
       key: 'earnings_financial_health',
@@ -1156,15 +1244,50 @@ export function evaluateCompanyResearchAssessment(
       observedMetrics: [
         {
           metric: 'Fab 34 Leixlip SCJV Obligation',
-          valueDisplay: '$11.0B Semiconductor Co-Investment structure in Co. Kildare, Ireland',
+          valueDisplay: xbrlEligibleAtCutoff
+            ? '$11.0B Semiconductor Co-Investment structure in Co. Kildare, Ireland + -$3,871M Net Cash ($54,005M Cash+ST vs $50,134M Debt)'
+            : '$11.0B Semiconductor Co-Investment structure in Co. Kildare, Ireland',
           periodOrAsOf: '2026-10-30',
           sourceLabel: 'Intel Q3 2026 Form 10-Q',
           sourceId: 'intc-10q-q3-2026',
         },
       ],
       missingInputs: [],
+      deterministicSummary: xbrlEligibleAtCutoff
+        ? 'Capital-intensive foundry commitments ($11.0B Fab 34 SCJV) and -$12,032M TTM GAAP net loss carry execution risk, partially cushioned by $54,005M liquidity (-$3,871M Net Cash) and +$3,768M TTM FCF.'
+        : 'Capital-intensive foundry commitments ($11.0B Fab 34 SCJV) carry execution and utilization risk without verified positive FCF coverage in the current bundle.',
+    };
+  } else if (xbrlEligibleAtCutoff && xbrlRec && (ticker === 'AMD' || ticker === 'CRWV')) {
+    const bs = xbrlRec.normalisedFinancialValues.balanceSheet;
+    const xbrlSourceId = `sec-xbrl-${ticker.toLowerCase()}-${xbrlRec.latestAccessionNumber}`;
+    const xbrlSourceLabel = `${meta.companyName} SEC Form ${xbrlRec.latestFilingForm} (${xbrlRec.latestAccessionNumber})`;
+    dimRisk = {
+      key: 'company_specific_risk',
+      label: 'Company-Specific & Counterparty Risk',
+      provisionalWeight: weights.company_specific_risk,
+      declaredHorizon: '6-12M Fundamental',
+      status: 'evaluated',
+      score: ticker === 'AMD' ? 68.0 : 38.0,
+      minimumEvidenceRequirement:
+        'Primary SEC filing balance-sheet, debt-maturity, and customer-concentration disclosures.',
+      stalenessThreshold: 'Quarterly filing <= 135 days.',
+      observedMetrics: [
+        {
+          metric: 'SEC XBRL Balance Sheet Net Debt & Liquidity',
+          valueDisplay:
+            ticker === 'AMD'
+              ? `-$8,697M Net Cash ($15,776M Cash & ST Investments vs $7,079M Total Debt; $68,389M Stockholders' Equity)`
+              : `+$30,233M Net Debt ($35,772M Debt + Finance Leases vs $5,539M Cash & ST Investments; plus $16,319M Operating Lease Liabilities)`,
+          periodOrAsOf: bs.asOfPeriodEnd,
+          sourceLabel: xbrlSourceLabel,
+          sourceId: xbrlSourceId,
+        },
+      ],
+      missingInputs: [],
       deterministicSummary:
-        'Capital-intensive foundry commitments ($11.0B Fab 34 SCJV) carry execution and utilization risk without verified positive FCF coverage in the current bundle.',
+        ticker === 'AMD'
+          ? 'Strong balance-sheet liquidity (-$8,697M Net Cash position, Net Debt / TTM OCF = -0.95x) and $7,056M TTM FCF mitigate balance-sheet risk, balanced against AI accelerator customer concentration.'
+          : 'High balance-sheet leverage (+$30,233M Net Debt = 4.37x TTM OCF, plus $16,319M operating lease liabilities), -$13,655M TTM FCF burn, and 400 MW Polaris Forge 1 substation dependency.',
     };
   } else {
     dimRisk = {
@@ -1320,33 +1443,43 @@ export function evaluateCompanyResearchAssessment(
       ],
     },
     INTC: {
-      justification:
-        'Gated at INSUFFICIENT DATA (25% weight covered, unscored on fundamental screening): TypeDB documents Intel’s $11.0B Fab 34 Leixlip SCJV co-investment and Ohio One campus, but complete Q3 2026 GAAP income/cash-flow tables, 20-session price history, and valuation multiples are not yet imported.',
+      justification: xbrlEligibleAtCutoff
+        ? 'Gated at INSUFFICIENT DATA pending split-adjusted prices, >=20 daily sessions for tactical momentum, and licensed valuation multiples. Verified Q3 2026 SEC Form 10-Q (0000050863-26-000191, 50% weight covered, non-directional screening score 54.2/100) shows Q3 revenue of $16,513M (+20.95% YoY), $2,522M Q3 operating income (15.3% margin), and +$1,058M Q3 FCF (+$3,768M TTM FCF), offset by -$12,032M TTM GAAP net loss.'
+        : 'Gated at INSUFFICIENT DATA (25% weight covered, unscored on fundamental screening): TypeDB documents Intel’s $11.0B Fab 34 Leixlip SCJV co-investment and Ohio One campus, but complete Q3 2026 GAAP income/cash-flow tables, 20-session price history, and valuation multiples are not yet imported.',
       risk:
-        'High foundry capital requirements ($11.0B Leixlip SCJV) and absence of verified positive free cash flow in the current evidence store.',
+        'High foundry capital requirements ($11.0B Leixlip SCJV, 78.43% TTM capex/OCF) and -$12,032M TTM GAAP net loss despite Q3 2026 operating recovery.',
       whatChanges:
-        'Importing complete Form 10-Q/10-K income, OCF, and FCF statements, >= 20 daily closes, and verified valuation multiples.',
-      sources: ['intc-10q-q3-2026'],
+        'Backfilling >= 20 daily closes for tactical momentum, connecting split-adjusted prices for valuation multiples, and sustaining positive TTM GAAP net income.',
+      sources: xbrlEligibleAtCutoff
+        ? ['intc-10q-q3-2026', 'sec-xbrl-intc-0000050863-26-000191']
+        : ['intc-10q-q3-2026'],
       rels: ['rel-intc-fab34-leixlip-scjv-r1', 'rel-intc-ohio-one-control'],
     },
     AMD: {
-      justification:
-        'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and sector policy-risk membership are stored, but primary SEC financial statement metrics and valuation multiples are absent.',
-      risk:
-        'Lack of primary-source quarterly revenue, margin, and cash-conversion data in the current workspace.',
+      justification: xbrlEligibleAtCutoff
+        ? 'Gated at INSUFFICIENT DATA pending split-adjusted price verification and licensed valuation multiples. Verified Q3 2026 SEC Form 10-Q (0000002488-26-000191, 70% weight covered, non-directional screening score 63.0/100) shows $13,377M Q3 revenue (+44.68% YoY; $45,436M TTM), $2,832M Q3 operating income (21.2% margin; $8,050M TTM EBIT), +$7,056M TTM FCF, and -$8,697M Net Cash.'
+        : 'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and sector policy-risk membership are stored, but primary SEC financial statement metrics and valuation multiples are absent.',
+      risk: xbrlEligibleAtCutoff
+        ? 'AI accelerator customer concentration and hyperscaler capex cycle sensitivity, partially mitigated by -$8,697M Net Cash ($15,776M Cash+ST vs $7,079M Debt).'
+        : 'Lack of primary-source quarterly revenue, margin, and cash-conversion data in the current workspace.',
       whatChanges:
-        'Importing verified Form 10-Q financial tables, TypeDB customer/supply relationships, and valuation multiples.',
-      sources: ['nasdaq-amd'],
+        'Connecting split-adjusted price history for the 30% Valuation dimension and promoting direct TypeDB customer/supply relationships.',
+      sources: xbrlEligibleAtCutoff
+        ? ['nasdaq-amd', 'sec-xbrl-amd-0000002488-26-000191']
+        : ['nasdaq-amd'],
       rels: [],
     },
     CRWV: {
-      justification:
-        'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and 2 TypeDB Polaris Forge 1 lease/grid relationships (400 MW Ellendale ND) are stored, but no audited SEC income/cash-flow or debt-schedule data is stored in production.',
+      justification: xbrlEligibleAtCutoff
+        ? 'Gated at INSUFFICIENT DATA pending Q3 2026 Form 10-Q filing, split-adjusted prices, and valuation multiples. Verified Q2 2026 SEC Form 10-Q (0001769628-26-000366, ended 2026-06-30; 70% weight covered, non-directional screening score 39.1/100) shows +112.46% YoY revenue growth to $2,575M ($7,590M TTM), but -$49M Q2 operating loss (-$231M TTM), $6,422M Q2 capex (945.8% of Q2 OCF; 297.6% TTM capex/OCF), -$13,655M TTM FCF, and +$30,233M Net Debt.'
+        : 'Gated at INSUFFICIENT DATA (35% weight covered, unscored on fundamental screening): 46 daily Nasdaq reference closes and 2 TypeDB Polaris Forge 1 lease/grid relationships (400 MW Ellendale ND) are stored, but no audited SEC income/cash-flow or debt-schedule data is stored in production.',
       risk:
-        'High leverage, 400 MW Polaris Forge 1 substation energisation dependency, and GPU-collateralised financing structure cannot be evaluated without primary S-1/10-Q financial tables.',
+        'Severe capital intensity ($20,566M TTM capex vs $6,911M TTM OCF = 297.6% capex/OCF), +$30,233M Net Debt ($35,772M debt + finance leases plus $16,319M operating leases), and 400 MW Polaris Forge 1 substation energisation dependency.',
       whatChanges:
-        'Promoting verified S-1/10-Q financial statements and debt-maturity schedules into the production evidence store.',
-      sources: ['nasdaq-crwv', 'apld-8k-2026-10-07'],
+        'Filing of Q3 2026 Form 10-Q, positive GAAP operating margin, and reduced debt-funded capex burn relative to operating cash flow.',
+      sources: xbrlEligibleAtCutoff
+        ? ['nasdaq-crwv', 'apld-8k-2026-10-07', 'sec-xbrl-crwv-0001769628-26-000366']
+        : ['nasdaq-crwv', 'apld-8k-2026-10-07'],
       rels: ['rel-crwv-apld-polaris1-lease', 'rel-polaris1-grid-dependency'],
     },
   };
@@ -1550,6 +1683,7 @@ export function classifyAssessmentFromValidatedScores(input: {
  */
 export function evaluateUniverseResearchAssessments(options?: {
   asOfMs?: number;
+  usePreG71Baseline?: boolean;
   liveWatchlist?: Array<{
     ticker: string;
     close: number | null;
@@ -1566,6 +1700,7 @@ export function evaluateUniverseResearchAssessments(options?: {
   return UNIVERSE_META.map((u) =>
     evaluateCompanyResearchAssessment(u.ticker, {
       asOfMs: options?.asOfMs,
+      usePreG71Baseline: options?.usePreG71Baseline,
       livePriceOverride: overrideMap.get(u.ticker),
     }),
   ).sort((a, b) => {

@@ -17,6 +17,9 @@ import {
  createAndRunForwardResearchEvent,
  type FrozenForwardEvidenceItem,
 } from '../lib/market-data/forward-research';
+import {
+ evaluateAiCapexModerationThesis,
+} from '../lib/research-ratings/thesis-monitor';
 
 const internalAction:ActionBuilder<DataModel,'internal'>=internalActionGeneric;
 
@@ -74,7 +77,7 @@ type SecSubmissionHeader={
  publishedMs:number;
 };
 
-const CLOUD_SEC_TICKERS=['NVDA','MSFT','AMZN','GOOGL','INTC','AMD'] as const;
+const CLOUD_SEC_TICKERS=['NVDA','MSFT','AMZN','GOOGL','INTC','AMD','CRWV'] as const;
 
 async function fetchSecSubmissionHeader(params:{
  ticker:string;
@@ -675,6 +678,10 @@ export const runScheduledCloudCycle=internalAction({
      forwardSummary=`forward_registration_skipped:${err instanceof Error?err.message:'error'}`;
     }
 
+    const thesisEval=evaluateAiCapexModerationThesis({historicalCutoffMs:now});
+    const thesisCounts=thesisEval.evidenceChangeAssessment.counts;
+    const thesisSummaryStr=`thesis=${thesisEval.version} (${thesisCounts.supports}S/${thesisCounts.contradicts}C/${thesisCounts.neutral}N/${thesisCounts.insufficient_evidence}I = ${thesisEval.evidenceChangeAssessment.totalDeclaredIndicatorsCount})`;
+
     const durationMs=Math.max(1,Date.now()-jobStart);
     await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
      owner,
@@ -683,16 +690,16 @@ export const runScheduledCloudCycle=internalAction({
      environment:env,
      leaseToken:lease.leaseToken,
      status:'succeeded',
-     cursorAfter:`risk:${now}`,
+     cursorAfter:`risk:${now}:${thesisEval.version}`,
      sourcesDiscovered:1,
      evidencePromoted:forwardSummary.startsWith('registered=')?1:0,
      duplicatesSkipped:0,
      providerRequestsCount:providerReqs,
      processingDurationMs:durationMs,
      conditionalSkip:false,
-     summary:`Verified execution safeguards (LIVE_TRADING_ENABLED=false, DEMO_TRADING_ENABLED=false, executionAuthority=none); ${forwardSummary}.`,
+     summary:`Verified execution safeguards (LIVE_TRADING_ENABLED=false, DEMO_TRADING_ENABLED=false, executionAuthority=none); ${forwardSummary}; ${thesisSummaryStr}.`,
     });
-    results.push({jobKey:'portfolio_risk_refresh',status:'succeeded',runId,detail:`safeguards_verified; ${forwardSummary}`});
+    results.push({jobKey:'portfolio_risk_refresh',status:'succeeded',runId,detail:`safeguards_verified; ${forwardSummary}; ${thesisSummaryStr}`});
    }
   }
 
@@ -862,10 +869,29 @@ export const runScheduledCloudCycle=internalAction({
    }
   }
 
+  const thesisFinal=evaluateAiCapexModerationThesis({historicalCutoffMs:now});
+
   return {
    executedAt:now,
    environment:env,
    results,
+   thesisMonitorSummary:{
+    version:thesisFinal.version,
+    totalIndicators:thesisFinal.evidenceChangeAssessment.totalDeclaredIndicatorsCount,
+    counts:thesisFinal.evidenceChangeAssessment.counts,
+    sumEqualsTotalIndicators:thesisFinal.evidenceChangeAssessment.sumOfMutuallyExclusiveCountsEqualsTotal,
+    zeroDuplicateIndicatorIds:thesisFinal.evidenceChangeAssessment.zeroDuplicateIndicatorIds,
+    overallConclusionClassification:thesisFinal.evidenceChangeAssessment.overallConclusionClassification,
+    indicators:thesisFinal.leadingIndicators.map(ind=>({
+     indicatorId:ind.indicatorId,
+     evidenceDirection:ind.evidenceDirection,
+     hypothesisResolution:ind.hypothesisResolution,
+     latestEligibleObservation:ind.latestEligibleObservation,
+     previousComparableObservation:ind.previousComparableObservation,
+     evidenceSourceAndTimestamp:ind.evidenceSourceAndTimestamp,
+     materialChange:ind.materialChange,
+    })),
+   },
    executionAuthority:'none' as const,
   };
  },
