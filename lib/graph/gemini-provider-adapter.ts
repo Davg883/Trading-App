@@ -1210,14 +1210,15 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   const userPromptText = [
     `Answer the user question strictly using the following authorised EvidenceBundleV1 JSON. Do not use any outside facts or invent any numbers.`,
-    `Return ONLY a single valid JSON object with these exact keys:`,
+    `Return ONLY a single valid JSON object with these exact keys in this order:`,
     `{`,
-    `  "shortAnswer": "string (under 700 chars)",`,
-    `  "executiveTldr": ["string bullet 1", "string bullet 2", "string bullet 3"],`,
+    `  "shortAnswer": "string (under 380 chars)",`,
+    `  "supportStatus": "fully_supported" | "partially_supported" | "unsupported",`,
+    `  "executiveTldr": ["string bullet 1 (under 140 chars)", "string bullet 2 (under 140 chars)"],`,
     `  "supportingClaims": [`,
     `    {`,
     `      "claimId": "claim-1",`,
-    `      "statement": "concise statement (under 220 chars) grounded in the cited relationship/source",`,
+    `      "statement": "concise statement (under 140 chars) grounded in the cited relationship/source",`,
     `      "distinction": "source_fact" | "deterministic_arithmetic" | "modelled_scenario" | "reported_unverified" | "interpretation",`,
     `      "evidenceIds": ["valid docId from ALLOWED_EVIDENCE_IDS"],`,
     `      "relationshipIds": ["valid relationshipId from ALLOWED_RELATIONSHIP_IDS"],`,
@@ -1228,21 +1229,13 @@ export async function generateAndValidateEvidenceLockedAnswer(
     `    }`,
     `  ],`,
     `  "relevantRelationshipIds": ["valid relationshipId from ALLOWED_RELATIONSHIP_IDS"],`,
-    `  "contradictoryEvidence": [`,
-    `    {`,
-    `      "topic": "string",`,
-    `      "description": "string",`,
-    `      "relationshipIds": ["valid relationshipId"],`,
-    `      "evidenceIds": ["valid docId"]`,
-    `    }`,
-    `  ],`,
+    `  "contradictoryEvidence": [],`,
     `  "missingInformation": ["string"],`,
-    `  "supportStatus": "fully_supported" | "partially_supported" | "unsupported",`,
     `  "abstentionReason": null,`,
-    `  "suggestedFollowUpQuestions": ["question 1", "question 2", "question 3"]`,
+    `  "suggestedFollowUpQuestions": ["question 1", "question 2"]`,
     `}`,
     `MANDATORY GROUNDING RULES:`,
-    `- Keep output ultra-concise (total JSON under 900 characters): include AT MOST 2 supportingClaims (each statement under 140 chars), AT MOST 1 contradictoryEvidence item, AT MOST 1 missingInformation item, and 2 executiveTldr bullets (each under 140 chars).`,
+    `- Keep output ultra-concise (total JSON under 800 characters): include AT MOST 2 supportingClaims (each statement under 140 chars), AT MOST 1 contradictoryEvidence item, AT MOST 1 missingInformation item, and 2 executiveTldr bullets (each under 140 chars).`,
     `- ALLOWED_EVIDENCE_IDS (every supportingClaim.evidenceIds and contradictoryEvidence.evidenceIds MUST only use IDs from this list): ${JSON.stringify(allowedEvidenceIds)}`,
     `- ALLOWED_RELATIONSHIP_IDS (every supportingClaim.relationshipIds, contradictoryEvidence.relationshipIds, and relevantRelationshipIds MUST only use IDs from this list): ${JSON.stringify(allowedRelationshipIds)}`,
     `- HISTORICAL_CUTOFF_DATE: ${cutoffDateOnly} (${bundle.temporalBasis} clock). Never cite any date after ${cutoffDateOnly} in periodOrAsOf.`,
@@ -1276,8 +1269,9 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 1536,
             ...(thinkingConfig ? { thinkingConfig } : {}),
+            responseMimeType: 'application/json',
           },
         }),
         new Promise<never>((_, reject) =>
@@ -1287,11 +1281,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
       const strippedText = (response.text ?? '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
       const firstBrace = strippedText.indexOf('{');
-      const lastBrace = strippedText.lastIndexOf('}');
-      const rawText =
-        firstBrace >= 0 && lastBrace > firstBrace
-          ? strippedText.slice(firstBrace, lastBrace + 1)
-          : strippedText;
+      const rawText = firstBrace >= 0 ? strippedText.slice(firstBrace) : strippedText;
       const responseId =
         typeof (response as { responseId?: unknown }).responseId === 'string'
           ? (response as { responseId: string }).responseId
@@ -1302,14 +1292,27 @@ export async function generateAndValidateEvidenceLockedAnswer(
       } catch (parseErr) {
         // Attempt deterministic tail-truncation recovery if maxOutputTokens cut off the final array/field
         let repaired: Record<string, unknown> | null = null;
-        for (let cut = rawText.length - 1; cut > 80; cut -= 1) {
+        for (let cut = rawText.length - 1; cut > 60; cut -= 1) {
           const ch = rawText[cut];
           if (ch !== '}' && ch !== ']' && ch !== '"') continue;
           const prefix = rawText.slice(0, cut + 1);
-          for (const suffix of ['}', ']}', '"}]}', ']}]}', 'null,"suggestedFollowUpQuestions":[]}']) {
+          for (const suffix of [
+            '}',
+            ']}',
+            '"]}',
+            '"}',
+            '"}]}',
+            ']}]}',
+            'null}]}',
+            'null,"suggestedFollowUpQuestions":[]}',
+          ]) {
             try {
               const candidate = JSON.parse(prefix + suffix) as Record<string, unknown>;
-              if (candidate && typeof candidate === 'object' && typeof candidate.shortAnswer === 'string') {
+              if (
+                candidate &&
+                typeof candidate === 'object' &&
+                typeof candidate.shortAnswer === 'string'
+              ) {
                 repaired = candidate;
                 break;
               }
@@ -1423,6 +1426,22 @@ export async function generateAndValidateEvidenceLockedAnswer(
         typeof parsedModelJson.abstentionReason === 'string'
           ? parsedModelJson.abstentionReason.slice(0, 495)
           : null;
+      const rawSupportStatus =
+        typeof parsedModelJson.supportStatus === 'string' &&
+        ['fully_supported', 'partially_supported', 'unsupported'].includes(
+          parsedModelJson.supportStatus,
+        )
+          ? (parsedModelJson.supportStatus as
+              | 'fully_supported'
+              | 'partially_supported'
+              | 'unsupported')
+          : rawClaims.length > 0
+            ? 'fully_supported'
+            : 'unsupported';
+      const effectiveRelIds =
+        rawRelIds.length > 0
+          ? rawRelIds
+          : Array.from(new Set(rawClaims.flatMap((c) => c.relationshipIds)));
 
       const candidateAnswer = {
         version: EVIDENCE_LOCKED_ANSWER_VERSION,
@@ -1430,11 +1449,16 @@ export async function generateAndValidateEvidenceLockedAnswer(
         bundleSha256: bundle.bundleSha256,
         ...parsedModelJson,
         shortAnswer: rawShortAnswer || parsedModelJson.shortAnswer,
+        supportStatus: rawSupportStatus,
         executiveTldr: rawTldr.length > 0 ? rawTldr : parsedModelJson.executiveTldr,
         supportingClaims: rawClaims,
-        relevantRelationshipIds: rawRelIds,
+        relevantRelationshipIds: effectiveRelIds,
         missingInformation: rawMissing,
-        abstentionReason: rawAbstentionReason,
+        abstentionReason:
+          rawSupportStatus === 'unsupported'
+            ? (rawAbstentionReason ??
+              'Insufficient approved evidence in the current bundle to support answering this question.')
+            : rawAbstentionReason,
         contradictoryEvidence: rawContra,
         suggestedFollowUpQuestions:
           rawFollowUps.length > 0 ? rawFollowUps : fallbackFollowUps,
