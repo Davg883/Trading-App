@@ -2,7 +2,7 @@
 
 **Document Status**: Formal Phase G.6 Production Acceptance & Financial Integrity Sign-Off Report  
 **Target Production Deployment**: `https://capital.aiguides.co.uk`  
-**Deployed Git Commit SHA**: `b93c2a0` (superseding `77e6a4d`, `b8836e2`, and `d22219b`)  
+**Deployed Git Commit SHA**: `cbf3b53` (superseding `b93c2a0`, `77e6a4d`, `b8836e2`, and `d22219b`)  
 **Methodology Version**: `aci-stock-rating-v1.0.0-exp` (`Experimental research assessment`)  
 **Execution Authority**: `none` (Live & Demo order submission disabled; read-only broker & knowledge-graph architecture preserved)
 
