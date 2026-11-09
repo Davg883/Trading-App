@@ -1145,15 +1145,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? 26_000;
+  const timeoutMs = options.timeoutMs ?? 24_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite']
-    : [
-        'gemini-3.7-flash',
-        'gemini-3.5-flash',
-        'gemini-3.8-flash',
-        'gemini-3.5-flash-lite',
-      ];
+    ? [modelId, 'gemini-3.8-flash']
+    : ['gemini-3.8-flash', 'gemini-3.8-flash'];
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
@@ -1239,6 +1234,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     `  "suggestedFollowUpQuestions": ["question 1", "question 2", "question 3"]`,
     `}`,
     `MANDATORY GROUNDING RULES:`,
+    `- Keep output compact and fast: include AT MOST 3 supportingClaims (each statement under 160 chars), AT MOST 1 contradictoryEvidence item, AT MOST 2 missingInformation items, and 3 executiveTldr bullets (each under 160 chars).`,
     `- ALLOWED_EVIDENCE_IDS (every supportingClaim.evidenceIds and contradictoryEvidence.evidenceIds MUST only use IDs from this list): ${JSON.stringify(allowedEvidenceIds)}`,
     `- ALLOWED_RELATIONSHIP_IDS (every supportingClaim.relationshipIds, contradictoryEvidence.relationshipIds, and relevantRelationshipIds MUST only use IDs from this list): ${JSON.stringify(allowedRelationshipIds)}`,
     `- HISTORICAL_CUTOFF_DATE: ${cutoffDateOnly} (${bundle.temporalBasis} clock). Never cite any date after ${cutoffDateOnly} in periodOrAsOf.`,
