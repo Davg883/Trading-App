@@ -1145,13 +1145,12 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? 45_000;
+  const timeoutMs = options.timeoutMs ?? 12_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash']
+    ? [modelId, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
     : [
         'gemini-3.8-flash',
         'gemini-3.7-flash',
-        'gemini-3.6-flash',
         'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
       ];
@@ -1474,10 +1473,13 @@ export async function generateAndValidateEvidenceLockedAnswer(
         useThinkingConfig = false;
         continue;
       }
-      const isTransientOrRetired = /503|UNAVAILABLE|429|no longer available|NOT_FOUND/i.test(msg);
+      const isTransientOrRetired =
+        /503|UNAVAILABLE|429|timeout|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
+          msg,
+        );
       if (!isTransientOrRetired || attempt === candidateModels.length - 1) break;
       if (options.env === undefined) {
-        await new Promise((r) => setTimeout(r, 800));
+        await new Promise((r) => setTimeout(r, 400));
       }
       fallbackIdx += 1;
       if (fallbackIdx < candidateModels.length) {
