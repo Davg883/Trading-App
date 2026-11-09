@@ -16,6 +16,7 @@ import {AlertsCentre,type Alert} from './alerts-centre';
 import {ResearchIntel} from './research-intel';
 import {AgentOperationsPanel} from './agent-operations-panel';
 import {MorningBriefPanel} from './morning-brief-panel';
+import {ExecutiveOverviewSections} from './executive-overview';
 import {DataBadge,age,iso,money,pct,signedMoney} from './shared';
 import {BrokerSyncStatus,type SyncConnection,type SyncSchedule} from '../broker-sync-status';
 
@@ -73,12 +74,21 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
   {id:'exec',tone:flags.live?'alert':'info',title:`Live submission ${flags.live?'ENABLED':'disabled'}.`,detail:`Demo submission ${flags.demo?'enabled':'disabled'}. This page cannot change trading permissions.`,href:'/trading#controls',hrefLabel:'Trading controls'},
  ];
  const syncValue:Value=data?.connection?.lastSuccessfulSyncAt?{ok:true,value:data.connection.lastSuccessfulSyncAt,source:`${provider} full synchronisation`,observedAt:data.connection.lastSuccessfulSyncAt}:{ok:false,reason:'No full synchronisation yet'};
- return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
-  {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
-  <AlertsCentre alerts={alerts} links={LINKS}/>
-  <section className="cc-account" aria-labelledby="account-title">
-   <header className="cc-account-head"><div><h1 id="account-title">Portfolio command centre</h1><p>{snap?<>Source: {fixture?'synthetic fixture (not Trading 212)':`Trading 212 · ${env==='live'?'Live account (read-only)':'Demo account'}`} · summary {iso(snap.summaryAt)} <span className={`cc-fresh cc-${fresh.state}`} data-testid="freshness">{fresh.state==='stale'?`Stale · ${age(fresh.ageMs)}`:`Fresh · ${age(fresh.ageMs)}`}</span></>:configured?signedIn?'No synchronised Trading 212 account yet.':'Sign in to load your Trading 212 account.':'Account integration not configured.'}</p></div>
-    <div className="cc-account-tools">{snap&&<DataBadge kind={accountKind}/>}{hasDemo&&<div role="radiogroup" aria-label="Account" className="cc-segment"><button role="radio" aria-checked={env==='live'} onClick={()=>setEnv('live')}>Live</button><button role="radio" aria-checked={env==='demo'} onClick={()=>setEnv('demo')}>Demo</button></div>}</div></header>
+ const ownedTickers=(snap?.positions??[]).filter(p=>(p.quantity??0)>0).map(p=>p.ticker);
+ const hasPerformanceSeries=Boolean(all&&all.series.length>=2);
+ const portfolioSnapshotSection=(
+  <section className="cc-account cc-panel g6-portfolio-snapshot" aria-labelledby="account-title" data-testid="portfolio-snapshot">
+   <header className="cc-account-head">
+    <div>
+     <div className="g6-eyebrow-row">
+      <span className="g6-section-tag">SECTION B · PORTFOLIO SNAPSHOT</span>
+      <span className="g6-meta-pill">Execution: Read-Only (Live {flags.live?'enabled':'disabled'} · Demo {flags.demo?'enabled':'disabled'})</span>
+     </div>
+     <h1 id="account-title">Portfolio command centre</h1>
+     <p>{snap?<>Source: {fixture?'synthetic fixture (not Trading 212)':`Trading 212 · ${env==='live'?'Live account (read-only)':'Demo account'}`} · summary {iso(snap.summaryAt)} <span className={`cc-fresh cc-${fresh.state}`} data-testid="freshness">{fresh.state==='stale'?`Stale · ${age(fresh.ageMs)}`:`Fresh · ${age(fresh.ageMs)}`}</span></>:configured?signedIn?'No synchronised Trading 212 account yet.':'Sign in to load your Trading 212 account.':'Account integration not configured.'}</p>
+    </div>
+    <div className="cc-account-tools">{snap&&<DataBadge kind={accountKind}/>}{hasDemo&&<div role="radiogroup" aria-label="Account" className="cc-segment"><button role="radio" aria-checked={env==='live'} onClick={()=>setEnv('live')}>Live</button><button role="radio" aria-checked={env==='demo'} onClick={()=>setEnv('demo')}>Demo</button></div>}</div>
+   </header>
    {kpis?<>
     <div className="cc-kpis cc-kpis-primary" data-testid="kpi-strip">
      <KpiCard emphasis label="Total account value" value={kpis.totalValue} format={v=>money(v,currency)} testId="kpi-total" fix={FIX_SYNC}/>
@@ -93,19 +103,40 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
      {label:'Last full sync',value:syncValue,format:(v:number)=>age(now-v),fix:FIX_SYNC},
     ] as never}/>
    </>:<div className="cc-empty cc-kpis-empty" data-testid="kpi-empty"><strong>{configured?signedIn?'No account data yet':'Signed out':'Not configured'}</strong><p>{configured?signedIn?'Connect and synchronise Trading 212 (read-only).':'Sign in to see capital, P/L and cash. Nothing is estimated in the meantime.':'Configure Clerk, Convex and the broker vault.'}</p>{configured&&signedIn&&<Link className="cc-fix" href={BROKER}>Connect Trading 212 →</Link>}</div>}
-   {data?.connection&&<details className="cc-sync" data-testid="cc-sync" open={wide||undefined} key={wide?'w':'n'}><summary>Broker connection and refresh</summary><BrokerSyncStatus compact environment={env} connection={data.connection} schedule={data.schedule??null} now={now} dataAt={snap?.summaryAt??null} onSync={onSync&&data.connection?()=>onSync(env,data.connection!.connectionId):undefined}/></details>}
    {snap&&deposits>0&&<p className="cc-note" data-testid="deposit-note">Deposits recorded: {money(deposits,currency)}. Deposits and withdrawals are external cash flows and are never counted as investment profit.</p>}
+   <details className="g6-drawer-details" data-testid="expanded-portfolio-drawer" open={hasPerformanceSeries||undefined}>
+    <summary className="g6-drawer-summary">
+     <span>Expanded Portfolio View — Performance Chart, Holdings, Broker Sync &amp; Risk Diagnostics</span>
+     <small>{hasPerformanceSeries?`${all?.series.length??0} valuation points plotted`:'Collapsed by default until ≥2 broker valuation points are recorded'}</small>
+    </summary>
+    <div className="g6-drawer-body">
+     {data?.connection&&<details className="cc-sync" data-testid="cc-sync" open={wide||undefined} key={wide?'w':'n'}><summary>Broker connection and refresh</summary><BrokerSyncStatus compact environment={env} connection={data.connection} schedule={data.schedule??null} now={now} dataAt={snap?.summaryAt??null} onSync={onSync&&data.connection?()=>onSync(env,data.connection!.connectionId):undefined}/></details>}
+     <PerformanceChart valuations={data?.valuations??[]} flows={data?.flows??[]} currency={currency} now={now} benchmarks={feed.benchmarks} fixHref={BROKER} compact={!wide} provider={provider}/>
+     <div className="cc-two">
+      <div className="cc-col">{snap?<HoldingsPanel positions={snap.positions} accountCurrency={currency} observedAt={snap.positionsAt} stale={posFresh.state==='stale'} kind={accountKind} provider={provider}/>:<section className="cc-panel" data-testid="holdings-panel"><header className="cc-panel-head"><div><h2>Holdings</h2><p>Owned positions from Trading 212</p></div></header><div className="cc-empty"><strong>No broker positions loaded</strong><p>Nothing is shown as owned until Trading 212 reports it.</p>{signedIn&&<Link className="cc-fix" href={BROKER}>Synchronise on Broker Connections →</Link>}</div></section>}</div>
+      <div className="cc-col"><RiskPanel concentration={concentration(snap?.positions??null,snap?.totalValue??null)} aiExposure={aiSectorExposure(snap?.positions??null,snap?.totalValue??null,feed.aiTickers)} maxDrawdown={all?maxDrawdown(all.series):{ok:false,reason:'No account history'}} pendingApprovals={count(['reviewed'])} awaitingConfirmation={count(['approved','confirmed'])} unknownOrders={count(['unknown','submitting'])} evidence={feed.evidence} marketDataAsOf={feed.marketDataAsOf} broker={{status:data?.connection?.status??null,lastSyncAt:data?.connection?.lastSuccessfulSyncAt??null,errorCode:data?.connection?.lastErrorCode??null}} execution={execution} now={now}/></div>
+     </div>
+    </div>
+   </details>
   </section>
-  <PerformanceChart valuations={data?.valuations??[]} flows={data?.flows??[]} currency={currency} now={now} benchmarks={feed.benchmarks} fixHref={BROKER} compact={!wide} provider={provider}/>
-  <div className="cc-two">
-   <div className="cc-col">{snap?<HoldingsPanel positions={snap.positions} accountCurrency={currency} observedAt={snap.positionsAt} stale={posFresh.state==='stale'} kind={accountKind} provider={provider}/>:<section className="cc-panel" data-testid="holdings-panel"><header className="cc-panel-head"><div><h2>Holdings</h2><p>Owned positions from Trading 212</p></div></header><div className="cc-empty"><strong>No broker positions loaded</strong><p>Nothing is shown as owned until Trading 212 reports it.</p>{signedIn&&<Link className="cc-fix" href={BROKER}>Synchronise on Broker Connections →</Link>}</div></section>}
-    <Collapsible title="Research watchlist (delayed public reference prices)" testId="watch-collapsible" wide={wide}><WatchlistPanel items={feed.watchlist} now={now} ownedTickers={(snap?.positions??[]).filter(p=>(p.quantity??0)>0).map(p=>p.ticker)}/></Collapsible></div>
-   <div className="cc-col"><RiskPanel concentration={concentration(snap?.positions??null,snap?.totalValue??null)} aiExposure={aiSectorExposure(snap?.positions??null,snap?.totalValue??null,feed.aiTickers)} maxDrawdown={all?maxDrawdown(all.series):{ok:false,reason:'No account history'}} pendingApprovals={count(['reviewed'])} awaitingConfirmation={count(['approved','confirmed'])} unknownOrders={count(['unknown','submitting'])} evidence={feed.evidence} marketDataAsOf={feed.marketDataAsOf} broker={{status:data?.connection?.status??null,lastSyncAt:data?.connection?.lastSuccessfulSyncAt??null,errorCode:data?.connection?.lastErrorCode??null}} execution={execution} now={now}/>
+ );
+ return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
+  {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
+  <AlertsCentre alerts={alerts} links={LINKS}/>
+  <ExecutiveOverviewSections watchlist={feed.watchlist} ownedTickers={ownedTickers} now={now} portfolioSnapshotSlot={portfolioSnapshotSection}/>
+  <details className="g6-drawer-details" data-testid="technical-evidence-details">
+   <summary className="g6-drawer-summary">
+    <span>Technical, Operations &amp; Evidence Audit Details (Agent Operations, Morning Brief, Watchlist &amp; Data Boundaries)</span>
+    <small>Secondary audit &amp; ingestion telemetry</small>
+   </summary>
+   <div className="g6-drawer-body">
+    <Collapsible title="Morning intelligence brief" testId="brief-collapsible" wide={wide}><MorningBriefPanel briefing={activeBriefing} fixture={fixture}/></Collapsible>
+    <Collapsible title="Agent operations & collection health" testId="ops-collapsible" wide={wide}><AgentOperationsPanel health={activeHealth} now={now} fixture={fixture} onToggleJob={onToggleJob}/></Collapsible>
+    <Collapsible title="Research intelligence" testId="intel-collapsible" wide={wide}><ResearchIntel events={feed.events} forwardPredictions={operations?.forwardResearchEvents?.length??feed.forwardPredictions} missingEvidenceResolution={operations?.missingEvidenceResolution??feed.missingEvidenceResolution} forwardResearchEvents={operations?.forwardResearchEvents??feed.forwardResearchEvents}/></Collapsible>
+    <Collapsible title="Research watchlist (delayed public reference prices)" testId="watch-collapsible" wide={wide}><WatchlistPanel items={feed.watchlist} now={now} ownedTickers={ownedTickers}/></Collapsible>
     <Collapsible title="Data boundaries" testId="bound-collapsible" wide={wide}><section className="cc-panel cc-boundaries" aria-labelledby="bound-title"><header className="cc-panel-head"><div><h2 id="bound-title">Data boundaries</h2><p>Real and simulated results are never combined.</p></div></header><ul>
-     <li><DataBadge kind="live"/> Actual orders, positions and cash. Trading 212 is authoritative.</li><li><DataBadge kind="demo"/> Trading 212 practice account; never added to Live figures.</li><li><DataBadge kind="paper"/> Internal paper ledger (Paper Trading module); never mixed with broker P/L.</li><li><DataBadge kind="synthetic"/> Illustrative examples and development fixtures only.</li><li><DataBadge kind="retrospective"/> Cases registered after the event; not predictions.</li><li><DataBadge kind="forward"/> Registered before the outcome; {(operations?.forwardResearchEvents?.length??feed.forwardPredictions)>0?`${operations?.forwardResearchEvents?.length??feed.forwardPredictions} active`:'none yet'}.</li></ul></section></Collapsible></div>
-  </div>
-  <Collapsible title="Morning intelligence brief" testId="brief-collapsible" wide={wide}><MorningBriefPanel briefing={activeBriefing} fixture={fixture}/></Collapsible>
-  <Collapsible title="Agent operations & collection health" testId="ops-collapsible" wide={wide}><AgentOperationsPanel health={activeHealth} now={now} fixture={fixture} onToggleJob={onToggleJob}/></Collapsible>
-  <Collapsible title="Research intelligence" testId="intel-collapsible" wide={wide}><ResearchIntel events={feed.events} forwardPredictions={operations?.forwardResearchEvents?.length??feed.forwardPredictions} missingEvidenceResolution={operations?.missingEvidenceResolution??feed.missingEvidenceResolution} forwardResearchEvents={operations?.forwardResearchEvents??feed.forwardResearchEvents}/></Collapsible>
+     <li><DataBadge kind="live"/> Actual orders, positions and cash. Trading 212 is authoritative.</li><li><DataBadge kind="demo"/> Trading 212 practice account; never added to Live figures.</li><li><DataBadge kind="paper"/> Internal paper ledger (Paper Trading module); never mixed with broker P/L.</li><li><DataBadge kind="synthetic"/> Illustrative examples and development fixtures only.</li><li><DataBadge kind="retrospective"/> Cases registered after the event; not predictions.</li><li><DataBadge kind="forward"/> Registered before the outcome; {(operations?.forwardResearchEvents?.length??feed.forwardPredictions)>0?`${operations?.forwardResearchEvents?.length??feed.forwardPredictions} active`:'none yet'}.</li></ul></section></Collapsible>
+   </div>
+  </details>
  </div>;
 }

@@ -997,8 +997,7 @@ export default function MacroDataRoom({
           <div>
             <span>AI CAPITAL INTELLIGENCE · MACRO INTELLIGENCE DATA ROOM</span>
             <small>
-              TYPEDB 3.14 PERA KNOWLEDGE GRAPH · CONVEX APPEND-ONLY OUTBOX · READ-ONLY
-              GATEWAY
+              TypeDB 3.14 Knowledge Graph · Convex Outbox · Read-Only Gateway (Execution Authority: None)
             </small>
           </div>
         </div>
@@ -1019,12 +1018,13 @@ export default function MacroDataRoom({
               ? 'STALE (1 retrying / dead_letter)'
               : `${dataset.relationships.length}/${dataset.relationships.length} Projected (0ms lag)`}
           </span>
-          <span className="dr-pill">Schema: {dataset.schemaVersion}</span>
-          <span className="dr-pill guardrail">
-            Execution Authority: NONE (Live & Demo Disabled)
-          </span>
-          <Link href="/" className="button secondary" style={{ padding: '7px 12px' }}>
-            ← Command Centre
+          <Link
+            href="/"
+            className="button secondary"
+            style={{ padding: '7px 12px' }}
+            data-testid="back-to-market-radar-link"
+          >
+            ← Market Radar &amp; Stock Ratings
           </Link>
         </div>
       </header>

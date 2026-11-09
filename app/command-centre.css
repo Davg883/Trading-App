@@ -130,3 +130,126 @@ main{max-width:min(1840px,100%)}
 @media (max-width:400px){.cc-kpis-primary{grid-template-columns:minmax(0,1fr)}}
 .cc-col>*,.cc-collapsible,.cc-collapsible>*{min-width:0;max-width:100%}
 .cc-root>*{min-width:0}
+
+/* ============================================================================
+   Phase G.6 — Executive Dashboard & Evidence-Backed Stock Research Ratings
+   ============================================================================ */
+.g6-executive-stack{display:grid;gap:22px;min-width:0}
+.g6-eyebrow-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.g6-section-tag{display:inline-block;font:700 10px/1.2 Arial,sans-serif;letter-spacing:.9px;text-transform:uppercase;color:#1e293b;background:#e2e8f0;padding:4px 8px;border-radius:4px}
+.g6-meta-pill{display:inline-block;font:600 11px/1.2 Arial,sans-serif;color:#475569;background:#f8fafc;border:1px solid #cbd5e1;padding:3px 8px;border-radius:999px}
+.g6-head-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+/* Section A — Today's Market Briefing */
+.g6-briefing-card{border-top:3px solid var(--nav);background:linear-gradient(180deg,#ffffff 0%,#fbfcfd 100%)}
+.g6-five-sentence-list{margin:12px 0 14px;padding-left:20px;display:grid;gap:10px;font-size:13.5px;line-height:1.65;color:var(--ink)}
+.g6-five-sentence-list li{padding-left:4px}
+.g6-five-sentence-list li::marker{font-weight:700;color:#334155}
+.g6-briefing-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--cc-text2)}
+
+/* Section B — Expandable Portfolio & Technical Drawers */
+.g6-portfolio-snapshot{display:grid;gap:14px}
+.g6-drawer-details{border:1px solid var(--line);border-radius:8px;background:#fafbfc;overflow:hidden}
+.g6-drawer-summary{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;cursor:pointer;font:700 13px/1.4 Arial,sans-serif;color:var(--ink);list-style:none;background:#f1f5f9}
+.g6-drawer-summary::-webkit-details-marker{display:none}
+.g6-drawer-summary small{font:500 11.5px/1.3 Arial,sans-serif;color:#475569}
+.g6-drawer-body{padding:16px;display:grid;gap:16px;border-top:1px solid var(--line);background:#fff}
+
+/* Section C — Stock Research Table */
+.g6-gate-banner{background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #475569;border-radius:6px;padding:12px 14px;font-size:12.5px;line-height:1.55;color:#1e293b;margin-bottom:14px}
+.g6-filter-bar{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:12px 14px;background:#f8fafc;border:1px solid var(--line);border-radius:6px;margin-bottom:14px}
+.g6-filter-control{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:700;color:#334155;min-width:140px;flex:1 1 140px}
+.g6-filter-control select{padding:7px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;font-size:12px;color:var(--ink)}
+.g6-table,.g6-stock-table{min-width:900px;width:100%}
+.g6-stock-table th,.g6-stock-table td{padding:8px 10px}
+.g6-stock-table thead th{white-space:normal;line-height:1.3}
+.g6-stock-table tbody th{min-width:125px}
+.g6-row-selected{background:#f1f5f9}
+.g6-company-cell{display:flex;flex-direction:column;gap:3px}
+.g6-company-cell strong{font-size:13px;color:var(--ink)}
+.g6-company-cell small{font-size:11px;color:#475569}
+.g6-inline-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.g6-ownership-pill{display:inline-block;font:600 10px/1.2 Arial,sans-serif;padding:2px 7px;border-radius:4px;background:#e0f2fe;border:1px solid #7dd3fc;color:#0369a1}
+.g6-ownership-pill.g6-research-only{background:#f1f5f9;border-color:#cbd5e1;color:#475569}
+.g6-price-cell{display:flex;flex-direction:column;gap:2px;min-width:130px}
+.g6-price-cell strong{font:600 13.5px/1.2 Georgia,serif;color:var(--ink)}
+.g6-price-class-tag,.g6-badge-delayed{display:inline-block;width:fit-content;margin-top:4px;font:600 10px/1.2 Arial,sans-serif;padding:2px 6px;border-radius:4px;background:#f1f5f9;border:1px solid #cbd5e1;color:#475569}
+
+/* Colour Discipline: Green/Red reserved strictly for directional BUY/SELL; neutral slate for INSUFFICIENT DATA */
+.g6-rating-badge{display:inline-block;width:fit-content;font:700 11px/1.2 Arial,sans-serif;letter-spacing:.5px;padding:4px 9px;border-radius:4px;border:1px solid;white-space:nowrap}
+.g6-rating-buy{background:#e3f1e8;border-color:#2f6b4f;color:#174b33}
+.g6-rating-hold{background:#f1f5f9;border-color:#64748b;color:#1e293b}
+.g6-rating-sell{background:#fbeee8;border-color:#b4452f;color:#7f1d1d}
+.g6-rating-insufficient{background:#f1f5f9;border-color:#94a3b8;color:#334155}
+
+.g6-assessment-cell,.g6-coverage-cell{display:flex;flex-direction:column;gap:4px;min-width:125px}
+.g6-coverage-bar{width:100%;height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:2px 0}
+.g6-coverage-bar span{display:block;height:100%;background:#334155;border-radius:999px}
+.g6-cell-prose{margin:0;font-size:11.5px;line-height:1.45;color:#1e293b;min-width:165px;max-width:240px}
+.g6-row-actions{display:flex;flex-direction:column;gap:5px;min-width:105px;align-items:flex-start}
+.g6-action-btn{background:transparent;border:0;padding:0;cursor:pointer;text-align:left}
+
+/* Detailed Company Assessment Drawer */
+.g6-company-drawer{margin-top:18px;border:1px solid #94a3b8;border-radius:8px;background:#f8fafc;padding:18px;display:grid;gap:16px}
+.g6-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid #cbd5e1}
+.g6-drawer-head h3{margin:4px 0;font:600 18px/1.25 Georgia,serif;color:var(--ink)}
+.g6-drawer-head p{margin:0;font-size:12px;color:#475569}
+.g6-drawer-links{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.g6-drawer-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.g6-drawer-col{display:grid;gap:10px;min-width:0;overflow-x:auto}
+.g6-drawer-col h4{margin:0;font-size:12.5px;text-transform:uppercase;letter-spacing:.6px;color:#334155}
+.g6-dim-table{min-width:0;width:100%;background:#fff;border:1px solid var(--line);border-radius:6px}
+.g6-dim-table tbody th{min-width:130px}
+.g6-null-score{display:inline-block;font:600 11px/1.2 Arial,sans-serif;padding:2px 6px;border-radius:4px;background:#e2e8f0;color:#475569;white-space:nowrap}
+.g6-dim-summary{margin:0 0 6px;color:#1e293b;font-size:12px;line-height:1.45}
+.g6-dim-metrics{margin:0 0 6px;padding-left:16px;color:#334155;font-size:11.5px;line-height:1.45}
+.g6-missing-box{padding:6px 8px;border-radius:4px;background:#f1f5f9;border-left:3px solid #64748b;font-size:11px;color:#334155}
+.g6-layer-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.g6-layer-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px;font-size:12px;line-height:1.55;display:grid;gap:6px;align-content:start}
+.g6-layer-card strong{color:var(--ink);font-size:12.5px}
+.g6-layer-card p{margin:0;color:#334155}
+.g6-gate-list{margin:0;padding-left:16px;color:#334155;font-size:11.5px;display:grid;gap:4px}
+
+/* Section D — What Changed? */
+.g6-filter-pills{display:flex;gap:6px;flex-wrap:wrap}
+.g6-pill-btn{padding:5px 10px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#334155;font:600 11.5px/1.2 Arial,sans-serif;cursor:pointer}
+.g6-pill-btn.active,.g6-pill-btn:hover{background:var(--nav);color:#fff;border-color:var(--nav)}
+.g6-changes-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.g6-change-card{border:1px solid var(--line);border-radius:8px;padding:14px;background:#fff;display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.55}
+.g6-change-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;color:#475569}
+.g6-change-cat{font:700 10px/1.2 Arial,sans-serif;text-transform:uppercase;letter-spacing:.5px;padding:3px 7px;border-radius:4px;background:#e2e8f0;color:#1e293b}
+.g6-change-card h3{margin:0;font-size:14.5px;color:var(--ink)}
+.g6-before-after{margin:0;display:grid;gap:6px;background:#f8fafc;padding:8px 10px;border-radius:6px;border:1px solid #e2e8f0;font-size:11.5px}
+.g6-before-after dt{font-weight:700;color:#475569;text-transform:uppercase;font-size:10px;letter-spacing:.4px}
+.g6-before-after dd{margin:2px 0 0;color:#1e293b}
+.g6-change-foot{margin-top:auto;padding-top:8px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#64748b}
+
+/* Section E — Research Assistant */
+.g6-starter-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.g6-chip-btn{padding:6px 11px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#1e293b;font:600 12px/1.3 Arial,sans-serif;cursor:pointer}
+.g6-chip-btn:hover{background:var(--nav);color:#fff;border-color:var(--nav)}
+.g6-chat-form{display:flex;gap:10px;flex-wrap:wrap}
+.g6-chat-form input{flex:1 1 320px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px}
+.g6-chat-error{margin:10px 0 0;padding:10px 12px;border-radius:6px;background:#fbeee8;border-left:3px solid #b4452f;color:#7f1d1d;font-size:12.5px}
+.g6-chat-response{margin-top:14px;padding:14px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;display:grid;gap:10px;font-size:13px;line-height:1.55}
+.g6-chat-response-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px}
+.g6-chat-short-answer{margin:0;color:var(--ink);font-weight:600}
+.g6-chat-bullets,.g6-chat-claims ul{margin:4px 0 0;padding-left:18px;display:grid;gap:4px;font-size:12.5px}
+
+/* Part 4 Methodology Validation Collapsible */
+.g6-validation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.g6-validation-box{border:1px solid var(--line);border-radius:8px;padding:14px;background:#fafbfc;display:grid;gap:10px;align-content:start}
+.g6-validation-box h3{margin:0;font-size:14px;color:var(--ink)}
+.g6-stat-dl{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.g6-stat-dl div{background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px}
+.g6-stat-dl dt{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:#475569;font-weight:700}
+.g6-stat-dl dd{margin:4px 0 0;font:600 15px/1.25 Georgia,serif;color:var(--ink)}
+
+@media (max-width:1100px){
+ .g6-drawer-grid,.g6-validation-grid,.g6-layer-cards{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:640px){
+ .g6-filter-bar{flex-direction:column;align-items:stretch}
+ .g6-chat-form{flex-direction:column}
+ .g6-stat-dl{grid-template-columns:minmax(0,1fr)}
+}
