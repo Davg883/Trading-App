@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, type Schema } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type, type Schema } from '@google/genai';
 import {
   EVIDENCE_LOCKED_ANSWER_VERSION,
   EVIDENCE_RETRIEVAL_LIMITS,
@@ -1127,7 +1127,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? 28_000;
+  const timeoutMs = options.timeoutMs ?? 45_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
     ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
     : [ACTIVE_GEMINI_GENERATION_MODEL_ID, modelId];
@@ -1155,8 +1155,29 @@ export async function generateAndValidateEvidenceLockedAnswer(
     historicalCutoffIso: bundle.historicalCutoffIso,
     temporalBasis: bundle.temporalBasis,
     commitmentLedger: bundle.commitmentLedger,
-    relationships: bundle.relationships,
-    sources: bundle.sources,
+    relationships: bundle.relationships.map((r) => ({
+      relationshipId: r.relationshipId,
+      relationshipType: r.relationshipType,
+      subjectId: r.subjectId,
+      objectId: r.objectId,
+      epistemicStatus: r.epistemicStatus,
+      contractualStatus: r.contractualStatus,
+      principalAmount: r.principalAmount,
+      capacityMw: r.capacityMw,
+      currency: r.currency,
+      effectiveFromIso: r.effectiveFromIso,
+      parentCommitmentEnvelopeId: r.parentCommitmentEnvelopeId,
+      sourceDocIds: r.sourceDocIds,
+      summary: r.summary,
+    })),
+    sources: bundle.sources.map((s) => ({
+      docId: s.docId,
+      title: s.title,
+      publisher: s.publisher,
+      publishedAtIso: s.publishedAtIso,
+      authorityTier: s.authorityTier,
+      excerpt: s.excerpt.slice(0, 350),
+    })),
     quantitativeClaims: bundle.quantitativeClaims,
     scenarios: bundle.scenarios,
     dataQualityWarnings: bundle.dataQualityWarnings,
@@ -1180,6 +1201,11 @@ export async function generateAndValidateEvidenceLockedAnswer(
   let useThinkingConfig = true;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
+      const thinkingConfig = useThinkingConfig
+        ? activeModelId.startsWith('gemini-3')
+          ? { thinkingLevel: ThinkingLevel.MINIMAL }
+          : { thinkingBudget: 0 }
+        : undefined;
       const response = await Promise.race([
         ai.models.generateContent({
           model: activeModelId,
@@ -1192,8 +1218,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
-            maxOutputTokens: 3072,
-            ...(useThinkingConfig ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+            maxOutputTokens: 2048,
+            ...(thinkingConfig ? { thinkingConfig } : {}),
             responseMimeType: 'application/json',
             responseSchema: GEMINI_RESPONSE_SCHEMA,
           },
