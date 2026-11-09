@@ -16,6 +16,9 @@ import {
   type StockResearchAssessment,
   type WhatChangedItem,
 } from '../../lib/research-ratings/engine';
+import {
+  evaluateAiCapexModerationThesis,
+} from '../../lib/research-ratings/thesis-monitor';
 import type { WatchItem } from './holdings-panel';
 
 interface ExecutiveOverviewProps {
@@ -64,6 +67,7 @@ export function ExecutiveOverviewSections({
     [assessments],
   );
   const validationReport = useMemo(() => runResearchMethodologyValidation(), []);
+  const thesisMonitor = useMemo(() => evaluateAiCapexModerationThesis(), []);
 
   // Section C Filters & Sorting State
   const [sectorFilter, setSectorFilter] = useState<string>('ALL');
@@ -955,6 +959,154 @@ export function ExecutiveOverviewSections({
             </article>
           ))}
         </div>
+
+        {/* COMPACT THESIS MONITOR (Requirement 7: Cathie Wood AI Capex Moderation) */}
+        <article
+          className="g6-change-card"
+          style={{ marginTop: '1rem' }}
+          data-testid="market-radar-thesis-monitor"
+        >
+          <div className="g6-change-meta">
+            <span className="g6-change-cat">
+              ACTIVE THESIS MONITOR · {thesisMonitor.version}
+            </span>
+            <span data-testid="thesis-classification-badge">
+              <strong>
+                {thesisMonitor.evidenceChangeAssessment.overallConclusionClassification.toUpperCase()}
+              </strong>{' '}
+              ({thesisMonitor.evidenceChangeAssessment.counts.supports} Supports ·{' '}
+              {thesisMonitor.evidenceChangeAssessment.counts.contradicts} Contradicts ·{' '}
+              {thesisMonitor.evidenceChangeAssessment.counts.neutral} Neutral ·{' '}
+              {thesisMonitor.evidenceChangeAssessment.counts.insufficient_evidence}{' '}
+              Insufficient)
+            </span>
+          </div>
+          <h3>
+            {thesisMonitor.thesisTitle} ({thesisMonitor.thesisId})
+          </h3>
+          <p className="cc-note" data-testid="thesis-short-conclusion">
+            <strong>Short Conclusion (Non-Probabilistic Evidence Classification):</strong>{' '}
+            {thesisMonitor.evidenceChangeAssessment.shortConclusion}
+          </p>
+
+          <details
+            className="g6-drawer-details"
+            style={{ marginTop: '0.5rem' }}
+            data-testid="thesis-supporting-evidence-drawer"
+          >
+            <summary className="g6-drawer-summary">
+              <span>
+                Supporting Primary Evidence (
+                {thesisMonitor.evidenceSynthesis.supportingEvidence.length} Verified
+                Observations)
+              </span>
+              <small>Cloud growth, Q3 BEA GDP +3.4%, FCF bridge, Loughton v2 &amp; grid limits</small>
+            </summary>
+            <ul className="g6-gate-list" style={{ padding: '0.75rem 1rem' }}>
+              {thesisMonitor.evidenceSynthesis.supportingEvidence.map((item, idx) => (
+                <li key={idx}>
+                  {item.statement}{' '}
+                  <small>
+                    <strong>[Evidence IDs: {item.evidenceIds.join(', ')}]</strong>
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </details>
+
+          <details
+            className="g6-drawer-details"
+            style={{ marginTop: '0.5rem' }}
+            data-testid="thesis-contradictory-evidence-drawer"
+          >
+            <summary className="g6-drawer-summary">
+              <span>
+                Contradicting Primary Evidence (
+                {thesisMonitor.evidenceSynthesis.contradictoryEvidence.length} Verified
+                Observations)
+              </span>
+              <small>Q3 capex surge, Anthropic $895.4B lock-in &amp; NVDA $108B Q3 guide</small>
+            </summary>
+            <ul className="g6-gate-list" style={{ padding: '0.75rem 1rem' }}>
+              {thesisMonitor.evidenceSynthesis.contradictoryEvidence.map((item, idx) => (
+                <li key={idx}>
+                  {item.statement}{' '}
+                  <small>
+                    <strong>[Evidence IDs: {item.evidenceIds.join(', ')}]</strong>
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </details>
+
+          <details
+            className="g6-drawer-details"
+            style={{ marginTop: '0.5rem' }}
+            data-testid="thesis-leading-indicators-drawer"
+          >
+            <summary className="g6-drawer-summary">
+              <span>
+                8 Leading Indicators, 5–6 Nov Market Closes &amp; BEA Q3 2026 GDP
+              </span>
+              <small>Value, reporting period, evidence ID, freshness &amp; historical comparison</small>
+            </summary>
+            <div className="cc-table-wrap" style={{ marginTop: '0.5rem' }}>
+              <table className="cc-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Indicator</th>
+                    <th scope="col">Observed Value &amp; Period</th>
+                    <th scope="col">Classification &amp; Freshness</th>
+                    <th scope="col">Historical Comparison &amp; Evidence ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {thesisMonitor.leadingIndicators.map((ind) => (
+                    <tr key={ind.indicatorId} data-testid={`thesis-ind-${ind.indicatorId}`}>
+                      <th scope="row">{ind.name}</th>
+                      <td>
+                        <strong>{ind.value}</strong>
+                        <br />
+                        <small>{ind.reportingPeriod}</small>
+                      </td>
+                      <td>
+                        <span className="g6-meta-pill">
+                          {ind.evidenceClassification.toUpperCase()}
+                        </span>
+                        <br />
+                        <small>{ind.freshnessStatus}</small>
+                      </td>
+                      <td>
+                        <small>{ind.historicalComparison}</small>
+                        <br />
+                        <code>{ind.evidenceId}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+
+          <footer className="g6-change-foot" style={{ marginTop: '0.75rem' }}>
+            <small>
+              Provenance: Commentary (`ark-in-the-know-2026-11-07`) isolated from
+              confirmed TypeDB graph facts · All 7 stocks gated at INSUFFICIENT DATA
+            </small>
+            <button
+              type="button"
+              className="button"
+              data-testid="thesis-ask-assistant-btn"
+              onClick={() => {
+                void askResearchAssistant(
+                  thesisMonitor.compactMarketRadarPanelProposal.linkedResearchChatPrompt,
+                );
+              }}
+            >
+              Test Thesis in Evidence-Locked Chat →
+            </button>
+          </footer>
+        </article>
       </section>
 
       {/* ===================================================================

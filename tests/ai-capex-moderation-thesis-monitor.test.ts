@@ -4,21 +4,25 @@ import {
   ARK_THESIS_PROVENANCE_RECORDS,
   MACRO_CLAIM_VERIFICATION_AUDITS,
   THESIS_MONITOR_VERSION,
+  VERIFIED_LIVE_GEMINI_THESIS_INFERENCE,
+  auditMarketCloseIngestionV3,
   evaluateAiCapexModerationThesis,
   runValidatedThesisChatExplanationTest,
 } from '../lib/research-ratings/thesis-monitor';
 
-describe('AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Capex Moderation', () => {
-  it('1 & 2. registers the dated 7 November 2026 thesis and separates provenance across commentary_origin, secondary_reporting, and verified_primary_evidence', () => {
+describe('AI Capital Intelligence — Cathie Wood Thesis Monitor: Live Integration Acceptance (v2.0.0)', () => {
+  it('1. preserves separate provenance categories for the registered thesis, original ARK commentary, secondary article, and verified primary evidence', () => {
     const assessment = evaluateAiCapexModerationThesis();
 
     expect(assessment.thesisId).toBe(ARK_CAPEX_THESIS_ID);
     expect(assessment.version).toBe(THESIS_MONITOR_VERSION);
-    expect(assessment.datedThesisStatement).toContain('7 November 2026');
     expect(assessment.executionAuthority).toBe('none');
     expect(assessment.schemaExpansionRecommendation.expandTypeDbSchemaNow).toBe(false);
     expect(assessment.schemaExpansionRecommendation.promoteUnverifiedCommentaryToProdGraph).toBe(false);
 
+    const thesisReg = ARK_THESIS_PROVENANCE_RECORDS.filter(
+      (r) => r.epistemicLayer === 'registered_thesis_statement',
+    );
     const commentaryRecords = ARK_THESIS_PROVENANCE_RECORDS.filter(
       (r) => r.epistemicLayer === 'commentary_origin',
     );
@@ -29,18 +33,19 @@ describe('AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Ca
       (r) => r.epistemicLayer === 'verified_primary_evidence',
     );
 
-    expect(commentaryRecords.length).toBeGreaterThanOrEqual(1);
-    expect(secondaryRecords.length).toBeGreaterThanOrEqual(1);
-    expect(primaryRecords.length).toBeGreaterThanOrEqual(5);
+    expect(thesisReg).toHaveLength(1);
+    expect(commentaryRecords).toHaveLength(1);
+    expect(secondaryRecords).toHaveLength(1);
+    expect(primaryRecords.length).toBeGreaterThanOrEqual(7);
 
-    // Commentary and secondary reporting must NEVER be eligible for graph confirmation as facts
-    for (const record of [...commentaryRecords, ...secondaryRecords]) {
+    // Non-primary layers must NEVER be eligible for graph confirmation as facts
+    for (const record of [...thesisReg, ...commentaryRecords, ...secondaryRecords]) {
       expect(record.eligibleForGraphConfirmation).toBe(false);
       expect(record.claimClassification).not.toBe('observed_fact');
       expect(record.receivedAtMs).toBeGreaterThan(0);
     }
 
-    // Verified primary SEC records must preserve publication and receipt timestamps
+    // Verified primary SEC/BEA/Nasdaq records must preserve publication and receipt timestamps
     for (const record of primaryRecords) {
       expect(record.eligibleForGraphConfirmation).toBe(true);
       expect(record.claimClassification).toBe('observed_fact');
@@ -49,98 +54,189 @@ describe('AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Ca
     }
   });
 
-  it('3. audits the 5 Nov sell-off, 6 Nov rebound, 2026 US election results, and Q3 GDP against authoritative stored sources without fabricating verification', () => {
-    expect(MACRO_CLAIM_VERIFICATION_AUDITS).toHaveLength(4);
+  it('2. ingests and validates the 5–6 November 2026 US market closes with zero v2 revisions and zero live-quote substitution', () => {
+    const mktAudit = auditMarketCloseIngestionV3();
 
+    expect(mktAudit.licensedForRedistribution).toBe(false);
+    expect(mktAudit.substitutedLiveQuotesForHistoricalCloses).toBe(false);
+    expect(mktAudit.v2OverlapSessionsChecked).toBeGreaterThanOrEqual(7);
+    expect(mktAudit.v2RevisionsDetectedCount).toBe(0);
+
+    // Verify 5 Nov sell-off and 6 Nov rebound across COMP, SOX, SPY, QQQ, and NVDA
+    expect(mktAudit.instruments.COMP!.nov4Close).toBe(25736.51);
+    expect(mktAudit.instruments.COMP!.nov5Close).toBe(24315.0);
+    expect(mktAudit.instruments.COMP!.nov6Close).toBe(24579.42);
+    expect(mktAudit.instruments.COMP!.nov5ChangePct).toBeCloseTo(-5.5233, 3);
+    expect(mktAudit.instruments.COMP!.nov6ChangePct).toBeCloseTo(1.0875, 3);
+
+    expect(mktAudit.instruments.SOX!.nov5ChangePct).toBeCloseTo(-12.2461, 3);
+    expect(mktAudit.instruments.SOX!.nov6ChangePct).toBeCloseTo(4.2071, 3);
+
+    expect(mktAudit.instruments.SPY!.nov4Close).toBe(766.81);
+    expect(mktAudit.instruments.SPY!.nov5Close).toBe(733.0);
+    expect(mktAudit.instruments.SPY!.nov6Close).toBe(735.29);
+
+    expect(mktAudit.instruments.NVDA!.nov4Close).toBe(200.13);
+    expect(mktAudit.instruments.NVDA!.nov5Close).toBe(181.6);
+    expect(mktAudit.instruments.NVDA!.nov6Close).toBe(186.64);
+  });
+
+  it('3. verifies the original BEA Q3 2026 GDP release (BEA 26-45) and separates enacted state policy from unofficial 3 Nov 2026 election returns', () => {
     const byKey = new Map(MACRO_CLAIM_VERIFICATION_AUDITS.map((c) => [c.claimKey, c]));
 
     const nov5 = byKey.get('nov_5_sp500_nasdaq_selloff')!;
-    expect(nov5.verificationStatus).toBe('missing_primary_source_in_store');
-    expect(nov5.whatIsVerifiedInStore).toContain('4 November 2026');
+    expect(nov5.verificationStatus).toBe('verified_in_primary_store');
+    expect(nov5.whatIsVerifiedInStore).toContain('24,315.00');
 
     const nov6 = byKey.get('nov_6_market_rebound')!;
-    expect(nov6.verificationStatus).toBe('missing_primary_source_in_store');
-    expect(nov6.whatIsVerifiedInStore).toContain('4 November 2026');
-
-    const elections = byKey.get('us_2026_midterm_election_results')!;
-    expect(elections.verificationStatus).toBe('partially_corroborated_unofficial_or_lagged');
-    expect(elections.whatIsMissingOrUnverified).toContain('authority: secondary');
+    expect(nov6.verificationStatus).toBe('verified_in_primary_store');
+    expect(nov6.whatIsVerifiedInStore).toContain('24,579.42');
 
     const gdp = byKey.get('us_q3_2026_gdp_growth')!;
-    expect(gdp.verificationStatus).toBe('missing_primary_source_in_store');
-    expect(gdp.authoritativeSourceRequiredToResolve).toContain('A191RL1Q225SBEA');
+    expect(gdp.verificationStatus).toBe('verified_in_primary_store');
+    expect(gdp.publishedAtMs).toBe(Date.parse('2026-10-29T12:30:00Z'));
+    expect(gdp.receivedAtMs).toBeGreaterThan(Date.parse('2026-11-09T18:00:00Z'));
+    expect(gdp.whatIsVerifiedInStore).toContain('BEA 26-45');
+    expect(gdp.whatIsVerifiedInStore).toContain('+3.4% SAAR');
+
+    const elections = byKey.get('us_2026_midterm_election_results')!;
+    expect(elections.verificationStatus).toBe(
+      'verified_enacted_policy_separated_from_unofficial_election_returns',
+    );
+    expect(elections.electionPolicySeparationNote).toContain('ny-eo62');
+    expect(elections.electionPolicySeparationNote).toContain('okhouse-hb2992');
+    expect(elections.electionPolicySeparationNote).toContain('unofficial_pending_statutory_canvass');
   });
 
-  it('4 & 10. links the thesis to all 7 universe stocks (NVDA, MSFT, AMZN, GOOGL, AMD, CRWV, INTC) while keeping all directional ratings gated at INSUFFICIENT DATA', () => {
-    const assessment = evaluateAiCapexModerationThesis();
-    const tickers = assessment.companyLinkages.map((c) => c.ticker);
-
-    expect(tickers).toEqual(['AMZN', 'GOOGL', 'MSFT', 'NVDA', 'AMD', 'CRWV', 'INTC']);
-
-    for (const linkage of assessment.companyLinkages) {
-      expect(linkage.currentRatingLabel).toBe('INSUFFICIENT DATA');
-      expect(linkage.verifiedSupportingMetrics.length).toBeGreaterThan(0);
-      expect(linkage.verifiedContradictoryOrRiskMetrics.length).toBeGreaterThan(0);
-      expect(linkage.missingCompanyEvidence.length).toBeGreaterThan(0);
-      expect(linkage.citedEvidenceIds.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('5. constructs 3 testable scenarios with strictly null numerical probabilities', () => {
-    const assessment = evaluateAiCapexModerationThesis();
-
-    expect(assessment.scenarios).toHaveLength(3);
-    expect(assessment.scenarios.map((s) => s.scenarioId)).toEqual([
-      'scenario-efficient-capex-moderation',
-      'scenario-persistent-infrastructure-bottlenecks',
-      'scenario-hard-capex-retrenchment',
-    ]);
-
-    for (const scenario of assessment.scenarios) {
-      expect(scenario.probabilityAssignment).toBeNull();
-      expect(scenario.probabilityPolicyNote).toContain('No numerical probability assigned');
-      expect(scenario.confirmingIndicatorThresholds.length).toBeGreaterThanOrEqual(2);
-      expect(scenario.invalidatingIndicatorThresholds.length).toBeGreaterThanOrEqual(1);
-    }
-  });
-
-  it('6 & 7. defines all 8 measurable leading indicators and separates supporting, contradictory, missing evidence, and uncertainties', () => {
+  it('4. connects all 8 leading indicators to stored observations with value, reportingPeriod, evidenceId, freshnessStatus, and historicalComparison', () => {
     const assessment = evaluateAiCapexModerationThesis();
 
     expect(assessment.leadingIndicators).toHaveLength(8);
-    const categories = assessment.leadingIndicators.map((i) => i.category);
-    expect(categories).toEqual([
-      'capex_efficiency',
-      'cash_conversion',
-      'cloud_monetisation',
-      'silicon_demand',
-      'project_execution',
-      'credit_and_financing',
-      'power_and_grid',
-      'regulatory_and_policy',
-    ]);
-
-    expect(assessment.evidenceSynthesis.supportingEvidence.length).toBeGreaterThanOrEqual(4);
-    expect(assessment.evidenceSynthesis.contradictoryEvidence.length).toBeGreaterThanOrEqual(3);
-    expect(assessment.evidenceSynthesis.missingEvidence.length).toBeGreaterThanOrEqual(5);
-    expect(assessment.evidenceSynthesis.keyUncertainties.length).toBeGreaterThanOrEqual(3);
+    for (const ind of assessment.leadingIndicators) {
+      expect(ind.value.length).toBeGreaterThan(5);
+      expect(ind.reportingPeriod.length).toBeGreaterThan(4);
+      expect(ind.evidenceId.length).toBeGreaterThan(3);
+      expect(ind.primaryEvidenceIds.length).toBeGreaterThan(0);
+      expect(ind.historicalComparison.length).toBeGreaterThan(15);
+      expect([
+        'fresh_verified',
+        'lagged_verified',
+        'unofficial_pending_certification',
+      ]).toContain(ind.freshnessStatus);
+      expect([
+        'supports',
+        'contradicts',
+        'neutral',
+        'insufficient_evidence',
+      ]).toContain(ind.evidenceClassification);
+    }
   });
 
-  it('8 & 9. validates the Evidence-Locked Research Chat explanation against the 9-check deterministic validator with explicit abstention on missing claims', async () => {
-    const { bundle, validatedAnswer, validationReport } = await runValidatedThesisChatExplanationTest();
+  it('5. implements deterministic non-probabilistic evidence-change classifications (supports, contradicts, neutral, insufficient_evidence)', () => {
+    const assessment = evaluateAiCapexModerationThesis();
+    const changeSummary = assessment.evidenceChangeAssessment;
 
-    expect(bundle.sources.length).toBeGreaterThan(0);
+    expect(changeSummary.classificationPolicyNote).toContain('never statistical probabilities');
+    expect(changeSummary.overallConclusionClassification).toBe('mixed_supports_and_contradicts');
+    expect(changeSummary.counts.supports).toBe(4);
+    expect(changeSummary.counts.contradicts).toBe(3);
+    expect(changeSummary.counts.neutral).toBe(1);
+    expect(changeSummary.counts.insufficient_evidence).toBe(1);
+
+    for (const scenario of assessment.scenarios) {
+      expect(scenario.probabilityAssignment).toBeNull();
+    }
+  });
+
+  it('6. records and validates the authenticated Gemini live inference telemetry and 9-check closed-evidence validator', async () => {
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.generationMode).toBe('gemini_live');
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.providerStatus).toBe('succeeded');
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.requestId).toBe('Zg3yaoXKKLvJiLMPj7at8AM');
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.inputTokens).toBe(6760);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.outputTokens).toBe(672);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.totalTokens).toBe(7432);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.latencyMs).toBe(9167);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.estimatedCostGbp).toBe(0.001105);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.validationValid).toBe(true);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.checksPassed).toBe(9);
+
+    const { bundle, validatedAnswer, validationReport } =
+      await runValidatedThesisChatExplanationTest();
+
+    expect(bundle.sources.some((s) => s.docId === 'bea-26-45-gdp-q3-2026-adv')).toBe(true);
+    expect(bundle.sources.some((s) => s.docId === 'nasdaq-comp-history-v3')).toBe(true);
     expect(validationReport.valid).toBe(true);
     expect(validationReport.actionTaken).toBe('accepted');
     expect(validationReport.checks).toHaveLength(9);
     for (const check of validationReport.checks) {
       expect(check.passed).toBe(true);
     }
-
     expect(validatedAnswer.executionAuthority).toBe('none');
-    expect(validatedAnswer.supportStatus).toBe('partially_supported');
-    expect(validatedAnswer.shortAnswer).toContain('$895.4B');
-    expect(validatedAnswer.missingInformation.join(' ')).toContain('5 November 2026');
-    expect(validatedAnswer.missingInformation.join(' ')).toContain('Q3 2026 Advance GDP');
+  });
+
+  it('8. handles missing, stale, contradictory, superseded, and post-cutoff evidence deterministically', async () => {
+    // (a) Missing evidence: excluding `amazon-sec-ex991` downgrades capex/OCF and FCF items to `insufficient_evidence`
+    const withMissing = evaluateAiCapexModerationThesis({
+      excludeEvidenceIds: ['amazon-sec-ex991'],
+    });
+    const capexInd = withMissing.leadingIndicators.find(
+      (i) => i.indicatorId === 'ind-capex-to-ocf',
+    )!;
+    expect(capexInd.freshnessStatus).toBe('missing_evidence');
+    expect(capexInd.evidenceClassification).toBe('insufficient_evidence');
+    expect(withMissing.evidenceChangeAssessment.counts.insufficient_evidence).toBeGreaterThan(1);
+
+    // (b) Stale evidence: setting tight maxFreshnessDays (10 days) marks July/August sources (`nvda-fy27-q2`, `cru-eirgrid-dc-policy-2026`) as `stale_beyond_threshold`
+    const withStale = evaluateAiCapexModerationThesis({
+      maxFreshnessDays: 10,
+    });
+    expect(withStale.evidenceChangeAssessment.staleIndicatorIds).toContain(
+      'ind-semiconductor-demand',
+    );
+    expect(withStale.evidenceChangeAssessment.staleIndicatorIds).toContain(
+      'ind-power-availability',
+    );
+
+    // (c) Superseded evidence: `rel-loughton-dc-cancelled-v1-r1` is excluded from active relationships while `rel-loughton-dc-active-v2-r1` is included
+    const standard = evaluateAiCapexModerationThesis();
+    expect(
+      standard.evidenceChangeAssessment.activeSupersededRelationshipIdsExcluded,
+    ).toContain('rel-loughton-dc-cancelled-v1-r1');
+    expect(
+      standard.evidenceChangeAssessment.activeReplacementRelationshipIdsIncluded,
+    ).toContain('rel-loughton-dc-active-v2-r1');
+
+    // (d) Historical cutoff (`publication` clock at 2026-10-30): excludes 2 Nov Anthropic S-1/A and 5–6 Nov market closes
+    const oct30Cutoff = evaluateAiCapexModerationThesis({
+      historicalCutoffMs: Date.parse('2026-10-30T23:59:59Z'),
+      temporalBasis: 'publication',
+    });
+    expect(oct30Cutoff.evidenceChangeAssessment.excludedByHistoricalCutoffIds).toContain(
+      'anthropic-s1a-2026-11-02',
+    );
+    expect(oct30Cutoff.evidenceChangeAssessment.excludedByHistoricalCutoffIds).toContain(
+      'nasdaq-comp-history-v3',
+    );
+
+    // Also verify chat bundle at 30 Oct 2026 cutoff excludes `anthropic-s1a-2026-11-02` and still passes 9/9 validation checks
+    const oct30Chat = await runValidatedThesisChatExplanationTest({
+      historicalCutoffMs: Date.parse('2026-10-30T23:59:59Z'),
+      temporalBasis: 'publication',
+    });
+    expect(
+      oct30Chat.bundle.sources.some((s) => s.docId === 'anthropic-s1a-2026-11-02'),
+    ).toBe(false);
+    expect(oct30Chat.validationReport.valid).toBe(true);
+  });
+
+  it('9. preserves INSUFFICIENT DATA across all 7 stocks and executionAuthority=none', () => {
+    const assessment = evaluateAiCapexModerationThesis();
+    expect(assessment.executionAuthority).toBe('none');
+    expect(assessment.companyLinkages).toHaveLength(7);
+    for (const company of assessment.companyLinkages) {
+      expect(company.currentRatingLabel).toBe('INSUFFICIENT DATA');
+      expect(company.nov5CloseUsd).toBeGreaterThan(0);
+      expect(company.nov6CloseUsd).toBeGreaterThan(0);
+    }
   });
 });

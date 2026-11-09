@@ -618,6 +618,9 @@ export async function retrieveClosedEvidenceBundle(
 
   // Sort focal-relationship & scenario sources first, then referenced sources, and cap at maxEvidenceDocuments
   const focalDocIds = new Set<string>();
+  for (const s of options.additionalSources ?? []) {
+    focalDocIds.add(s.sourceDocId);
+  }
   for (const rel of boundedRels.slice(0, 6)) {
     for (const d of rel.sourceDocIds) focalDocIds.add(d);
   }

@@ -1,0 +1,837 @@
+{
+  "packageId": "thesis-monitor-live-ingestion-2026-11-09-v1",
+  "capturedAtIso": "2026-11-09T18:08:13Z",
+  "capturedAtMs": 1794247693808,
+  "beaGdpRelease": {
+    "sourceId": "bea-26-45-gdp-q3-2026-adv",
+    "releaseNumber": "BEA 26-45",
+    "title": "Gross Domestic Product (Advance Estimate), 3rd Quarter 2026",
+    "url": "https://www.bea.gov/news/2026/gdp-advance-estimate-3rd-quarter-2026",
+    "pdfUrl": "https://www.bea.gov/sites/default/files/2026-10/gdp3q26-adv.pdf",
+    "publishedAtIso": "2026-10-29T12:30:00Z",
+    "publishedAtMs": 1793277000000,
+    "publicationBasis": "official_embargo_release_830am_edt",
+    "receivedAtIso": "2026-11-09T18:08:13Z",
+    "receivedAtMs": 1794247693808,
+    "sha256": "b51d2f8f5bb721a5b37d17426a7512dcbfce1949aeb1e33b3ff28c823fcaaa30",
+    "metrics": {
+      "realGdpQ3SaarPct": 3.4,
+      "realGdpQ2SaarPct": 2.2,
+      "currentDollarGdpQ3SaarPct": 5.6,
+      "currentDollarGdpLevelTrillionsUsd": 30.84,
+      "realFinalSalesToPrivateDomesticPurchasersQ3SaarPct": 4.9,
+      "realFinalSalesToPrivateDomesticPurchasersQ2SaarPct": 4.6,
+      "grossDomesticPurchasesPriceIndexQ3Pct": 3.0,
+      "pcePriceIndexQ3Pct": 2.1,
+      "corePcePriceIndexQ3Pct": 2.5
+    }
+  },
+  "nasdaqHistoricalClosesV3": {
+    "COMP": {
+      "symbol": "COMP",
+      "assetClass": "index",
+      "sourceId": "nasdaq-comp-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "ee45b7abb6d5cb769aef675eba64544ee0e0ec009c4f702aeff8fb7fcccc1598",
+      "receivedAtMs": 1794247688844,
+      "receivedAtIso": "2026-11-09T18:08:08Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "index_level",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 25736.51,
+      "nov5Close": 24315.0,
+      "nov6Close": 24579.42,
+      "nov5ChangePct": -5.5233,
+      "nov6ChangePct": 1.0875,
+      "twoDayNetChangePct": -4.4959,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 24579.42,
+          "open": 24602.48,
+          "high": 24825.55,
+          "low": 24507.63,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 24315.0,
+          "open": 25558.11,
+          "high": 25559.03,
+          "low": 24262.14,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 25736.51,
+          "open": 25652.78,
+          "high": 26048.83,
+          "low": 25602.14,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 25372.01,
+          "open": 25246.63,
+          "high": 25474.46,
+          "low": 25246.63,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 25164.36,
+          "open": 25600.17,
+          "high": 25799.46,
+          "low": 25145.95,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "NDX": {
+      "symbol": "NDX",
+      "assetClass": "index",
+      "sourceId": "nasdaq-ndx-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/NDX/historical?assetclass=index&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "1483423a526d4a4df2efff7dd21599ce32338bef7e6e883c32c579331c19f708",
+      "receivedAtMs": 1794247689454,
+      "receivedAtIso": "2026-11-09T18:08:09Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "index_level",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 28437.17,
+      "nov5Close": 26629.81,
+      "nov6Close": 26989.99,
+      "nov5ChangePct": -6.3556,
+      "nov6ChangePct": 1.3525,
+      "twoDayNetChangePct": -5.089,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 26989.99,
+          "open": 27045.26,
+          "high": 27316.09,
+          "low": 26887.69,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 26629.81,
+          "open": 28078.18,
+          "high": 28078.18,
+          "low": 26606.43,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 28437.17,
+          "open": 28346.81,
+          "high": 28829.66,
+          "low": 28276.22,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 28180.26,
+          "open": 28085.5,
+          "high": 28307.9,
+          "low": 28085.5,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 27989.82,
+          "open": 28561.17,
+          "high": 28753.39,
+          "low": 27967.44,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "SOX": {
+      "symbol": "SOX",
+      "assetClass": "index",
+      "sourceId": "nasdaq-sox-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/SOX/historical?assetclass=index&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "0be4699472e8177282cfeebaf7a916da61ac194cd897aa27f283b6a8bf85749e",
+      "receivedAtMs": 1794247690014,
+      "receivedAtIso": "2026-11-09T18:08:10Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "index_level",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 10268.65,
+      "nov5Close": 9011.14,
+      "nov6Close": 9390.25,
+      "nov5ChangePct": -12.2461,
+      "nov6ChangePct": 4.2071,
+      "twoDayNetChangePct": -8.5542,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 9390.25,
+          "open": 9495.21,
+          "high": 9627.26,
+          "low": 9221.35,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 9011.14,
+          "open": 9806.31,
+          "high": 9838.13,
+          "low": 8997.39,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 10268.65,
+          "open": 10485.88,
+          "high": 10652.02,
+          "low": 10064.73,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 10600.4,
+          "open": 10574.1,
+          "high": 10761.85,
+          "low": 10530.68,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 10328.33,
+          "open": 10762.48,
+          "high": 10890.94,
+          "low": 10300.98,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "SPY": {
+      "symbol": "SPY",
+      "assetClass": "etf",
+      "sourceId": "nasdaq-spy-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/SPY/historical?assetclass=etf&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "1e313e1e13ae22e30b878dafa311eeef175632cf0e5a33584c1ef6be3e25ecc3",
+      "receivedAtMs": 1794247690415,
+      "receivedAtIso": "2026-11-09T18:08:10Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 766.81,
+      "nov5Close": 733.0,
+      "nov6Close": 735.29,
+      "nov5ChangePct": -4.4092,
+      "nov6ChangePct": 0.3124,
+      "twoDayNetChangePct": -4.1105,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 735.29,
+          "open": 734.82,
+          "high": 742.2104,
+          "low": 734.58,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 733.0,
+          "open": 765.47,
+          "high": 765.97,
+          "low": 732.71,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 766.81,
+          "open": 762.99,
+          "high": 775.64,
+          "low": 762.64,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 754.35,
+          "open": 752.73,
+          "high": 757.07,
+          "low": 752.39,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 752.1,
+          "open": 759.45,
+          "high": 763.86,
+          "low": 751.6,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "QQQ": {
+      "symbol": "QQQ",
+      "assetClass": "etf",
+      "sourceId": "nasdaq-qqq-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/QQQ/historical?assetclass=etf&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "eddb29c8e19e2c1d671796750889ba91b5811d9937a937884f4b0ec5c4037812",
+      "receivedAtMs": 1794247690810,
+      "receivedAtIso": "2026-11-09T18:08:10Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 691.95,
+      "nov5Close": 647.05,
+      "nov6Close": 656.1,
+      "nov5ChangePct": -6.4889,
+      "nov6ChangePct": 1.3987,
+      "twoDayNetChangePct": -5.181,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 656.1,
+          "open": 658.35,
+          "high": 664.52,
+          "low": 653.99,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 647.05,
+          "open": 683.12,
+          "high": 683.65,
+          "low": 647.05,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 691.95,
+          "open": 688.43,
+          "high": 701.45,
+          "low": 687.87,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 685.28,
+          "open": 684.39,
+          "high": 688.69,
+          "low": 683.18,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 681.09,
+          "open": 695.315,
+          "high": 699.43,
+          "low": 680.33,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "VT": {
+      "symbol": "VT",
+      "assetClass": "etf",
+      "sourceId": "nasdaq-vt-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/VT/historical?assetclass=etf&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "dfaf92e2afdd89f9cf2f791b6dd7f4f5b174c95608fce1bca74a5e066b88bb83",
+      "receivedAtMs": 1794247691157,
+      "receivedAtIso": "2026-11-09T18:08:11Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 157.81,
+      "nov5Close": 151.38,
+      "nov6Close": 151.73,
+      "nov5ChangePct": -4.0745,
+      "nov6ChangePct": 0.2312,
+      "twoDayNetChangePct": -3.8527,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 151.73,
+          "open": 151.47,
+          "high": 152.6899,
+          "low": 151.345,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 151.38,
+          "open": 157.28,
+          "high": 157.4,
+          "low": 151.25,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 157.81,
+          "open": 157.19,
+          "high": 158.15,
+          "low": 156.99,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 155.16,
+          "open": 155.21,
+          "high": 155.755,
+          "low": 154.97,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 155.11,
+          "open": 156.15,
+          "high": 157.17,
+          "low": 155.045,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "NVDA": {
+      "symbol": "NVDA",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-nvda-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "869b662ea3b96b49210ac29382edddad45f365a1a8505f5af4b6b49281b0a41a",
+      "receivedAtMs": 1794247691281,
+      "receivedAtIso": "2026-11-09T18:08:11Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 200.13,
+      "nov5Close": 181.6,
+      "nov6Close": 186.64,
+      "nov5ChangePct": -9.259,
+      "nov6ChangePct": 2.7753,
+      "twoDayNetChangePct": -6.7406,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 186.64,
+          "open": 191.1,
+          "high": 194.895,
+          "low": 185.22,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 181.6,
+          "open": 196.07,
+          "high": 196.25,
+          "low": 181.462,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 200.13,
+          "open": 203.5,
+          "high": 206.79,
+          "low": 199.68,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 206.69,
+          "open": 207.96,
+          "high": 209.14,
+          "low": 205.93,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 202.06,
+          "open": 207.53,
+          "high": 209.9769,
+          "low": 201.66,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "MSFT": {
+      "symbol": "MSFT",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-msft-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/MSFT/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "1bee2ab2866c466dd0cf457845e3573798792c33f0b552054a5a617980d83099",
+      "receivedAtMs": 1794247691703,
+      "receivedAtIso": "2026-11-09T18:08:11Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 555.8,
+      "nov5Close": 535.93,
+      "nov6Close": 530.61,
+      "nov5ChangePct": -3.575,
+      "nov6ChangePct": -0.9927,
+      "twoDayNetChangePct": -4.5322,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 530.61,
+          "open": 525.69,
+          "high": 538.33,
+          "low": 524.47,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 535.93,
+          "open": 554.935,
+          "high": 557.62,
+          "low": 532.675,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 555.8,
+          "open": 543.695,
+          "high": 559.15,
+          "low": 542.3,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 520.99,
+          "open": 509.005,
+          "high": 523.44,
+          "low": 507.82,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 507.12,
+          "open": 524.015,
+          "high": 529.63,
+          "low": 504.96,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "AMZN": {
+      "symbol": "AMZN",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-amzn-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/AMZN/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "69d9f6e891662c229aa945d46031519eade058e55a9da24b6cadf1e0cb7642c3",
+      "receivedAtMs": 1794247691811,
+      "receivedAtIso": "2026-11-09T18:08:11Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 266.03,
+      "nov5Close": 260.21,
+      "nov6Close": 259.3,
+      "nov5ChangePct": -2.1877,
+      "nov6ChangePct": -0.3497,
+      "twoDayNetChangePct": -2.5298,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 259.3,
+          "open": 259.81,
+          "high": 264.182,
+          "low": 258.53,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 260.21,
+          "open": 271.43,
+          "high": 273.23,
+          "low": 252.27,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 266.03,
+          "open": 264.815,
+          "high": 271.49,
+          "low": 263.8486,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 250.69,
+          "open": 248.59,
+          "high": 252.45,
+          "low": 245.88,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 245.63,
+          "open": 243.01,
+          "high": 253.81,
+          "low": 242.28,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "GOOGL": {
+      "symbol": "GOOGL",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-googl-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/GOOGL/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "609c6214c1310db82b5e41f07b8f2950c26b27163c52aa963b6d4b6d0f18b9b8",
+      "receivedAtMs": 1794247691956,
+      "receivedAtIso": "2026-11-09T18:08:11Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 288.93,
+      "nov5Close": 282.57,
+      "nov6Close": 284.78,
+      "nov5ChangePct": -2.2012,
+      "nov6ChangePct": 0.7821,
+      "twoDayNetChangePct": -1.4363,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 284.78,
+          "open": 284.9,
+          "high": 290.49,
+          "low": 284.59,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 282.57,
+          "open": 293.97,
+          "high": 295.6,
+          "low": 277.07,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 288.93,
+          "open": 283.51,
+          "high": 296.49,
+          "low": 283.4,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 280.03,
+          "open": 280.23,
+          "high": 281.605,
+          "low": 277.2,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 278.99,
+          "open": 282.46,
+          "high": 287.0,
+          "low": 278.8,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "AMD": {
+      "symbol": "AMD",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-amd-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/AMD/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "e96f623750eca3d8708e50875d15aeb49599c1796d2167b10c512b521395068f",
+      "receivedAtMs": 1794247692269,
+      "receivedAtIso": "2026-11-09T18:08:12Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 488.78,
+      "nov5Close": 404.4,
+      "nov6Close": 449.04,
+      "nov5ChangePct": -17.2634,
+      "nov6ChangePct": 11.0386,
+      "twoDayNetChangePct": -8.1304,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 449.04,
+          "open": 444.43,
+          "high": 459.8,
+          "low": 433.3,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 404.4,
+          "open": 452.5,
+          "high": 456.2,
+          "low": 402.1,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 488.78,
+          "open": 485.25,
+          "high": 514.6099,
+          "low": 476.5,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 483.9,
+          "open": 479.99,
+          "high": 497.4,
+          "low": 473.5401,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 466.84,
+          "open": 510.705,
+          "high": 512.82,
+          "low": 466.0717,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "CRWV": {
+      "symbol": "CRWV",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-crwv-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/CRWV/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "f1f9ae99165e1dfd2b96143f92921bec25602545c1df9fe4ac566b42acf4de09",
+      "receivedAtMs": 1794247692615,
+      "receivedAtIso": "2026-11-09T18:08:12Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 48.42,
+      "nov5Close": 43.66,
+      "nov6Close": 46.4,
+      "nov5ChangePct": -9.8306,
+      "nov6ChangePct": 6.2758,
+      "twoDayNetChangePct": -4.1718,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 46.4,
+          "open": 46.915,
+          "high": 47.7,
+          "low": 43.105,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 43.66,
+          "open": 46.47,
+          "high": 47.2889,
+          "low": 40.58,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 48.42,
+          "open": 50.49,
+          "high": 52.49,
+          "low": 48.02,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 53.74,
+          "open": 50.905,
+          "high": 53.925,
+          "low": 50.6,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 50.15,
+          "open": 55.59,
+          "high": 55.738,
+          "low": 49.46,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    },
+    "INTC": {
+      "symbol": "INTC",
+      "assetClass": "stocks",
+      "sourceId": "nasdaq-intc-history-v3",
+      "sourceUrl": "https://api.nasdaq.com/api/quote/INTC/historical?assetclass=stocks&fromdate=2026-09-01&todate=2026-11-09&limit=100",
+      "sha256": "cf62f59c9ded4a3690e891d1fc37e36bab7a68c4161a58c670f05e2dfbc98cc2",
+      "receivedAtMs": 1794247693026,
+      "receivedAtIso": "2026-11-09T18:08:13Z",
+      "publishedAtMs": null,
+      "publicationBasis": "retrieval_upper_bound",
+      "priceBasis": "unadjusted_close",
+      "licensedForRedistribution": false,
+      "sessionCount": 48,
+      "nov4Close": 58.27,
+      "nov5Close": 52.25,
+      "nov6Close": 56.28,
+      "nov5ChangePct": -10.3312,
+      "nov6ChangePct": 7.7129,
+      "twoDayNetChangePct": -3.4151,
+      "latest5Sessions": [
+        {
+          "date": "2026-11-06",
+          "close": 56.28,
+          "open": 54.99,
+          "high": 57.32,
+          "low": 54.5601,
+          "eventCloseUtc": "2026-11-06T21:00:00Z"
+        },
+        {
+          "date": "2026-11-05",
+          "close": 52.25,
+          "open": 56.505,
+          "high": 56.73,
+          "low": 51.51,
+          "eventCloseUtc": "2026-11-05T21:00:00Z"
+        },
+        {
+          "date": "2026-11-04",
+          "close": 58.27,
+          "open": 58.665,
+          "high": 60.2,
+          "low": 56.77,
+          "eventCloseUtc": "2026-11-04T21:00:00Z"
+        },
+        {
+          "date": "2026-11-03",
+          "close": 60.55,
+          "open": 61.325,
+          "high": 62.59,
+          "low": 59.87,
+          "eventCloseUtc": "2026-11-03T21:00:00Z"
+        },
+        {
+          "date": "2026-11-02",
+          "close": 59.97,
+          "open": 65.4,
+          "high": 65.72,
+          "low": 59.395,
+          "eventCloseUtc": "2026-11-02T21:00:00Z"
+        }
+      ]
+    }
+  }
+}
