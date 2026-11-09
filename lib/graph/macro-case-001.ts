@@ -455,42 +455,206 @@ export const MACRO_CASE_001_HISTORICAL_CUTOFFS = [
 ] as const;
 
 /**
- * Computes the non-double-counted financial commitment ledger for Macro Case 001.
- * Explicitly prevents adding sub-commitments ($44.6B Nscale Monarch) on top of parent
- * commitment envelopes ($895.4B Anthropic S-1/A aggregate compute commitments), and
- * excludes cancelled (Loughton r2) or unsigned reported discussions (Monarch credit talks).
+ * Computes the non-double-counted financial commitment ledger using reusable, general rules:
+ * 1. Date validity & supersession reconstruction (`asOfMs`, `temporalBasis`, `effectiveFromMs`, `effectiveToMs`, and supersession lineage).
+ * 2. Contractual & epistemic classification gate (only `bindingObligation === true`, `epistemicStatus === 'confirmed'`,
+ *    and binding contractual statuses `signed` / `funded` / `active` are summed into authoritative financial totals;
+ *    `cancelled`, `terminated`, `reported_discussion`, `announced`, or `inferred` items are dynamically excluded).
+ * 3. Source-grounded inclusion hierarchies (`parentCommitmentEnvelopeId` via claims, `economicGroupId` parent references,
+ *    or buyer-scoped aggregate commitment envelopes) so child sub-commitments are never double-counted on top of an active parent envelope.
  */
 export function computeNonDoubleCountedCommitments(
   dataset: MacroGraphDataset = loadInitialAcceptanceDataset(),
+  options?: {
+    asOfMs?: number;
+    temporalBasis?: 'publication' | 'receipt';
+    claims?: readonly MacroCase001Claim[];
+  },
 ): MacroCase001CommitmentLedgerSummary {
-  const monarchRel = dataset.relationships.find(
-    (r) => r.relationshipId === 'rel-anthropic-monarch-services-r1',
+  const asOfMs = options?.asOfMs;
+  const temporalBasis = options?.temporalBasis ?? 'receipt';
+  const claims = options?.claims ?? MACRO_CASE_001_CLAIMS;
+
+  // 1. Reconstruct temporally valid, non-superseded relationships when asOfMs is specified
+  const candidateRelationships =
+    asOfMs !== undefined
+      ? reconstructGraphRelationshipsAtDate(dataset.relationships, asOfMs, {
+          basis: temporalBasis,
+          includeSuperseded: false,
+          includeConflicting: true,
+        }).activeRelationships
+      : (() => {
+          const supersededIds = new Set(
+            dataset.relationships
+              .map((r) => r.supersedesRelationshipId)
+              .filter((id): id is string => Boolean(id)),
+          );
+          return dataset.relationships.filter((r) => !supersededIds.has(r.relationshipId));
+        })();
+
+  const dateValidRelationships = candidateRelationships.filter((rel) => {
+    if (asOfMs !== undefined && rel.effectiveFromMs > asOfMs) return false;
+    if (asOfMs !== undefined && rel.effectiveToMs !== null && rel.effectiveToMs <= asOfMs) {
+      return false;
+    }
+    return true;
+  });
+
+  const activeById = new Map<string, MacroRelationship>(
+    dateValidRelationships.map((r) => [r.relationshipId, r]),
   );
-  const s1aAggregateRel = dataset.relationships.find(
-    (r) => r.relationshipId === 'rel-anthropic-s1a-amzn-compute-r1',
+
+  // 2. Contractual & epistemic classification gate
+  const BINDING_STATUSES = new Set(['signed', 'funded', 'active', 'regulatory_filing']);
+  const isAuthoritativeBinding = (rel: MacroRelationship): boolean =>
+    rel.bindingObligation === true &&
+    rel.epistemicStatus === 'confirmed' &&
+    BINDING_STATUSES.has(rel.contractualStatus);
+
+  const excludedReportedOrCancelledItems: MacroCase001CommitmentLedgerSummary['excludedReportedOrCancelledItems'] =
+    [];
+
+  for (const rel of dateValidRelationships) {
+    if (!isAuthoritativeBinding(rel)) {
+      if (
+        rel.contractualStatus === 'cancelled' ||
+        rel.contractualStatus === 'expired' ||
+        rel.contractualStatus === 'reported_discussion' ||
+        rel.epistemicStatus === 'reported'
+      ) {
+        excludedReportedOrCancelledItems.push({
+          relationshipId: rel.relationshipId,
+          reason: rel.conditionsSummary,
+          principalAmount: rel.principalAmount,
+          capacityMw: rel.capacityUnit === 'MW' ? rel.capacityQuantity : null,
+        });
+      }
+    }
+  }
+
+  // 3. Build general inclusion hierarchy map: childRelationshipId -> parentEnvelopeRelationshipId
+  const claimById = new Map(claims.map((c) => [c.claimId, c]));
+  const childToParentRelMap = new Map<string, { parentRelId: string; explanation: string }>();
+
+  for (const claim of claims) {
+    if (!claim.relationshipId || !claim.parentCommitmentEnvelopeId) continue;
+    const parentClaim = claimById.get(claim.parentCommitmentEnvelopeId);
+    const parentRelId = parentClaim?.relationshipId ?? claim.parentCommitmentEnvelopeId;
+    if (activeById.has(claim.relationshipId) && activeById.has(parentRelId)) {
+      childToParentRelMap.set(claim.relationshipId, {
+        parentRelId,
+        explanation: claim.assumptionsAndBasis,
+      });
+    }
+  }
+
+  // Also detect structural parent-child inclusion directly on relationships:
+  // (a) rel.economicGroupId matching another active relationship's relationshipId, or
+  // (b) an active aggregate commitment envelope (`economicGroupId` ending with `-envelope`) for the same buyer org
+  const bindingComputeRels = dateValidRelationships.filter(
+    (rel) =>
+      isAuthoritativeBinding(rel) &&
+      rel.principalAmount !== null &&
+      rel.principalAmount > 0 &&
+      (rel.category === 'compute_purchase_commitment' ||
+        rel.category === 'commercial_contract' ||
+        rel.category === 'commercial_commitment' ||
+        rel.relationType === 'procurement_relationship'),
   );
-  const monarchAmount = monarchRel?.principalAmount ?? 44_600_000_000;
-  const s1aAggregateAmount = s1aAggregateRel?.principalAmount ?? 895_400_000_000;
 
-  const naiveComputeCommitmentsSumUsd = s1aAggregateAmount + monarchAmount;
-  const deduplicatedComputeCommitmentsUsd = s1aAggregateAmount;
-  const doubleCountPreventedUsd = monarchAmount;
+  for (const rel of bindingComputeRels) {
+    if (childToParentRelMap.has(rel.relationshipId)) continue;
+    if (rel.economicGroupId && activeById.has(rel.economicGroupId)) {
+      childToParentRelMap.set(rel.relationshipId, {
+        parentRelId: rel.economicGroupId,
+        explanation: `${rel.relationshipId} declares parent commitment envelope ${rel.economicGroupId}.`,
+      });
+      continue;
+    }
+    const isEnvelopeItself =
+      Boolean(rel.economicGroupId?.endsWith('-envelope')) ||
+      /\baggregate\b.*\bcommitments\b/i.test(rel.conditionsSummary);
+    if (isEnvelopeItself) continue;
 
-  const nscaleConv =
-    dataset.relationships.find((r) => r.relationshipId === 'rel-nscale-nvda-convertible-r1')
-      ?.principalAmount ?? 1_000_000_000;
-  const intcFab34 =
-    dataset.relationships.find((r) => r.relationshipId === 'rel-intc-fab34-leixlip-scjv-r1')
-      ?.principalAmount ?? 11_000_000_000;
-  const signedDebtAndCoInvestmentUsd = nscaleConv + intcFab34;
+    const buyerParticipant = rel.participants.find((p) => p.role === 'buyer' || p.role === 'lessee');
+    if (!buyerParticipant) continue;
 
-  const signedGuaranteesUsd =
-    dataset.relationships.find((r) => r.relationshipId === 'rel-ward-county-guarantee-r1')
-      ?.principalAmount ?? 860_300_000;
+    const matchingParentEnvelope = bindingComputeRels.find(
+      (candidate) =>
+        candidate.relationshipId !== rel.relationshipId &&
+        (Boolean(candidate.economicGroupId?.endsWith('-envelope')) ||
+          /\baggregate\b.*\bcommitments\b/i.test(candidate.conditionsSummary)) &&
+        candidate.participants.some(
+          (p) =>
+            (p.role === 'buyer' || p.role === 'lessee') &&
+            p.entityId === buyerParticipant.entityId,
+        ) &&
+        (candidate.principalAmount ?? 0) > (rel.principalAmount ?? 0) &&
+        rel.effectiveFromMs <= candidate.effectiveFromMs,
+    );
 
-  const signedEquityAndConvertibleBackingCapUsd =
-    dataset.relationships.find((r) => r.relationshipId === 'rel-anthropic-googl-dual-role-r1')
-      ?.principalAmount ?? 40_000_000_000;
+    if (matchingParentEnvelope) {
+      childToParentRelMap.set(rel.relationshipId, {
+        parentRelId: matchingParentEnvelope.relationshipId,
+        explanation: `${rel.relationshipId} ($${((rel.principalAmount ?? 0) / 1e9).toFixed(1)}B) is a sub-commitment within ${buyerParticipant.entityId}'s aggregate commitment envelope ${matchingParentEnvelope.relationshipId} ($${((matchingParentEnvelope.principalAmount ?? 0) / 1e9).toFixed(1)}B).`,
+      });
+    }
+  }
+
+  let naiveComputeCommitmentsSumUsd = 0;
+  let doubleCountPreventedUsd = 0;
+  const envelopeSubCommitmentsExcludedFromSum: MacroCase001CommitmentLedgerSummary['envelopeSubCommitmentsExcludedFromSum'] =
+    [];
+
+  for (const rel of bindingComputeRels) {
+    const amount = rel.principalAmount ?? 0;
+    naiveComputeCommitmentsSumUsd += amount;
+    const parentLink = childToParentRelMap.get(rel.relationshipId);
+    if (parentLink && activeById.has(parentLink.parentRelId)) {
+      doubleCountPreventedUsd += amount;
+      envelopeSubCommitmentsExcludedFromSum.push({
+        relationshipId: rel.relationshipId,
+        parentEnvelopeId: parentLink.parentRelId,
+        amountUsd: amount,
+        explanation: parentLink.explanation,
+      });
+    }
+  }
+
+  const deduplicatedComputeCommitmentsUsd = Math.max(
+    0,
+    naiveComputeCommitmentsSumUsd - doubleCountPreventedUsd,
+  );
+
+  // 4. Bucketed financial totals by contractual classification
+  const signedDebtAndCoInvestmentUsd = dateValidRelationships
+    .filter(
+      (rel) =>
+        isAuthoritativeBinding(rel) &&
+        rel.principalAmount !== null &&
+        (rel.category === 'borrowing' || rel.category === 'financing'),
+    )
+    .reduce((sum, rel) => sum + (rel.principalAmount ?? 0), 0);
+
+  const signedGuaranteesUsd = dateValidRelationships
+    .filter(
+      (rel) =>
+        isAuthoritativeBinding(rel) &&
+        rel.principalAmount !== null &&
+        (rel.category === 'guarantee' || rel.relationType === 'guarantee_arrangement'),
+    )
+    .reduce((sum, rel) => sum + (rel.principalAmount ?? 0), 0);
+
+  const signedEquityAndConvertibleBackingCapUsd = dateValidRelationships
+    .filter(
+      (rel) =>
+        isAuthoritativeBinding(rel) &&
+        rel.principalAmount !== null &&
+        (rel.category === 'equity_and_convertible_backing' ||
+          rel.category === 'equity_ownership' ||
+          rel.relationType === 'ownership_stake'),
+    )
+    .reduce((sum, rel) => sum + (rel.principalAmount ?? 0), 0);
 
   return {
     naiveComputeCommitmentsSumUsd,
@@ -499,38 +663,8 @@ export function computeNonDoubleCountedCommitments(
     signedDebtAndCoInvestmentUsd,
     signedGuaranteesUsd,
     signedEquityAndConvertibleBackingCapUsd,
-    excludedReportedOrCancelledItems: [
-      {
-        relationshipId: 'rel-monarch-credit-talks-r1',
-        reason:
-          'Reported unsigned credit-support discussions (Reuters, 30 Oct 2026); principal undisclosed (null) and not a binding guarantee.',
-        principalAmount: null,
-        capacityMw: null,
-      },
-      {
-        relationshipId: 'rel-loughton-msft-r2',
-        reason:
-          'Customer commitment terminated on 19 Oct 2026 (supersedes rel-loughton-msft-r1); excluded from active capacity commitments.',
-        principalAmount: null,
-        capacityMw: 50,
-      },
-      {
-        relationshipId: 'rel-quinn-irish-news-discovery-contagion-r1',
-        reason:
-          'Secondary-source discovery article (Eamon Quinn, Irish News, 8 Nov 2026); retained as reported context, never promoted as a confirmed financial commitment.',
-        principalAmount: null,
-        capacityMw: null,
-      },
-    ],
-    envelopeSubCommitmentsExcludedFromSum: [
-      {
-        relationshipId: 'rel-anthropic-monarch-services-r1',
-        parentEnvelopeId: 'rel-anthropic-s1a-amzn-compute-r1',
-        amountUsd: monarchAmount,
-        explanation:
-          'Nscale Monarch $44.6B multi-year AI compute service cap (signed 18 Sep 2026) is a sub-commitment within Anthropic’s $895.4B aggregate signed purchase and lease obligations disclosed in Form S-1/A (as of 30 Sep 2026).',
-      },
-    ],
+    excludedReportedOrCancelledItems,
+    envelopeSubCommitmentsExcludedFromSum,
   };
 }
 

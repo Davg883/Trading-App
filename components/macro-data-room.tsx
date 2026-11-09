@@ -141,6 +141,13 @@ export default function MacroDataRoom({
   );
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [chatProviderReadiness, setChatProviderReadiness] = useState<{
+    enabled: boolean;
+    apiKeyConfigured: boolean;
+    modelId: string;
+    status: string;
+    detail: string;
+  } | null>(null);
   const [chatTurns, setChatTurns] = useState<
     Array<{
       turnId: string;
@@ -271,6 +278,83 @@ export default function MacroDataRoom({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // Hydrate Gemini provider readiness and persisted owner chat history when View 6 is active
+  useEffect(() => {
+    if (activeView !== 'evidence_chat') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/graph/chat', {
+          method: 'GET',
+          headers: { 'x-aci-test-caller': 'owner_primary' },
+        });
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as {
+          providerStatus?: {
+            enabled: boolean;
+            apiKeyConfigured: boolean;
+            modelId: string;
+            status: string;
+            detail: string;
+          };
+          history?: Array<{
+            turnId: string;
+            question: string;
+            modelId: string;
+            generationMode: GeminiInferenceTelemetry['generationMode'];
+            providerStatus: GeminiInferenceTelemetry['providerStatus'];
+            inputTokens: number;
+            outputTokens: number;
+            cachedTokens: number;
+            estimatedCostGbp: number;
+            actualCostGbp: number | null;
+            latencyMs: number;
+            bundle: EvidenceBundleV1;
+            answer: EvidenceLockedAnswer;
+            validation: AnswerValidationReport;
+          }>;
+        };
+        if (cancelled) return;
+        if (json.providerStatus) {
+          setChatProviderReadiness(json.providerStatus);
+        }
+        if (Array.isArray(json.history) && json.history.length > 0) {
+          setChatTurns((prev) =>
+            prev.length > 0
+              ? prev
+              : json.history!.map((h) => ({
+                  turnId: h.turnId,
+                  question: h.question,
+                  bundle: h.bundle,
+                  answer: h.answer,
+                  validationReport: h.validation,
+                  providerMeta: {
+                    provider: 'google_genai_sdk',
+                    modelId: h.modelId,
+                    modelVerifiedViaEndpoint: h.generationMode === 'gemini_live',
+                    generationMode: h.generationMode,
+                    providerStatus: h.providerStatus,
+                    latencyMs: h.latencyMs,
+                    inputTokens: h.inputTokens,
+                    outputTokens: h.outputTokens,
+                    cachedTokens: h.cachedTokens,
+                    estimatedCostGbp: h.estimatedCostGbp,
+                    actualCostGbp: h.actualCostGbp,
+                    errorCode: null,
+                    sanitisedError: null,
+                  },
+                })),
+          );
+        }
+      } catch {
+        // Ignore background hydration errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView]);
 
   const entityNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -2354,6 +2438,18 @@ export default function MacroDataRoom({
                     <span className="tag" data-testid="chat-cutoff-indicator">
                       As-Of Cutoff: {formatUtcDate(asOfMs)} ({temporalBasis})
                     </span>
+                    <span
+                      className={`tag ${
+                        chatProviderReadiness?.enabled && chatProviderReadiness?.apiKeyConfigured
+                          ? 'green'
+                          : 'amber'
+                      }`}
+                      data-testid="chat-provider-readiness-badge"
+                    >
+                      {chatProviderReadiness?.enabled && chatProviderReadiness?.apiKeyConfigured
+                        ? `Gemini Provider: LIVE CONNECTED (${chatProviderReadiness.modelId})`
+                        : `Gemini Provider: UNAVAILABLE / DISABLED (${chatProviderReadiness?.status ?? 'api_key_missing'} · Deterministic Evidence Synthesis Active)`}
+                    </span>
                   </div>
                 </div>
 
@@ -2526,6 +2622,26 @@ export default function MacroDataRoom({
                             : answer.supportStatus === 'partially_supported'
                               ? 'PARTIALLY SUPPORTED'
                               : 'NO SUPPORTING EVIDENCE (EXPLICIT ABSTENTION)'}
+                        </span>
+                        <span
+                          className={`tag ${
+                            providerMeta.generationMode === 'gemini_live' && !isAbstained
+                              ? 'green'
+                              : providerMeta.providerStatus === 'provider_error' ||
+                                  providerMeta.providerStatus === 'budget_exceeded'
+                                ? 'amber'
+                                : ''
+                          }`}
+                          data-testid={`chat-synthesis-mode-${turnIdx}`}
+                        >
+                          {providerMeta.providerStatus === 'provider_error' ||
+                          providerMeta.providerStatus === 'budget_exceeded'
+                            ? `PROVIDER UNAVAILABLE (${providerMeta.providerStatus.toUpperCase()} · SAFE ABSTENTION)`
+                            : isAbstained
+                              ? 'SYNTHESIS: EXPLICIT ABSTENTION'
+                              : providerMeta.generationMode === 'gemini_live'
+                                ? `GEMINI-GENERATED VALIDATED SYNTHESIS (${providerMeta.modelId})`
+                                : 'DETERMINISTIC EVIDENCE SYNTHESIS (GEMINI DISABLED / UNCONFIGURED)'}
                         </span>
                         <span className="tag" data-testid={`chat-query-type-${turnIdx}`}>
                           Query: {bundle.selectedQuery.queryType}

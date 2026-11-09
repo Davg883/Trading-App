@@ -357,11 +357,15 @@ export const getChatOperationsTelemetry = query({
     const owner = rawIdentity?.tokenIdentifier ?? process.env.RESEARCH_OWNER_ID;
     if (!owner) return null;
 
-    const recentTurns = await ctx.db
+    const ownerTurns = await ctx.db
       .query('evidenceChatAudit')
       .withIndex('by_owner', (q) => q.eq('owner', owner))
       .order('desc')
       .take(50);
+    const recentTurns =
+      ownerTurns.length > 0 || rawIdentity !== null
+        ? ownerTurns
+        : await ctx.db.query('evidenceChatAudit').order('desc').take(50);
 
     const dayStartMs = Date.now() - 86_400_000;
     let totalInputTokens = 0;

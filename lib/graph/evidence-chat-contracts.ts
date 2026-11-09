@@ -351,6 +351,7 @@ export type GeminiInferenceTelemetry = {
     | 'rate_limited'
     | 'provider_error'
     | 'security_blocked';
+  requestId?: string | null;
   latencyMs: number;
   inputTokens: number;
   outputTokens: number;

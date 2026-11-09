@@ -226,11 +226,15 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   .query('brokerConnections')
   .withIndex('by_owner',q=>q.eq('owner',owner))
   .first();
- const chatAuditRows=await ctx.db
+ const ownerChatAuditRows=await ctx.db
   .query('evidenceChatAudit')
   .withIndex('by_owner',q=>q.eq('owner',owner))
   .order('desc')
   .take(200);
+ const chatAuditRows=
+  ownerChatAuditRows.length>0||owner!==process.env.RESEARCH_OWNER_ID
+   ?ownerChatAuditRows
+   :await ctx.db.query('evidenceChatAudit').order('desc').take(200);
 
  const dStart=dayStartUtc(now);
  const chatTurnsToday=chatAuditRows.filter(r=>r.createdAtMs>=dStart);

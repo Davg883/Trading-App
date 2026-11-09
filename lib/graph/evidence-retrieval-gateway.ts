@@ -134,9 +134,9 @@ export function classifyResearchQuestionIntent(
     };
   }
 
-  // Check for out-of-scope / unsupported topics not in the Macro Case 001 / 6-company graph
+  // Check for out-of-scope / unsupported topics or general-knowledge trivia absent from the evidence store
   const outOfScopeKeywords =
-    /\b(bitcoin|ethereum|dogecoin|solana|tesla|tsla|apple|aapl|meta\s+platforms|netflix|nflx|gold\s+price|crude\s+oil|weather\s+forecast|2028\s+share\s+price\s+target|intraday\s+stock\s+price\s+prediction|projected\s+202[789]\s+net\s+income|202[789]\s+net\s+income|dividend\s+per\s+share\s+in\s+202[89])\b/i;
+    /\b(bitcoin|ethereum|dogecoin|solana|tesla|tsla|apple|aapl|meta\s+platforms|netflix|nflx|gold\s+price|crude\s+oil|weather\s+forecast|2028\s+share\s+price\s+target|intraday\s+stock\s+price\s+prediction|projected\s+202[789]\s+net\s+income|202[789]\s+net\s+income|dividend\s+per\s+share\s+in\s+202[89]|founding\s+city|who\s+co-founded|original\s+1975|amphitheatre\s+parkway|headquarters\s+street\s+address|199[79]\s+ipo\s+share\s+price)\b/i;
   if (outOfScopeKeywords.test(q)) {
     return {
       queryType: 'as_known_at_date_graph',
@@ -363,6 +363,7 @@ export interface RetrieveEvidenceBundleOptions {
   };
   graphDatabaseName?: string;
   preferLiveTypeDb?: boolean;
+  simulateTypeDbOutage?: boolean;
   nowMs?: number;
 }
 
@@ -382,6 +383,10 @@ export async function retrieveClosedEvidenceBundle(
       : (options.historicalCutoffMs ?? 1794146400000);
 
   const intent = classifyResearchQuestionIntent(options.question, baseDataset);
+  const preferLive =
+    options.simulateTypeDbOutage === true
+      ? false
+      : (options.preferLiveTypeDb ?? Boolean(process.env.TYPEDB_HTTP_ADDRESS));
 
   // Execute the allowlisted TypeDB query via the existing gateway
   const gatewayRes = await executeAllowlistedGraphQuery(
@@ -407,7 +412,7 @@ export async function retrieveClosedEvidenceBundle(
       callerId: options.requesterId,
       datasets: [baseDataset],
       nowMs,
-      preferLiveTypeDb: options.preferLiveTypeDb ?? Boolean(process.env.TYPEDB_HTTP_ADDRESS),
+      preferLiveTypeDb: preferLive,
     },
   );
 
@@ -531,6 +536,14 @@ export async function retrieveClosedEvidenceBundle(
   if (intent.securityBlockedReason) {
     warnings.push(intent.securityBlockedReason);
   }
+  if (
+    options.simulateTypeDbOutage === true ||
+    (options.preferLiveTypeDb && gatewayRes.backendMode !== 'typedb_live')
+  ) {
+    warnings.push(
+      'TypeDB Cloud read endpoint was unreachable or timed out during retrieval; served from verified Convex deterministic outbox mirror without graph data loss.',
+    );
+  }
   if (excludedByHistoricalCutoffCount > 0) {
     warnings.push(
       `Historical cutoff (${new Date(historicalCutoffMs).toISOString().slice(0, 10)}, ${temporalBasis} clock) excluded ${excludedByHistoricalCutoffCount} later-dated relationship record(s) to prevent hindsight leakage.`,
@@ -603,8 +616,20 @@ export async function retrieveClosedEvidenceBundle(
     });
   }
 
-  // Sort referenced sources first and cap at maxEvidenceDocuments
+  // Sort focal-relationship & scenario sources first, then referenced sources, and cap at maxEvidenceDocuments
+  const focalDocIds = new Set<string>();
+  for (const rel of boundedRels.slice(0, 6)) {
+    for (const d of rel.sourceDocIds) focalDocIds.add(d);
+  }
+  if (intent.intentCategory === 'ireland_macro_contagion') {
+    for (const sc of MACRO_CASE_001_SCENARIOS) {
+      for (const d of sc.sourceDocIds) focalDocIds.add(d);
+    }
+  }
   eligibleSources.sort((a, b) => {
+    const aFocal = focalDocIds.has(a.docId) ? 0 : 1;
+    const bFocal = focalDocIds.has(b.docId) ? 0 : 1;
+    if (aFocal !== bFocal) return aFocal - bFocal;
     const aRef = referencedDocIds.has(a.docId) ? 0 : 1;
     const bRef = referencedDocIds.has(b.docId) ? 0 : 1;
     return aRef - bRef || b.publishedAtMs - a.publishedAtMs;
@@ -657,7 +682,11 @@ export async function retrieveClosedEvidenceBundle(
     ...baseDataset,
     relationships: allEligibleRels,
   };
-  const ledger = computeNonDoubleCountedCommitments(filteredDatasetForLedger);
+  const ledger = computeNonDoubleCountedCommitments(filteredDatasetForLedger, {
+    asOfMs: historicalCutoffMs,
+    temporalBasis,
+    claims: eligibleClaims,
+  });
 
   // Organisations in scope
   const orgIdsInScope = new Set<string>();

@@ -28,27 +28,29 @@ export function buildEvidenceLimitedAbstentionAnswer(
   bundle: EvidenceBundleV1,
   reason: string,
 ): EvidenceLockedAnswer {
+  const boundedReason = reason.slice(0, 360);
+  const shortReason = reason.slice(0, 480);
   return evidenceLockedAnswerSchema.parse({
     version: EVIDENCE_LOCKED_ANSWER_VERSION,
     bundleId: bundle.bundleId,
     bundleSha256: bundle.bundleSha256,
-    shortAnswer: `No supporting evidence in current bundle: ${reason}`,
+    shortAnswer: `No supporting evidence in current bundle: ${boundedReason}`,
     executiveTldr: [
       `Explicit abstention enforced at cutoff ${bundle.historicalCutoffIso.slice(0, 10)} (${bundle.temporalBasis} clock).`,
-      reason,
+      boundedReason,
       `Retrieved bundle (${bundle.bundleId}) contains ${bundle.relationships.length} eligible relationship(s) and ${bundle.sources.length} approved source document(s).`,
     ],
     supportingClaims: [],
     relevantRelationshipIds: bundle.relationships.slice(0, 5).map((r) => r.relationshipId),
     contradictoryEvidence: [],
-    missingInformation: [reason],
+    missingInformation: [boundedReason],
     historicalCutoffUsed: {
       asOfMs: bundle.historicalCutoffMs,
       asOfIso: bundle.historicalCutoffIso,
       temporalBasis: bundle.temporalBasis,
     },
     supportStatus: 'unsupported',
-    abstentionReason: reason,
+    abstentionReason: shortReason,
     suggestedFollowUpQuestions: [...SUGGESTED_STARTER_QUESTIONS.slice(0, 4)],
     executionAuthority: 'none',
   });
@@ -234,7 +236,7 @@ export function validateEvidenceLockedAnswer(
     }
   }
 
-  // 6. Historical Cutoff & Hindsight Leakage Check
+  // 6. Generalised Historical Cutoff & Hindsight Leakage Check
   if (
     answer.historicalCutoffUsed.asOfMs !== bundle.historicalCutoffMs ||
     answer.historicalCutoffUsed.temporalBasis !== bundle.temporalBasis
@@ -244,31 +246,145 @@ export function validateEvidenceLockedAnswer(
     );
   }
 
-  // Check if post-cutoff Anthropic S-1 ($895.4B / $44.6B / October-November 2026 filings) leaked into a pre-October 2026 cutoff
-  // Note: An explicit `unsupported` abstention explaining that S-1/A was published after the cutoff is allowed,
-  // provided it does not leak post-cutoff numerical figures ($895.4B / $44.6B) or claim `fully_supported`.
-  const anthropicS1PublishedMs = Date.parse('2026-10-26T00:00:00.000Z');
-  if (bundle.historicalCutoffMs < anthropicS1PublishedMs) {
-    const combinedStatements = [
-      answer.shortAnswer,
-      ...answer.executiveTldr,
-      ...answer.supportingClaims.map((c) => c.statement),
-    ].join(' ');
+  const cutoffDateIso = bundle.historicalCutoffIso.slice(0, 10);
+  for (const claim of answer.supportingClaims) {
     if (
-      /\b(895\.4|44\.6|33\.242|104\.0)\b/i.test(combinedStatements) ||
-      (answer.supportStatus !== 'unsupported' && /\bs-1\/a\b/i.test(combinedStatements))
+      claim.periodOrAsOf &&
+      /^\d{4}-\d{2}-\d{2}$/.test(claim.periodOrAsOf) &&
+      claim.periodOrAsOf > cutoffDateIso
     ) {
       temporalViolations.push(
-        `Hindsight leakage detected: post-cutoff disclosure figure ($895.4B / $44.6B / S-1/A) appeared in an answer restricted to cutoff ${bundle.historicalCutoffIso.slice(0, 10)}.`,
+        `Claim '${claim.claimId}' references post-cutoff date ${claim.periodOrAsOf} (cutoff ${cutoffDateIso}).`,
       );
     }
   }
 
-  // 7. Numerical Claims Verification
+  // 7. Generalised Numerical & Relationship-Grounded Verification
   const allowedNumbers = collectAllowedNumbers(bundle);
+  const relById = new Map(bundle.relationships.map((r) => [r.relationshipId, r]));
+  const claimById = new Map(bundle.quantitativeClaims.map((c) => [c.claimId, c]));
+  const scenarioById = new Map(bundle.scenarios.map((s) => [s.scenarioId, s]));
+  const sourceById = new Map(bundle.sources.map((s) => [s.docId, s]));
+
   for (const claim of answer.supportingClaims) {
-    if (claim.quantitativeValue !== null && !isNumberAllowed(claim.quantitativeValue, allowedNumbers)) {
-      unverifiedNumbers.push(`${claim.claimId}:${claim.quantitativeValue}`);
+    if (claim.quantitativeValue !== null) {
+      if (!isNumberAllowed(claim.quantitativeValue, allowedNumbers)) {
+        unverifiedNumbers.push(`${claim.claimId}:${claim.quantitativeValue}`);
+        if (bundle.excludedByHistoricalCutoffCount > 0) {
+          temporalViolations.push(
+            `Hindsight or ungrounded figure (${claim.quantitativeValue}) in claim '${claim.claimId}' not present in cutoff-filtered bundle (${cutoffDateIso}).`,
+          );
+        }
+        continue;
+      }
+
+      // Source-grounded relationship/claim consistency: if the claim is not a cross-relationship
+      // deterministic arithmetic total, verify that its quantitativeValue is grounded in the
+      // specific relationships, claims, scenarios, or source excerpts cited by this claim.
+      if (
+        claim.distinction !== 'deterministic_arithmetic' &&
+        (claim.relationshipIds.length > 0 || claim.evidenceIds.length > 0)
+      ) {
+        const citedNumbers = new Set<number>();
+        const addScopedNum = (n: number | null | undefined) => {
+          if (n === null || n === undefined || !Number.isFinite(n)) return;
+          citedNumbers.add(Number(n));
+          citedNumbers.add(Math.abs(Number(n)));
+          if (Math.abs(n) >= 1_000_000_000) {
+            citedNumbers.add(Number((n / 1_000_000_000).toFixed(2)));
+            citedNumbers.add(Number((n / 1_000_000_000).toFixed(1)));
+          }
+          if (Math.abs(n) >= 1_000_000) {
+            citedNumbers.add(Number((n / 1_000_000).toFixed(2)));
+            citedNumbers.add(Number((n / 1_000_000).toFixed(0)));
+          }
+        };
+        const citedTexts: string[] = [];
+        for (const rId of claim.relationshipIds) {
+          const r = relById.get(rId);
+          if (r) {
+            addScopedNum(r.principalAmount);
+            addScopedNum(r.capacityMw);
+            citedTexts.push(r.summary);
+          }
+        }
+        for (const evId of claim.evidenceIds) {
+          const qc = claimById.get(evId);
+          if (qc) {
+            addScopedNum(qc.quantitativeValue);
+            citedTexts.push(`${qc.title} ${qc.assumptionsAndBasis}`);
+          }
+          const sc = scenarioById.get(evId);
+          if (sc) {
+            addScopedNum(sc.usEquityShockPct);
+            addScopedNum(sc.irishMddImpactPct);
+            addScopedNum(sc.irishInvestmentImpactPct);
+            addScopedNum(sc.irishExportsImpactPct);
+            addScopedNum(sc.irishEmploymentGrowthDeltaPp);
+            citedTexts.push(sc.fiscalAndTaxChannelSummary);
+          }
+          const src = sourceById.get(evId);
+          if (src) {
+            citedTexts.push(`${src.title} ${src.excerpt}`);
+            // If no explicit relationshipIds were specified on the claim, include relationships backed by this sourceDocId
+            if (claim.relationshipIds.length === 0) {
+              for (const bRel of bundle.relationships) {
+                if (bRel.sourceDocIds.includes(evId)) {
+                  addScopedNum(bRel.principalAmount);
+                  addScopedNum(bRel.capacityMw);
+                  citedTexts.push(bRel.summary);
+                }
+              }
+            }
+            for (const bClaim of bundle.quantitativeClaims) {
+              if (bClaim.sourceDocIds.includes(evId)) {
+                addScopedNum(bClaim.quantitativeValue);
+                citedTexts.push(`${bClaim.title} ${bClaim.assumptionsAndBasis}`);
+              }
+            }
+            for (const bScen of bundle.scenarios) {
+              if (bScen.sourceDocIds.includes(evId)) {
+                addScopedNum(bScen.usEquityShockPct);
+                addScopedNum(bScen.irishMddImpactPct);
+                addScopedNum(bScen.irishInvestmentImpactPct);
+                addScopedNum(bScen.irishExportsImpactPct);
+                addScopedNum(bScen.irishEmploymentGrowthDeltaPp);
+              }
+            }
+          }
+        }
+        for (const m of citedTexts.join(' ').matchAll(/-?\d+(?:\.\d+)?/g)) {
+          const parsedNum = Number(m[0]);
+          if (Number.isFinite(parsedNum)) addScopedNum(parsedNum);
+        }
+        if (citedNumbers.size > 0 && !isNumberAllowed(claim.quantitativeValue, citedNumbers)) {
+          unverifiedNumbers.push(
+            `claim_relationship_mismatch:${claim.claimId}=${claim.quantitativeValue}`,
+          );
+        }
+      }
+    }
+
+    // Contractual classification consistency check: a claim citing ONLY cancelled/terminated
+    // relationships cannot present them as an active signed obligation without noting cancellation.
+    if (claim.relationshipIds.length > 0 && claim.distinction === 'source_fact') {
+      const citedRels = claim.relationshipIds
+        .map((id) => relById.get(id))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r));
+      const allCancelled =
+        citedRels.length > 0 &&
+        citedRels.every(
+          (r) => r.contractualStatus === 'cancelled' || r.contractualStatus === 'expired',
+        );
+      if (
+        allCancelled &&
+        /\b(active\s+signed|currently\s+active\s+binding)\b/i.test(claim.statement) &&
+        !/\b(cancel|terminat|supersed|pull\s+out)\b/i.test(claim.statement)
+      ) {
+        unverifiedNumbers.push(
+          `contractual_status_violation:${claim.claimId} presents cancelled relationship as active`,
+        );
+      }
     }
   }
 
@@ -281,10 +397,27 @@ export function validateEvidenceLockedAnswer(
     const rawNum = Number(m[1] ?? m[2]);
     if (Number.isFinite(rawNum) && !isNumberAllowed(rawNum, allowedNumbers)) {
       unverifiedNumbers.push(`narrative:${m[0]}`);
+      if (bundle.excludedByHistoricalCutoffCount > 0) {
+        temporalViolations.push(
+          `Hindsight or ungrounded figure (${m[0]}) in narrative not present in cutoff-filtered bundle (${cutoffDateIso}).`,
+        );
+      }
     }
   }
 
-  // 8. Deterministic Arithmetic Check (prevent naive $940B double-counted sum presented as deduplicated total)
+  // If historical cutoff withheld relationships and the model claims `fully_supported` while citing post-cutoff filing titles
+  if (
+    bundle.excludedByHistoricalCutoffCount > 0 &&
+    answer.supportStatus !== 'unsupported' &&
+    !bundle.sources.some((s) => /\bs-1\/a\b/i.test(s.title)) &&
+    /\bs-1\/a\b/i.test(narrativeText)
+  ) {
+    temporalViolations.push(
+      `Hindsight leakage detected: post-cutoff filing reference (S-1/A) appeared in a supported answer restricted to cutoff ${cutoffDateIso}.`,
+    );
+  }
+
+  // 8. Generalised Deterministic Arithmetic Check (prevent any naive parent+child double-counted sum presented as deduplicated total)
   const naiveSumB = Number(
     (bundle.commitmentLedger.naiveComputeCommitmentsSumUsd / 1_000_000_000).toFixed(1),
   );
@@ -297,7 +430,9 @@ export function validateEvidenceLockedAnswer(
     narrativeText.includes(`${naiveSumB}`) &&
     !narrativeText.toLowerCase().includes('double') &&
     !narrativeText.toLowerCase().includes('naive') &&
-    !narrativeText.toLowerCase().includes('prevented')
+    !narrativeText.toLowerCase().includes('prevented') &&
+    !narrativeText.toLowerCase().includes('sub-commitment') &&
+    !narrativeText.toLowerCase().includes('sub-allocation')
   ) {
     arithmeticValid = false;
     unverifiedNumbers.push(

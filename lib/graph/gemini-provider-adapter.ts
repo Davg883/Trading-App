@@ -473,6 +473,9 @@ export function synthesizeDeterministicEvidenceAnswer(
     const hasCbiDoc = bundle.sources.some((s) => s.docId === 'cbi-fsr-2026-i')
       ? 'cbi-fsr-2026-i'
       : fallbackDocId;
+    const hasCruDoc = bundle.sources.some((s) => s.docId === 'cru-eirgrid-dc-policy-2026')
+      ? 'cru-eirgrid-dc-policy-2026'
+      : hasCbiDoc;
     const hasDofDoc = bundle.sources.some((s) => s.docId === 'ireland-dof-ai-correction-2026-07')
       ? 'ireland-dof-ai-correction-2026-07'
       : fallbackDocId;
@@ -501,8 +504,8 @@ export function synthesizeDeterministicEvidenceAnswer(
           statement:
             'Observed primary disclosures show data centres consume 21.0% of Irish electricity (CRU/EirGrid), multinationals provide 17.0% of Irish income tax (Dept of Finance), and Intel Fab 34 Leixlip is backed by an $11.0B SCJV (Intel Q3 2026 10-Q).',
           distinction: 'source_fact',
-          evidenceIds: [hasCbiDoc, hasDofDoc],
-          relationshipIds: effectiveRelIds.slice(0, 3),
+          evidenceIds: [...new Set([hasCruDoc, hasCbiDoc, hasDofDoc])],
+          relationshipIds: effectiveRelIds.slice(0, 4),
           quantitativeValue: 21.0,
           unit: 'percent',
           currency: null,
@@ -1099,6 +1102,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
+            maxOutputTokens: 8192,
+            thinkingConfig: { thinkingBudget: 1024 },
             responseMimeType: 'application/json',
             responseSchema: GEMINI_RESPONSE_SCHEMA,
           },
@@ -1109,6 +1114,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
       ]);
 
       const rawText = response.text ?? '';
+      const responseId =
+        typeof (response as { responseId?: unknown }).responseId === 'string'
+          ? (response as { responseId: string }).responseId
+          : null;
       const parsedModelJson = JSON.parse(rawText) as Record<string, unknown>;
       const candidateAnswer = {
         version: EVIDENCE_LOCKED_ANSWER_VERSION,
@@ -1150,6 +1159,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
           modelVerifiedViaEndpoint: endpointVerified,
           generationMode: 'gemini_live',
           providerStatus: 'succeeded',
+          requestId: responseId,
           latencyMs: Math.max(1, Date.now() - startMs),
           inputTokens,
           outputTokens,
