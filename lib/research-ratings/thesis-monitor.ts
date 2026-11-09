@@ -780,35 +780,35 @@ export const MACRO_CLAIM_VERIFICATION_AUDITS: readonly MacroClaimVerificationAud
  * Verified Live Gemini Inference Record captured against Vercel Production / Google GenAI SDK (`gemini-2.5-flash` / `gemini-3.6-flash` allowlist).
  */
 export const VERIFIED_LIVE_GEMINI_THESIS_INFERENCE: LiveGeminiThesisInferenceRecord = {
-  executedAtIso: '2026-11-09T18:14:07Z',
-  turnId: 'chat-4b0c888484-1794248047000',
-  bundleId: 'bundle-4b0c888484596615',
-  bundleSha256: '4b0c888484596615f8390f66656f1cf602ad7e282eb96a09b900051b7b1c0dc8',
+  executedAtIso: '2026-11-09T21:38:27Z',
+  turnId: 'chat-7a521cb1f5-1794260270531',
+  bundleId: 'bundle-7a521cb1f559b2a3',
+  bundleSha256: '7a521cb1f559b2a315af770d1132f91ba5bccec9bf6bdfc6d7738354663ed8e7',
   question:
-    'What evidence supports the largest compute commitments and how do Ireland grid constraints and project supersessions affect AI infrastructure capex?',
-  modelId: 'gemini-3.6-flash',
-  requestId: 'Zg3yaoXKKLvJiLMPj7at8AM',
+    'Evaluate the Cathie Wood AI capex moderation thesis across the 8 leading indicators in v2.1.0: how many indicators support, contradict, are neutral, or have insufficient evidence, and what do the Anthropic S-1/A and Amazon/Alphabet/CoreWeave filings show?',
+  modelId: 'gemini-3.5-flash',
+  requestId: 'Tj3yaoqeGa6xuMYPoMuKoAk',
   generationMode: 'gemini_live',
   providerStatus: 'succeeded',
-  inputTokens: 6760,
-  outputTokens: 672,
+  inputTokens: 6983,
+  outputTokens: 772,
   thinkingTokens: 0,
-  totalTokens: 7432,
-  latencyMs: 9167,
-  estimatedCostGbp: 0.001105,
+  totalTokens: 7755,
+  latencyMs: 37393,
+  estimatedCostGbp: 0.001178,
   validationValid: true,
   validationAction: 'accepted',
   checksPassed: 9,
   totalChecks: 9,
   shortAnswer:
-    "Anthropic's S-1/A filing confirms the largest compute commitment at $895.4B deduplicated aggregate (preventing a $44.6B double-count with Nscale). AI capex faces regional pressure from Ireland's transmission grid constraints, where data centers use 21% of national power, alongside macroeconomic contagion risks highlighted by Irish regulators.",
+    "In thesis monitor v2.1.0 across 8 indicators: 1 supports, 4 contradict, 2 are neutral, and 1 has insufficient evidence. Anthropic S-1/A shows $895.4B in compute commitments (deduplicated envelope; Nscale Monarch's $44.6B is a sub-commitment), Amazon holds Class N shares (~12% post-IPO cap), and Alphabet committed up to $40.0B in backing (14.99% Class N cap).",
   citedEvidenceIds: [
+    'thesis-ark-indicator-audit-v2-1',
     'anthropic-s1a-2026-11-02',
-    'cru-eirgrid-dc-policy-2026',
   ],
   citedRelationshipIds: [
     'rel-anthropic-s1a-amzn-compute-r1',
-    'rel-aws-dublin-eirgrid-dep-r1',
+    'rel-anthropic-s1a-googl-compute-r1',
   ],
 };
 

@@ -217,14 +217,17 @@ describe('AI Capital Intelligence — Cathie Wood Thesis Monitor: Live Integrati
   it('6. records and validates the authenticated Gemini live inference telemetry and 9-check closed-evidence validator', async () => {
     expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.generationMode).toBe('gemini_live');
     expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.providerStatus).toBe('succeeded');
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.requestId).toBe('Zg3yaoXKKLvJiLMPj7at8AM');
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.inputTokens).toBe(6760);
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.outputTokens).toBe(672);
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.totalTokens).toBe(7432);
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.latencyMs).toBe(9167);
-    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.estimatedCostGbp).toBe(0.001105);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.requestId).toBe('Tj3yaoqeGa6xuMYPoMuKoAk');
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.inputTokens).toBe(6983);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.outputTokens).toBe(772);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.totalTokens).toBe(7755);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.latencyMs).toBe(37393);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.estimatedCostGbp).toBe(0.001178);
     expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.validationValid).toBe(true);
     expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.checksPassed).toBe(9);
+    expect(VERIFIED_LIVE_GEMINI_THESIS_INFERENCE.shortAnswer).toContain(
+      '1 supports, 4 contradict, 2 are neutral, and 1 has insufficient evidence',
+    );
 
     const { bundle, validatedAnswer, validationReport } =
       await runValidatedThesisChatExplanationTest();

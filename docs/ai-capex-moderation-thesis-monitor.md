@@ -131,11 +131,19 @@ Executed against the production Vercel & Convex stack (`POST https://capital.aig
 
 | Telemetry / Validation Field | Verified Production Value |
 | --- | --- |
+| **Executed At (UTC)** | `2026-11-09T21:38:27Z` |
 | **Provider & SDK** | `google_genai_sdk` (`@google/genai`) |
-| **Active Model ID** | `gemini-3.6-flash` (`modelVerifiedViaEndpoint: true`) |
+| **Active Model ID** | `gemini-3.5-flash` (`modelVerifiedViaEndpoint: true`) |
+| **Google Upstream Request ID** | `Tj3yaoqeGa6xuMYPoMuKoAk` |
+| **Turn ID & Convex Audit ID** | `chat-7a521cb1f5-1794260270531` · `tn7062y8zg8xvs96tqw3b2hmr98hxqw2` |
+| **Bundle ID & SHA-256** | `bundle-7a521cb1f559b2a3` (`7a521cb1f559b2a315af770d1132f91ba5bccec9bf6bdfc6d7738354663ed8e7`) |
+| **Input / Output / Thinking / Total Tokens** | `6,983` input · `772` output · `0` thinking · **`7,755` total tokens** |
+| **End-to-End Latency** | **`37,393 ms`** |
+| **Actual / Estimated Cost (GBP)** | **`£0.001178`** (within `£0.05` per-request and `£2.00` daily ceiling) |
 | **Generation Mode & Status** | `gemini_live` · `succeeded` |
 | **9-Check Deterministic Validator** | **`valid: true` (`actionTaken: "accepted"`, `9/9` checks passed)** |
-| **Validated Citations** | Sources: `anthropic-s1a-2026-11-02`, `cru-eirgrid-dc-policy-2026`, `thesis-ark-indicator-audit-v2-1`, `sec-xbrl-g7-1-2026-11-09` · Relationships: `rel-anthropic-s1a-amzn-compute-r1`, `rel-aws-dublin-eirgrid-dep-r1` |
+| **Validated Live Short Answer** | *"In thesis monitor v2.1.0 across 8 indicators: 1 supports, 4 contradict, 2 are neutral, and 1 has insufficient evidence. Anthropic S-1/A shows $895.4B in compute commitments (deduplicated envelope; Nscale Monarch's $44.6B is a sub-commitment), Amazon holds Class N shares (~12% post-IPO cap), and Alphabet committed up to $40.0B in backing (14.99% Class N cap)."* |
+| **Validated Citations** | Sources: `thesis-ark-indicator-audit-v2-1`, `anthropic-s1a-2026-11-02` · Relationships: `rel-anthropic-s1a-amzn-compute-r1`, `rel-anthropic-s1a-googl-compute-r1` |
 
 ---
 
