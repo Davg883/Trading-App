@@ -1191,7 +1191,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     `  "supportingClaims": [`,
     `    {`,
     `      "claimId": "claim-1",`,
-    `      "statement": "string statement grounded in the cited relationship/source",`,
+    `      "statement": "concise statement (under 220 chars) grounded in the cited relationship/source",`,
     `      "distinction": "source_fact" | "deterministic_arithmetic" | "modelled_scenario" | "reported_unverified" | "interpretation",`,
     `      "evidenceIds": ["valid docId from ALLOWED_EVIDENCE_IDS"],`,
     `      "relationshipIds": ["valid relationshipId from ALLOWED_RELATIONSHIP_IDS"],`,
@@ -1248,7 +1248,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 8192,
             ...(thinkingConfig ? { thinkingConfig } : {}),
             responseMimeType: 'application/json',
           },
