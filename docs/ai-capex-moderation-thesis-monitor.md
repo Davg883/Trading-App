@@ -127,3 +127,19 @@ Executed against the production Vercel & Convex stack (`POST https://capital.aig
 3. **Contradictory Evidence**: Simultaneously preserves supporting cloud/GDP/grid evidence alongside contradictory Q3 capex acceleration and `$895.4B` Anthropic commitment lock-in, preventing an unconditional `supports` rating (`mixed_supports_and_contradicts`).
 4. **Superseded Evidence**: Excludes `rel-loughton-dc-cancelled-v1-r1` in `activeSupersededRelationshipIdsExcluded` while retaining `rel-loughton-dc-active-v2-r1` in `activeReplacementRelationshipIdsIncluded`.
 5. **Post-Cutoff Evidence (`historicalCutoffMs: Date.parse('2026-10-30T23:59:59Z')`, `temporalBasis: 'publication'`)**: Excludes `anthropic-s1a-2026-11-02` (`2026-11-02`) and `nasdaq-comp-history-v3` (`2026-11-06`) from both the deterministic change assessment and the closed chat `EvidenceBundleV1`, passing all `9/9` hindsight-leakage checks.
+
+### Production Browser Acceptance (`https://capital.aiguides.co.uk`, Commit `dadef98`)
+- **Desktop (`1440x900`) & Mobile (`390x844`) Verification (`2026-11-09T18:38:30Z`)**:
+  - `market-radar-thesis-monitor` visible: **`true`**
+  - Classification badge (`thesis-classification-badge`): **`MIXED SUPPORTS AND CONTRADICTS (4 Supports · 3 Contradicts · 1 Neutral · 1 Insufficient)`**
+  - Expandable drawers (`thesis-supporting-evidence-drawer`, `thesis-contradictory-evidence-drawer`, `thesis-leading-indicators-drawer`): **`true` (`8` leading indicator rows rendered)**
+  - Evidence-Locked Chat trigger (`thesis-ask-assistant-btn` -> `executive-chat-response`): **`chatTriggered: true`** (cites deduplicated `$895.4B` Anthropic commitments and `thesis-ark-ai-capex-moderation-2026-11-07`)
+  - Stock rating gates (`INSUFFICIENT DATA`): **`21` badges across all `7` universe stocks and `3` horizons (`executionAuthority: "none"`)**
+  - Mobile Thesis Monitor bounding box (`390x844`): **`thesisMonitorWidth: 324px`, `thesisMonitorRight: 357px`, `thesisMonitorOverflow: false`**
+  - Uncaught page errors: **`0`**
+
+### Remaining Limitations & Open Boundaries
+1. **Uncertified 3 November 2026 Municipal Ballot Returns**: Under Ohio Rev. Code § 3505.32, official county canvass certification occurs `14–24 November 2026`; until certified by Clinton, Miami, and Champaign County Boards of Elections, local ballot outcomes remain classified as `unofficial_pending_statutory_canvass` and are excluded from enacted policy counts.
+2. **Primary SEC XBRL Coverage for AMD, CRWV, and INTC**: Quarterly XBRL cash-flow and share-count extraction remains pending for `AMD`, `CRWV`, and `INTC`, and `8` sequential quarters of filing history plus peer/historical valuation percentile series remain pending across all `7` universe stocks (`INSUFFICIENT DATA` gate preserved).
+3. **Public Market Close Redistribution**: Historical regular-session closes (`v3` through `2026-11-06`) are stored for internal analytical verification and public reference display only (`licensedForRedistribution: false`).
+
