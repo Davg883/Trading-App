@@ -1144,11 +1144,36 @@ export async function generateAndValidateEvidenceLockedAnswer(
   }
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
-  const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? 42_000;
+  const timeoutMs = options.timeoutMs ?? 20_000;
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      timeout: timeoutMs,
+      retryOptions: {
+        attempts: 1,
+      },
+    },
+  });
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, 'gemini-3.8-flash']
-    : ['gemini-3.8-flash', 'gemini-3.8-flash'];
+    ? [
+        modelId,
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-omni-flash-preview',
+        'gemini-4-argon',
+      ]
+    : [
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-omni-flash-preview',
+        'gemini-4-argon',
+      ];
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
@@ -1533,18 +1558,18 @@ export async function generateAndValidateEvidenceLockedAnswer(
         continue;
       }
       const isTransientOrRetired =
-        /503|UNAVAILABLE|429|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
+        /503|UNAVAILABLE|429|timeout|ABORT|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
           msg,
         );
       if (
         !isTransientOrRetired ||
         attempt === candidateModels.length - 1 ||
-        Date.now() - startMs > 18_000
+        Date.now() - startMs > 42_000
       ) {
         break;
       }
       if (options.env === undefined) {
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 250));
       }
       fallbackIdx += 1;
       if (fallbackIdx < candidateModels.length) {
