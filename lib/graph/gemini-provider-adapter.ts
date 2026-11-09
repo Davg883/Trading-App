@@ -30,6 +30,8 @@ export const PINNED_GEMINI_FLASH_MODEL_ID = 'gemini-2.5-flash' as const;
 export const ACTIVE_GEMINI_GENERATION_MODEL_ID = 'gemini-3.8-flash' as const;
 export const ALLOWLISTED_GEMINI_MODELS = [
   'gemini-3.8-flash',
+  'gemini-3.8-flash-lite',
+  'gemini-3.8-pro',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.5-flash-lite',
@@ -1129,8 +1131,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
   const ai = new GoogleGenAI({ apiKey });
   const timeoutMs = options.timeoutMs ?? 45_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
-    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, modelId];
+    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID, 'gemini-3.8-flash-lite', 'gemini-3.8-pro']
+    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, 'gemini-3.8-flash-lite', 'gemini-3.8-pro', modelId];
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
@@ -1229,7 +1231,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   let lastError: unknown = null;
   let useThinkingConfig = true;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  let fallbackIdx = 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       const thinkingConfig = useThinkingConfig
         ? activeModelId.startsWith('gemini-3')
@@ -1442,20 +1445,23 @@ export async function generateAndValidateEvidenceLockedAnswer(
       const recommendedMatch = msg.match(/models\/(gemini-[0-9.]+-flash(?:-lite|-preview)?)/i);
       if (recommendedMatch && recommendedMatch[1] && recommendedMatch[1] !== activeModelId) {
         activeModelId = recommendedMatch[1];
-        useThinkingConfig = false;
-        continue;
-      }
-      if (/no longer available|NOT_FOUND/i.test(msg) && activeModelId !== ACTIVE_GEMINI_GENERATION_MODEL_ID) {
-        activeModelId = ACTIVE_GEMINI_GENERATION_MODEL_ID;
-        useThinkingConfig = false;
+        useThinkingConfig = true;
         continue;
       }
       if (/thinking|budget|INVALID_ARGUMENT/i.test(msg) && useThinkingConfig) {
         useThinkingConfig = false;
         continue;
       }
-      const isTransient = /503|UNAVAILABLE/i.test(msg);
-      if (!isTransient || attempt === 2) break;
+      const isTransientOrNotFound = /503|UNAVAILABLE|no longer available|NOT_FOUND/i.test(msg);
+      if (!isTransientOrNotFound || attempt === 3) break;
+      if (options.env === undefined) {
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      fallbackIdx += 1;
+      if (fallbackIdx < candidateModels.length) {
+        activeModelId = candidateModels[fallbackIdx]!;
+        useThinkingConfig = true;
+      }
     }
   }
 
@@ -1480,7 +1486,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     validation: report,
     telemetry: {
       provider: 'google_genai_sdk',
-      modelId,
+      modelId: activeModelId,
       modelVerifiedViaEndpoint: endpointVerified,
       generationMode: 'abstention_only',
       providerStatus: 'provider_error',
