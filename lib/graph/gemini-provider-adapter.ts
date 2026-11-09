@@ -1173,7 +1173,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     historicalCutoffIso: bundle.historicalCutoffIso,
     temporalBasis: bundle.temporalBasis,
     commitmentLedger: bundle.commitmentLedger,
-    relationships: bundle.relationships.map((r) => ({
+    relationships: bundle.relationships.slice(0, 8).map((r) => ({
       relationshipId: r.relationshipId,
       relationshipType: r.relationshipType,
       participants: r.participants,
@@ -1185,19 +1185,27 @@ export async function generateAndValidateEvidenceLockedAnswer(
       publishedAtIso: new Date(r.publishedAtMs).toISOString().slice(0, 10),
       parentCommitmentEnvelopeId: r.parentCommitmentEnvelopeId,
       sourceDocIds: r.sourceDocIds,
-      summary: r.summary,
+      summary: r.summary.slice(0, 180),
     })),
-    sources: bundle.sources.map((s) => ({
+    sources: bundle.sources.slice(0, 8).map((s) => ({
       docId: s.docId,
       title: s.title,
       publisher: s.publisher,
       publishedAtIso: new Date(s.publishedAtMs).toISOString().slice(0, 10),
       sourceTier: s.sourceTier,
-      excerpt: s.excerpt.slice(0, 350),
+      excerpt: s.excerpt.slice(0, 160),
     })),
-    quantitativeClaims: bundle.quantitativeClaims,
-    scenarios: bundle.scenarios,
-    dataQualityWarnings: bundle.dataQualityWarnings,
+    quantitativeClaims: bundle.quantitativeClaims.slice(0, 6).map((c) => ({
+      claimId: c.claimId,
+      title: c.title,
+      classification: c.classification,
+      quantitativeValue: c.quantitativeValue,
+      unit: c.unit,
+      asOfDate: c.asOfDate,
+      sourceDocIds: c.sourceDocIds,
+    })),
+    scenarios: bundle.scenarios.slice(0, 2),
+    dataQualityWarnings: bundle.dataQualityWarnings.slice(0, 3),
   });
 
   const userPromptText = [
@@ -1270,7 +1278,6 @@ export async function generateAndValidateEvidenceLockedAnswer(
             temperature: 0.0,
             maxOutputTokens: 2048,
             ...(thinkingConfig ? { thinkingConfig } : {}),
-            responseMimeType: 'application/json',
           },
         }),
         new Promise<never>((_, reject) =>
@@ -1278,7 +1285,13 @@ export async function generateAndValidateEvidenceLockedAnswer(
         ),
       ]);
 
-      const rawText = (response.text ?? '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+      const strippedText = (response.text ?? '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+      const firstBrace = strippedText.indexOf('{');
+      const lastBrace = strippedText.lastIndexOf('}');
+      const rawText =
+        firstBrace >= 0 && lastBrace > firstBrace
+          ? strippedText.slice(firstBrace, lastBrace + 1)
+          : strippedText;
       const responseId =
         typeof (response as { responseId?: unknown }).responseId === 'string'
           ? (response as { responseId: string }).responseId
