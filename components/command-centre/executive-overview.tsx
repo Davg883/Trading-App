@@ -963,16 +963,24 @@ export function ExecutiveOverviewSections({
         {/* COMPACT THESIS MONITOR (Requirement 7: Cathie Wood AI Capex Moderation) */}
         <article
           className="g6-change-card"
-          style={{ marginTop: '1rem' }}
+          style={{
+            marginTop: '1rem',
+            maxWidth: '100%',
+            overflowX: 'hidden',
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word',
+          }}
           data-testid="market-radar-thesis-monitor"
         >
-          <div className="g6-change-meta">
+          <div className="g6-change-meta" style={{ flexWrap: 'wrap', gap: '0.35rem' }}>
             <span className="g6-change-cat">
               ACTIVE THESIS MONITOR · {thesisMonitor.version}
             </span>
             <span data-testid="thesis-classification-badge">
               <strong>
-                {thesisMonitor.evidenceChangeAssessment.overallConclusionClassification.toUpperCase()}
+                {thesisMonitor.evidenceChangeAssessment.overallConclusionClassification
+                  .replace(/_/g, ' ')
+                  .toUpperCase()}
               </strong>{' '}
               ({thesisMonitor.evidenceChangeAssessment.counts.supports} Supports ·{' '}
               {thesisMonitor.evidenceChangeAssessment.counts.contradicts} Contradicts ·{' '}
@@ -981,7 +989,7 @@ export function ExecutiveOverviewSections({
               Insufficient)
             </span>
           </div>
-          <h3>
+          <h3 style={{ overflowWrap: 'anywhere' }}>
             {thesisMonitor.thesisTitle} ({thesisMonitor.thesisId})
           </h3>
           <p className="cc-note" data-testid="thesis-short-conclusion">
@@ -1050,7 +1058,10 @@ export function ExecutiveOverviewSections({
               </span>
               <small>Value, reporting period, evidence ID, freshness &amp; historical comparison</small>
             </summary>
-            <div className="cc-table-wrap" style={{ marginTop: '0.5rem' }}>
+            <div
+              className="cc-table-wrap"
+              style={{ marginTop: '0.5rem', maxWidth: '100%', overflowX: 'auto' }}
+            >
               <table className="cc-table">
                 <thead>
                   <tr>
