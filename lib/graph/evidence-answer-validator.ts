@@ -326,8 +326,9 @@ export function validateEvidenceLockedAnswer(
           const src = sourceById.get(evId);
           if (src) {
             citedTexts.push(`${src.title} ${src.excerpt}`);
-            // If no explicit relationshipIds were specified on the claim, include relationships backed by this sourceDocId
-            if (claim.relationshipIds.length === 0) {
+            // If the claim does not target a single specific relationship (0 or 2+ relationships),
+            // include relationships backed by this cited sourceDocId
+            if (claim.relationshipIds.length !== 1) {
               for (const bRel of bundle.relationships) {
                 if (bRel.sourceDocIds.includes(evId)) {
                   addScopedNum(bRel.principalAmount);

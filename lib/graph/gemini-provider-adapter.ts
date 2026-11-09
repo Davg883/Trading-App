@@ -1173,11 +1173,30 @@ export async function generateAndValidateEvidenceLockedAnswer(
           ? (response as { responseId: string }).responseId
           : null;
       const parsedModelJson = JSON.parse(rawText) as Record<string, unknown>;
+      const fallbackFollowUps = [...SUGGESTED_STARTER_QUESTIONS.slice(0, 3)];
+      const rawFollowUps = Array.isArray(parsedModelJson.suggestedFollowUpQuestions)
+        ? (parsedModelJson.suggestedFollowUpQuestions as unknown[])
+            .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+            .map((q) => q.slice(0, 235))
+            .slice(0, 5)
+        : [];
+      const rawContra = Array.isArray(parsedModelJson.contradictoryEvidence)
+        ? (parsedModelJson.contradictoryEvidence as Array<Record<string, unknown>>).filter(
+            (c) =>
+              c &&
+              typeof c === 'object' &&
+              Array.isArray(c.evidenceIds) &&
+              c.evidenceIds.length > 0,
+          )
+        : [];
       const candidateAnswer = {
         version: EVIDENCE_LOCKED_ANSWER_VERSION,
         bundleId: bundle.bundleId,
         bundleSha256: bundle.bundleSha256,
         ...parsedModelJson,
+        contradictoryEvidence: rawContra,
+        suggestedFollowUpQuestions:
+          rawFollowUps.length > 0 ? rawFollowUps : fallbackFollowUps,
         historicalCutoffUsed: {
           asOfMs: bundle.historicalCutoffMs,
           asOfIso: bundle.historicalCutoffIso,
