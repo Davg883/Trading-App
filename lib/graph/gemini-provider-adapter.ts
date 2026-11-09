@@ -108,6 +108,7 @@ export interface GeminiAvailabilityStatus {
   displayName: string | null;
   supportedInputTokenLimit: number | null;
   supportedOutputTokenLimit: number | null;
+  availableModels?: string[];
   latencyMs: number;
   status: 'connected' | 'disabled_by_default' | 'api_key_missing' | 'endpoint_unreachable';
   detail: string;
@@ -228,6 +229,18 @@ export async function checkGeminiProviderAvailability(options?: {
         ),
       ]);
     }
+    let availableModels: string[] = [];
+    try {
+      const pager = await ai.models.list({ config: { pageSize: 50 } });
+      for await (const m of pager) {
+        if (m.name && m.name.includes('gemini')) {
+          availableModels.push(m.name.replace(/^models\//, ''));
+        }
+        if (availableModels.length >= 30) break;
+      }
+    } catch {
+      availableModels = [];
+    }
     return {
       enabled: true,
       apiKeyConfigured: true,
@@ -238,6 +251,7 @@ export async function checkGeminiProviderAvailability(options?: {
       displayName: modelInfo.displayName ?? verifiedModelId,
       supportedInputTokenLimit: modelInfo.inputTokenLimit ?? null,
       supportedOutputTokenLimit: modelInfo.outputTokenLimit ?? null,
+      availableModels,
       latencyMs: Date.now() - startMs,
       status: 'connected',
       detail: `Verified ${modelInfo.name ?? verifiedModelId} via official Google GenAI models endpoint (${Date.now() - startMs} ms).`,
@@ -1131,8 +1145,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
   const ai = new GoogleGenAI({ apiKey });
   const timeoutMs = options.timeoutMs ?? 45_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID, 'gemini-3.8-flash-lite', 'gemini-3.8-pro']
-    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, 'gemini-3.8-flash-lite', 'gemini-3.8-pro', modelId];
+    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
+    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, ACTIVE_GEMINI_GENERATION_MODEL_ID];
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
@@ -1452,16 +1466,35 @@ export async function generateAndValidateEvidenceLockedAnswer(
         useThinkingConfig = false;
         continue;
       }
-      const isTransientOrNotFound = /503|UNAVAILABLE|no longer available|NOT_FOUND/i.test(msg);
-      if (!isTransientOrNotFound || attempt === 3) break;
+      const isTransient = /503|UNAVAILABLE|429/i.test(msg);
+      if (!isTransient || attempt === 3) break;
       if (options.env === undefined) {
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        // On second 503, inspect ai.models.list() for an alternate live Gemini 3 model if available
+        if (attempt === 1) {
+          try {
+            const pager = await ai.models.list({ config: { pageSize: 40 } });
+            for await (const m of pager) {
+              const id = m.name?.replace(/^models\//, '') ?? '';
+              if (
+                id.startsWith('gemini-3') &&
+                id !== activeModelId &&
+                !id.includes('embedding') &&
+                !id.includes('imagen') &&
+                !id.includes('tts')
+              ) {
+                activeModelId = id;
+                break;
+              }
+            }
+          } catch {
+            // Keep activeModelId
+          }
+        } else if (attempt === 2) {
+          activeModelId = ACTIVE_GEMINI_GENERATION_MODEL_ID;
+        }
       }
       fallbackIdx += 1;
-      if (fallbackIdx < candidateModels.length) {
-        activeModelId = candidateModels[fallbackIdx]!;
-        useThinkingConfig = true;
-      }
     }
   }
 
