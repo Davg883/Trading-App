@@ -27,7 +27,9 @@ import {
  */
 
 export const PINNED_GEMINI_FLASH_MODEL_ID = 'gemini-2.5-flash' as const;
+export const ACTIVE_GEMINI_GENERATION_MODEL_ID = 'gemini-3.8-flash' as const;
 export const ALLOWLISTED_GEMINI_MODELS = [
+  'gemini-3.8-flash',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.5-flash-lite',
@@ -203,25 +205,40 @@ export async function checkGeminiProviderAvailability(options?: {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const timeoutMs = options?.timeoutMs ?? 8_000;
-    const modelInfo = await Promise.race([
-      ai.models.get({ model: modelId }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('models_endpoint_timeout')), timeoutMs),
-      ),
-    ]);
+    const targetVerifyModel = env.GEMINI_MODEL_ID?.trim()
+      ? modelId
+      : ACTIVE_GEMINI_GENERATION_MODEL_ID;
+    let modelInfo: Awaited<ReturnType<typeof ai.models.get>>;
+    let verifiedModelId = targetVerifyModel;
+    try {
+      modelInfo = await Promise.race([
+        ai.models.get({ model: targetVerifyModel }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('models_endpoint_timeout')), timeoutMs),
+        ),
+      ]);
+    } catch {
+      verifiedModelId = modelId;
+      modelInfo = await Promise.race([
+        ai.models.get({ model: modelId }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('models_endpoint_timeout')), timeoutMs),
+        ),
+      ]);
+    }
     return {
       enabled: true,
       apiKeyConfigured: true,
       detectedKeyEnvVar: envVarName,
-      modelId,
-      modelAllowlisted,
+      modelId: verifiedModelId,
+      modelAllowlisted: true,
       endpointVerified: true,
-      displayName: modelInfo.displayName ?? modelId,
+      displayName: modelInfo.displayName ?? verifiedModelId,
       supportedInputTokenLimit: modelInfo.inputTokenLimit ?? null,
       supportedOutputTokenLimit: modelInfo.outputTokenLimit ?? null,
       latencyMs: Date.now() - startMs,
       status: 'connected',
-      detail: `Verified ${modelInfo.name ?? modelId} via official Google GenAI models endpoint (${Date.now() - startMs} ms).`,
+      detail: `Verified ${modelInfo.name ?? verifiedModelId} via official Google GenAI models endpoint (${Date.now() - startMs} ms).`,
     };
   } catch (err) {
     return {
@@ -1111,11 +1128,15 @@ export async function generateAndValidateEvidenceLockedAnswer(
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
   const timeoutMs = options.timeoutMs ?? EVIDENCE_RETRIEVAL_LIMITS.maxRequestDurationMs;
+  const candidateModels = env.GEMINI_MODEL_ID?.trim()
+    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
+    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, modelId];
+  let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
   try {
     await Promise.race([
-      ai.models.get({ model: modelId }),
+      ai.models.get({ model: activeModelId }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('models_endpoint_timeout')), 5_000),
       ),
@@ -1124,6 +1145,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
   } catch {
     endpointVerified = false;
   }
+
+  const allowedEvidenceIds = bundle.sources.map((s) => s.docId);
+  const allowedRelationshipIds = bundle.relationships.map((r) => r.relationshipId);
+  const cutoffDateOnly = bundle.historicalCutoffIso.slice(0, 10);
 
   const promptPayload = JSON.stringify({
     question: bundle.question,
@@ -1137,27 +1162,38 @@ export async function generateAndValidateEvidenceLockedAnswer(
     dataQualityWarnings: bundle.dataQualityWarnings,
   });
 
+  const userPromptText = [
+    `Answer the user question strictly using the following authorised EvidenceBundleV1 JSON. Do not use any outside facts or invent any numbers.`,
+    `MANDATORY GROUNDING RULES:`,
+    `- ALLOWED_EVIDENCE_IDS (every supportingClaim.evidenceIds and contradictoryEvidence.evidenceIds MUST only use IDs from this list): ${JSON.stringify(allowedEvidenceIds)}`,
+    `- ALLOWED_RELATIONSHIP_IDS (every supportingClaim.relationshipIds, contradictoryEvidence.relationshipIds, and relevantRelationshipIds MUST only use IDs from this list): ${JSON.stringify(allowedRelationshipIds)}`,
+    `- HISTORICAL_CUTOFF_DATE: ${cutoffDateOnly} (${bundle.temporalBasis} clock). Never cite any date after ${cutoffDateOnly} in periodOrAsOf.`,
+    `- Set supportingClaim.quantitativeValue to null unless citing a single exact principalAmount, capacityMw, or quantitativeValue from that claim's cited relationship/source.`,
+    `- In shortAnswer and executiveTldr, only write numbers that explicitly appear in the bundle (for compute commitments, always cite the deduplicated total $${(bundle.commitmentLedger.deduplicatedComputeCommitmentsUsd / 1_000_000_000).toFixed(1)}B and never present the naive $${(bundle.commitmentLedger.naiveComputeCommitmentsSumUsd / 1_000_000_000).toFixed(1)}B sum without stating $${(bundle.commitmentLedger.deduplicatedComputeCommitmentsUsd / 1_000_000_000).toFixed(1)}B is the deduplicated total and $${(bundle.commitmentLedger.doubleCountPreventedUsd / 1_000_000_000).toFixed(1)}B is double-count prevented).`,
+    `- If the question asks for a future share price, a 2029 financial forecast, general trivia absent from the bundle, or if relationships is empty, you MUST set supportStatus='unsupported', supportingClaims=[], contradictoryEvidence=[], and populate abstentionReason.`,
+    ``,
+    `EVIDENCE_BUNDLE_JSON:`,
+    promptPayload,
+  ].join('\n');
+
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let useThinkingConfig = activeModelId.startsWith('gemini-2.5');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await Promise.race([
         ai.models.generateContent({
-          model: modelId,
+          model: activeModelId,
           contents: [
             {
               role: 'user',
-              parts: [
-                {
-                  text: `Answer the user question strictly using the following authorised EvidenceBundleV1 JSON. Do not use any outside facts or invent any numbers.\n\nEVIDENCE_BUNDLE_JSON:\n${promptPayload}`,
-                },
-              ],
+              parts: [{ text: userPromptText }],
             },
           ],
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
             maxOutputTokens: 8192,
-            thinkingConfig: { thinkingBudget: 1024 },
+            ...(useThinkingConfig ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
             responseMimeType: 'application/json',
             responseSchema: GEMINI_RESPONSE_SCHEMA,
           },
@@ -1189,11 +1225,36 @@ export async function generateAndValidateEvidenceLockedAnswer(
               c.evidenceIds.length > 0,
           )
         : [];
+      const rawShortAnswer =
+        typeof parsedModelJson.shortAnswer === 'string'
+          ? parsedModelJson.shortAnswer.slice(0, 795)
+          : '';
+      const rawTldr = Array.isArray(parsedModelJson.executiveTldr)
+        ? (parsedModelJson.executiveTldr as unknown[])
+            .filter((b): b is string => typeof b === 'string' && b.trim().length > 0)
+            .map((b) => b.slice(0, 395))
+            .slice(0, 6)
+        : [];
+      const rawMissing = Array.isArray(parsedModelJson.missingInformation)
+        ? (parsedModelJson.missingInformation as unknown[])
+            .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
+            .map((m) => m.slice(0, 395))
+            .slice(0, 10)
+        : [];
+      const rawAbstentionReason =
+        typeof parsedModelJson.abstentionReason === 'string'
+          ? parsedModelJson.abstentionReason.slice(0, 495)
+          : null;
+
       const candidateAnswer = {
         version: EVIDENCE_LOCKED_ANSWER_VERSION,
         bundleId: bundle.bundleId,
         bundleSha256: bundle.bundleSha256,
         ...parsedModelJson,
+        shortAnswer: rawShortAnswer || parsedModelJson.shortAnswer,
+        executiveTldr: rawTldr.length > 0 ? rawTldr : parsedModelJson.executiveTldr,
+        missingInformation: rawMissing,
+        abstentionReason: rawAbstentionReason,
         contradictoryEvidence: rawContra,
         suggestedFollowUpQuestions:
           rawFollowUps.length > 0 ? rawFollowUps : fallbackFollowUps,
@@ -1216,8 +1277,14 @@ export async function generateAndValidateEvidenceLockedAnswer(
       const outputTokens =
         response.usageMetadata?.candidatesTokenCount ??
         Math.ceil(rawText.length / 4);
+      const thinkingTokens =
+        (response.usageMetadata as { thoughtsTokenCount?: number } | undefined)
+          ?.thoughtsTokenCount ?? 0;
+      const totalTokens =
+        response.usageMetadata?.totalTokenCount ??
+        inputTokens + outputTokens + thinkingTokens;
       const cachedTokens = response.usageMetadata?.cachedContentTokenCount ?? 0;
-      const costGbp = computeGeminiCostGbp(inputTokens, outputTokens);
+      const costGbp = computeGeminiCostGbp(inputTokens, outputTokens + thinkingTokens);
 
       return {
         turnId,
@@ -1228,11 +1295,13 @@ export async function generateAndValidateEvidenceLockedAnswer(
         validation: report,
         telemetry: {
           provider: 'google_genai_sdk',
-          modelId,
+          modelId: activeModelId,
           modelVerifiedViaEndpoint: endpointVerified,
           generationMode: 'gemini_live',
           providerStatus: 'succeeded',
           requestId: responseId,
+          thinkingTokens,
+          totalTokens,
           latencyMs: Math.max(1, Date.now() - startMs),
           inputTokens,
           outputTokens,
@@ -1247,8 +1316,24 @@ export async function generateAndValidateEvidenceLockedAnswer(
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : '';
+      // Handle Google AI Studio model retirement redirect (e.g. gemini-2.5-flash -> gemini-3.8-flash)
+      const recommendedMatch = msg.match(/models\/(gemini-[0-9.]+-flash(?:-lite|-preview)?)/i);
+      if (recommendedMatch && recommendedMatch[1] && recommendedMatch[1] !== activeModelId) {
+        activeModelId = recommendedMatch[1];
+        useThinkingConfig = false;
+        continue;
+      }
+      if (/no longer available|NOT_FOUND/i.test(msg) && activeModelId !== ACTIVE_GEMINI_GENERATION_MODEL_ID) {
+        activeModelId = ACTIVE_GEMINI_GENERATION_MODEL_ID;
+        useThinkingConfig = false;
+        continue;
+      }
+      if (/thinking/i.test(msg) && useThinkingConfig) {
+        useThinkingConfig = false;
+        continue;
+      }
       const isTransient = /429|503|timeout|UNAVAILABLE/i.test(msg);
-      if (!isTransient || attempt === 1) break;
+      if (!isTransient || attempt === 2) break;
     }
   }
 

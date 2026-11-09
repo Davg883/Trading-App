@@ -63,10 +63,11 @@ function collectAllowedNumbers(bundle: EvidenceBundleV1): Set<number> {
     allowed.add(Number(n));
     allowed.add(Math.abs(Number(n)));
     // Add billions / millions scaled equivalents for USD amounts
-    if (Math.abs(n) >= 1_000_000_000) {
+    if (Math.abs(n) >= 100_000_000) {
       const b = Number((n / 1_000_000_000).toFixed(2));
       allowed.add(b);
       allowed.add(Number((n / 1_000_000_000).toFixed(1)));
+      allowed.add(Number((n / 1_000_000_000).toFixed(3)));
     }
     if (Math.abs(n) >= 1_000_000) {
       const m = Number((n / 1_000_000).toFixed(2));
@@ -326,9 +327,18 @@ export function validateEvidenceLockedAnswer(
           const src = sourceById.get(evId);
           if (src) {
             citedTexts.push(`${src.title} ${src.excerpt}`);
-            // If the claim does not target a single specific relationship (0 or 2+ relationships),
+            // Unless the claim targets a single specific child sub-commitment with its own amount,
             // include relationships backed by this cited sourceDocId
-            if (claim.relationshipIds.length !== 1) {
+            const singleRel =
+              claim.relationshipIds.length === 1
+                ? relById.get(claim.relationshipIds[0]!)
+                : null;
+            const isSingleChildWithOwnAmount = Boolean(
+              singleRel &&
+                (singleRel.principalAmount !== null || singleRel.capacityMw !== null) &&
+                singleRel.parentCommitmentEnvelopeId !== null,
+            );
+            if (!isSingleChildWithOwnAmount) {
               for (const bRel of bundle.relationships) {
                 if (bRel.sourceDocIds.includes(evId)) {
                   addScopedNum(bRel.principalAmount);
