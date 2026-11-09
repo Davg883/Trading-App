@@ -30,8 +30,10 @@ export const PINNED_GEMINI_FLASH_MODEL_ID = 'gemini-2.5-flash' as const;
 export const ACTIVE_GEMINI_GENERATION_MODEL_ID = 'gemini-3.8-flash' as const;
 export const ALLOWLISTED_GEMINI_MODELS = [
   'gemini-3.8-flash',
-  'gemini-3.8-flash-lite',
-  'gemini-3.8-pro',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.5-flash-lite',
@@ -1145,8 +1147,14 @@ export async function generateAndValidateEvidenceLockedAnswer(
   const ai = new GoogleGenAI({ apiKey });
   const timeoutMs = options.timeoutMs ?? 45_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
-    ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
-    : [ACTIVE_GEMINI_GENERATION_MODEL_ID, ACTIVE_GEMINI_GENERATION_MODEL_ID];
+    ? [modelId, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash']
+    : [
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+      ];
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = false;
 
@@ -1246,7 +1254,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
   let lastError: unknown = null;
   let useThinkingConfig = true;
   let fallbackIdx = 0;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < candidateModels.length; attempt += 1) {
     try {
       const thinkingConfig = useThinkingConfig
         ? activeModelId.startsWith('gemini-3')
@@ -1466,35 +1474,16 @@ export async function generateAndValidateEvidenceLockedAnswer(
         useThinkingConfig = false;
         continue;
       }
-      const isTransient = /503|UNAVAILABLE|429/i.test(msg);
-      if (!isTransient || attempt === 3) break;
+      const isTransientOrRetired = /503|UNAVAILABLE|429|no longer available|NOT_FOUND/i.test(msg);
+      if (!isTransientOrRetired || attempt === candidateModels.length - 1) break;
       if (options.env === undefined) {
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-        // On second 503, inspect ai.models.list() for an alternate live Gemini 3 model if available
-        if (attempt === 1) {
-          try {
-            const pager = await ai.models.list({ config: { pageSize: 40 } });
-            for await (const m of pager) {
-              const id = m.name?.replace(/^models\//, '') ?? '';
-              if (
-                id.startsWith('gemini-3') &&
-                id !== activeModelId &&
-                !id.includes('embedding') &&
-                !id.includes('imagen') &&
-                !id.includes('tts')
-              ) {
-                activeModelId = id;
-                break;
-              }
-            }
-          } catch {
-            // Keep activeModelId
-          }
-        } else if (attempt === 2) {
-          activeModelId = ACTIVE_GEMINI_GENERATION_MODEL_ID;
-        }
+        await new Promise((r) => setTimeout(r, 800));
       }
       fallbackIdx += 1;
+      if (fallbackIdx < candidateModels.length) {
+        activeModelId = candidateModels[fallbackIdx]!;
+        useThinkingConfig = true;
+      }
     }
   }
 
