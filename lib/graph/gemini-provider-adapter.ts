@@ -27,11 +27,11 @@ import {
  */
 
 export const PINNED_GEMINI_FLASH_MODEL_ID = 'gemini-2.5-flash' as const;
-export const ACTIVE_GEMINI_GENERATION_MODEL_ID = 'gemini-3.8-flash' as const;
+export const ACTIVE_GEMINI_GENERATION_MODEL_ID = 'gemini-3.6-flash' as const;
 export const ALLOWLISTED_GEMINI_MODELS = [
+  'gemini-3.6-flash',
   'gemini-3.8-flash',
   'gemini-3.7-flash',
-  'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-2.5-flash',
@@ -1144,7 +1144,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
   }
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
-  const timeoutMs = options.timeoutMs ?? 42_000;
+  const timeoutMs = options.timeoutMs ?? 25_000;
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
@@ -1157,18 +1157,18 @@ export async function generateAndValidateEvidenceLockedAnswer(
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
     ? [
         modelId,
+        'gemini-3.6-flash',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
-        'gemini-3.6-flash',
         'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-omni-flash-preview',
         'gemini-4-argon',
       ]
     : [
+        'gemini-3.6-flash',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
-        'gemini-3.6-flash',
         'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-omni-flash-preview',
