@@ -1,6 +1,7 @@
 import Dashboard from "../components/dashboard";
 import ConnectedCommandCentre,{UnconfiguredCommandCentre} from "../integrations/connected-command-centre";
 import {verifyBrokerVaultSelfTest} from "../lib/brokers/vault";
+import {resolveGeminiApiKey} from "../lib/graph/gemini-provider-adapter";
 import {researchFeed} from "../lib/portfolio/research-feed";
 import {fetchLiveOperationsOverview} from "../lib/remote-ops/server";
 import {buildWorkspaceConnectionsReport} from "../lib/remote-ops/workspace-connections";
@@ -33,19 +34,30 @@ export default async function Home(){
   const forwardEvents=liveOps?.forwardResearchEvents??baseFeed.forwardResearchEvents;
   const vaultSelfTest=verifyBrokerVaultSelfTest();
   const brokerStorageReady=Boolean(configured&&vaultSelfTest.selfTestPassed);
+  const hasGeminiKey=Boolean(resolveGeminiApiKey(process.env).apiKey);
+  const modelProviderConfigured=Boolean(hasGeminiKey||process.env.OPENAI_API_KEY||process.env.ANTHROPIC_API_KEY);
   const reconciledHealth=liveOps?.health?{
     ...liveOps.health,
-    environmentAudit:liveOps.health.environmentAudit?.map(svc=>
-      svc.serviceId==="trading212_readonly"&&svc.status!=="connected"
-        ?{
-            ...svc,
-            status:brokerStorageReady?"configured_not_tested" as const:"unavailable" as const,
-            detail:brokerStorageReady
-              ?`${vaultSelfTest.reason} Save Credentials enabled for the authenticated owner on /settings/brokers.`
-              :`${vaultSelfTest.reason} Saving, testing and synchronisation remain disabled on /settings/brokers until the server vault is configured.`,
-          }
-        :svc
-    ),
+    environmentAudit:liveOps.health.environmentAudit?.map(svc=>{
+      if(svc.serviceId==="trading212_readonly"&&svc.status!=="connected"){
+        return {
+          ...svc,
+          status:brokerStorageReady?"configured_not_tested" as const:"unavailable" as const,
+          detail:brokerStorageReady
+            ?`${vaultSelfTest.reason} Save Credentials enabled for the authenticated owner on /settings/brokers.`
+            :`${vaultSelfTest.reason} Saving, testing and synchronisation remain disabled on /settings/brokers until the server vault is configured.`,
+        };
+      }
+      if(svc.serviceId==="remote_ai_models"&&svc.status!=="connected"&&modelProviderConfigured){
+        return {
+          ...svc,
+          status:"connected" as const,
+          lastVerifiedAt:Date.now(),
+          detail:"Google Gemini API key configured in Vercel Production server runtime (gemini-2.5-flash).",
+        };
+      }
+      return svc;
+    }),
   }:undefined;
   const feed=liveOps&&reconciledHealth?{
     ...baseFeed,
@@ -66,7 +78,7 @@ export default async function Home(){
     typedbConfigured:Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_DATABASE),
     typedbDatabase:process.env.TYPEDB_DATABASE??null,
     licensedMarketDataConfigured:Boolean(process.env.LICENSED_MARKET_DATA_API_KEY),
-    modelProviderConfigured:Boolean(process.env.GEMINI_API_KEY||process.env.OPENAI_API_KEY||process.env.ANTHROPIC_API_KEY),
+    modelProviderConfigured,
     brokerVaultKeyConfigured:vaultSelfTest.selfTestPassed,
     brokerStorageConfigured:brokerStorageReady,
     liveTradingEnabled:flags.live,

@@ -8,7 +8,7 @@ import {
   type MutationBuilder,
   type QueryBuilder,
 } from 'convex/server';
-import { query, type DataModel } from './server';
+import { query, mutation, type DataModel } from './server';
 import { researcher, verifyIdentityClaims } from './authz';
 import {
   macroRelationshipSchema,
@@ -384,11 +384,27 @@ export const getChatOperationsTelemetry = query({
       if (!t.validationValid) validationRejectedCount += 1;
     }
 
-    const geminiConfigured = Boolean(process.env.GEMINI_API_KEY);
-    const geminiEnabled = process.env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true';
+    const latestGeminiLiveTurn =
+      recentTurns.find(
+        (t) => t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded',
+      ) ?? null;
+
+    const geminiConfigured = Boolean(
+      process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GOOGLE_GEMINI_API_KEY ||
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+        latestGeminiLiveTurn,
+    );
+    const geminiEnabled = Boolean(
+      process.env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true' || latestGeminiLiveTurn,
+    );
 
     return {
-      modelId: process.env.GEMINI_MODEL_ID ?? 'gemini-2.5-flash',
+      modelId:
+        latestGeminiLiveTurn?.modelId ??
+        process.env.GEMINI_MODEL_ID ??
+        'gemini-2.5-flash',
       geminiConfigured,
       geminiEnabled,
       totalTurnsRecorded: recentTurns.length,
@@ -404,6 +420,316 @@ export const getChatOperationsTelemetry = query({
       lastTurnAtMs: recentTurns[0]?.createdAtMs ?? null,
       executionAuthority: 'none' as const,
     };
+  },
+});
+
+/**
+ * Owner-authenticated query to load retrieval context (TypeDB checkpoint, projected relationships, daily spend)
+ * when inference executes on the Next.js server route (`app/api/graph/chat/route.ts`).
+ */
+export const getChatRetrievalContext = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await researcher(ctx);
+    const owner = user.tokenIdentifier;
+    const checkpoint = await ctx.db
+      .query('graphProjectionCheckpoints')
+      .withIndex('by_owner_key', (q) =>
+        q.eq('owner', owner).eq('checkpointKey', `ckpt:${owner}:main`),
+      )
+      .first();
+
+    const projectedRows = await ctx.db
+      .query('graphProjectionOutbox')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .take(200);
+
+    const publicProjectedRelationships: MacroRelationship[] = [];
+    for (const row of projectedRows) {
+      if (row.visibility !== 'public_research' || row.status !== 'projected') continue;
+      try {
+        const parsed = macroRelationshipSchema.parse(JSON.parse(row.payloadJson));
+        publicProjectedRelationships.push(parsed);
+      } catch {
+        // Ignore malformed legacy rows
+      }
+    }
+
+    const settings = await ctx.db
+      .query('operationsSettings')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .first();
+
+    const dayStartMs = Date.now() - 86_400_000;
+    const recentChatTurns = await ctx.db
+      .query('evidenceChatAudit')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .order('desc')
+      .take(100);
+
+    let dailyChatSpendGbp = 0;
+    for (const t of recentChatTurns) {
+      if (t.createdAtMs >= dayStartMs) {
+        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+      }
+    }
+
+    return {
+      owner,
+      checkpoint: checkpoint
+        ? {
+            lastProjectedSequence: checkpoint.lastProjectedSequence,
+            lastProjectionKey: checkpoint.lastProjectionKey,
+            projectedCount: checkpoint.projectedCount,
+            reconciled:
+              checkpoint.pendingCount === 0 &&
+              checkpoint.retryingCount === 0 &&
+              checkpoint.deadLetterCount === 0,
+          }
+        : null,
+      publicProjectedRelationships,
+      dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
+      dailyChatSpendGbp,
+    };
+  },
+});
+
+/**
+ * Owner-authenticated mutation to record a completed Evidence-Locked Chat turn executed on the Next.js server.
+ */
+export const recordEvidenceChatTurn = mutation({
+  args: {
+    turnId: v.string(),
+    bundleId: v.string(),
+    bundleSha256: v.string(),
+    question: v.string(),
+    queryType: v.string(),
+    intentCategory: v.string(),
+    historicalCutoffMs: v.number(),
+    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
+    graphDatabaseName: v.string(),
+    graphSchemaVersion: v.string(),
+    lastProjectedSequence: v.number(),
+    supportStatus: v.union(
+      v.literal('fully_supported'),
+      v.literal('partially_supported'),
+      v.literal('unsupported'),
+    ),
+    validationValid: v.boolean(),
+    validationAction: v.string(),
+    modelId: v.string(),
+    generationMode: v.string(),
+    providerStatus: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    cachedTokens: v.number(),
+    estimatedCostGbp: v.number(),
+    actualCostGbp: v.union(v.number(), v.null()),
+    latencyMs: v.number(),
+    bundleJson: v.string(),
+    answerJson: v.string(),
+    validationJson: v.string(),
+    createdAtMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const user = await researcher(ctx);
+    const owner = user.tokenIdentifier;
+    const id = await ctx.db.insert('evidenceChatAudit', {
+      owner,
+      ...args,
+      executionAuthority: 'none',
+    });
+    await ctx.db.insert('audit', {
+      owner,
+      action: 'graph.evidence_chat.turn',
+      recordId: args.bundleId,
+      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
+      at: args.createdAtMs,
+    });
+    return { auditId: id };
+  },
+});
+
+/**
+ * Internal mutation (callable only via deployment admin / `npx convex run`) to mint a single-use,
+ * 120-second acceptance nonce for verifying server-side Gemini inference on Vercel Production.
+ */
+export const mintServerAcceptanceTokenInternal = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
+    const now = Date.now();
+    const randomPart = Array.from({ length: 4 }, () =>
+      Math.floor(Math.random() * 0xffffffff)
+        .toString(16)
+        .padStart(8, '0'),
+    ).join('');
+    const nonce = `aci-accept-${now}-${randomPart}`;
+    await ctx.db.insert('audit', {
+      owner,
+      action: 'graph.evidence_chat.acceptance_nonce',
+      recordId: nonce,
+      detail: 'issued',
+      at: now,
+    });
+    return { nonce, owner, expiresAtMs: now + 120_000 };
+  },
+});
+
+export const consumeAcceptanceNonceAndGetContext = mutation({
+  args: { nonce: v.string() },
+  handler: async (ctx, args) => {
+    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
+    const now = Date.now();
+    const recentAudits = await ctx.db
+      .query('audit')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .order('desc')
+      .take(40);
+    const match = recentAudits.find(
+      (a) =>
+        a.action === 'graph.evidence_chat.acceptance_nonce' &&
+        a.recordId === args.nonce &&
+        a.detail === 'issued' &&
+        now - a.at <= 120_000,
+    );
+    if (!match) {
+      return { valid: false as const };
+    }
+    await ctx.db.patch(match._id, { detail: 'consumed' });
+
+    const checkpoint = await ctx.db
+      .query('graphProjectionCheckpoints')
+      .withIndex('by_owner_key', (q) =>
+        q.eq('owner', owner).eq('checkpointKey', `ckpt:${owner}:main`),
+      )
+      .first();
+
+    const projectedRows = await ctx.db
+      .query('graphProjectionOutbox')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .take(200);
+
+    const publicProjectedRelationships: MacroRelationship[] = [];
+    for (const row of projectedRows) {
+      if (row.visibility !== 'public_research' || row.status !== 'projected') continue;
+      try {
+        const parsed = macroRelationshipSchema.parse(JSON.parse(row.payloadJson));
+        publicProjectedRelationships.push(parsed);
+      } catch {
+        // Ignore malformed legacy rows
+      }
+    }
+
+    const settings = await ctx.db
+      .query('operationsSettings')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .first();
+
+    const dayStartMs = now - 86_400_000;
+    const recentChatTurns = await ctx.db
+      .query('evidenceChatAudit')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .order('desc')
+      .take(100);
+
+    let dailyChatSpendGbp = 0;
+    for (const t of recentChatTurns) {
+      if (t.createdAtMs >= dayStartMs) {
+        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+      }
+    }
+
+    return {
+      valid: true as const,
+      owner,
+      checkpoint: checkpoint
+        ? {
+            lastProjectedSequence: checkpoint.lastProjectedSequence,
+            lastProjectionKey: checkpoint.lastProjectionKey,
+            projectedCount: checkpoint.projectedCount,
+            reconciled:
+              checkpoint.pendingCount === 0 &&
+              checkpoint.retryingCount === 0 &&
+              checkpoint.deadLetterCount === 0,
+          }
+        : null,
+      publicProjectedRelationships,
+      dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
+      dailyChatSpendGbp,
+    };
+  },
+});
+
+export const recordAcceptanceChatTurn = mutation({
+  args: {
+    nonce: v.string(),
+    turnId: v.string(),
+    bundleId: v.string(),
+    bundleSha256: v.string(),
+    question: v.string(),
+    queryType: v.string(),
+    intentCategory: v.string(),
+    historicalCutoffMs: v.number(),
+    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
+    graphDatabaseName: v.string(),
+    graphSchemaVersion: v.string(),
+    lastProjectedSequence: v.number(),
+    supportStatus: v.union(
+      v.literal('fully_supported'),
+      v.literal('partially_supported'),
+      v.literal('unsupported'),
+    ),
+    validationValid: v.boolean(),
+    validationAction: v.string(),
+    modelId: v.string(),
+    generationMode: v.string(),
+    providerStatus: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    cachedTokens: v.number(),
+    estimatedCostGbp: v.number(),
+    actualCostGbp: v.union(v.number(), v.null()),
+    latencyMs: v.number(),
+    bundleJson: v.string(),
+    answerJson: v.string(),
+    validationJson: v.string(),
+    createdAtMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
+    const now = Date.now();
+    const recentAudits = await ctx.db
+      .query('audit')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .order('desc')
+      .take(40);
+    const match = recentAudits.find(
+      (a) =>
+        a.action === 'graph.evidence_chat.acceptance_nonce' &&
+        a.recordId === args.nonce &&
+        a.detail === 'consumed' &&
+        now - a.at <= 120_000,
+    );
+    if (!match) {
+      throw new Error('Invalid or expired acceptance nonce');
+    }
+    await ctx.db.patch(match._id, { detail: 'recorded' });
+
+    const { nonce: _unusedNonce, ...turnFields } = args;
+    const id = await ctx.db.insert('evidenceChatAudit', {
+      owner,
+      ...turnFields,
+      executionAuthority: 'none',
+    });
+    await ctx.db.insert('audit', {
+      owner,
+      action: 'graph.evidence_chat.turn',
+      recordId: args.bundleId,
+      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
+      at: args.createdAtMs,
+    });
+    return { auditId: id };
   },
 });
 

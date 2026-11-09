@@ -82,6 +82,7 @@ export function sanitiseProviderError(error: unknown, apiKey?: string): string {
 export interface GeminiAvailabilityStatus {
   enabled: boolean;
   apiKeyConfigured: boolean;
+  detectedKeyEnvVar?: string | null;
   modelId: string;
   modelAllowlisted: boolean;
   endpointVerified: boolean;
@@ -93,6 +94,27 @@ export interface GeminiAvailabilityStatus {
   detail: string;
 }
 
+const GEMINI_KEY_ENV_CANDIDATES = [
+  'GEMINI_API_KEY',
+  'GOOGLE_GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'GOOGLE_GENAI_API_KEY',
+  'NEXT_PUBLIC_GEMINI_API_KEY',
+] as const;
+
+export function resolveGeminiApiKey(
+  env: Record<string, string | undefined> = process.env,
+): { apiKey: string | undefined; envVarName: string | null } {
+  for (const name of GEMINI_KEY_ENV_CANDIDATES) {
+    const val = env[name]?.trim();
+    if (val && val.length > 0) {
+      return { apiKey: val, envVarName: name };
+    }
+  }
+  return { apiKey: undefined, envVarName: null };
+}
+
 export async function checkGeminiProviderAvailability(options?: {
   env?: Record<string, string | undefined>;
   verifyEndpoint?: boolean;
@@ -100,8 +122,12 @@ export async function checkGeminiProviderAvailability(options?: {
 }): Promise<GeminiAvailabilityStatus> {
   const env = options?.env ?? process.env;
   const startMs = Date.now();
-  const apiKey = env.GEMINI_API_KEY?.trim();
-  const enabledFlag = env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true';
+  const { apiKey, envVarName } = resolveGeminiApiKey(env);
+  const enabledFlag =
+    env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true' ||
+    (options?.env === undefined &&
+      Boolean(apiKey) &&
+      env.EVIDENCE_CHAT_GEMINI_ENABLED !== 'false');
   const requestedModel = env.GEMINI_MODEL_ID?.trim() || PINNED_GEMINI_FLASH_MODEL_ID;
   const modelAllowlisted = (ALLOWLISTED_GEMINI_MODELS as readonly string[]).includes(
     requestedModel,
@@ -112,6 +138,7 @@ export async function checkGeminiProviderAvailability(options?: {
     return {
       enabled: false,
       apiKeyConfigured: false,
+      detectedKeyEnvVar: null,
       modelId,
       modelAllowlisted,
       endpointVerified: false,
@@ -128,6 +155,7 @@ export async function checkGeminiProviderAvailability(options?: {
     return {
       enabled: false,
       apiKeyConfigured: true,
+      detectedKeyEnvVar: envVarName,
       modelId,
       modelAllowlisted,
       endpointVerified: false,
@@ -144,6 +172,7 @@ export async function checkGeminiProviderAvailability(options?: {
     return {
       enabled: true,
       apiKeyConfigured: true,
+      detectedKeyEnvVar: envVarName,
       modelId,
       modelAllowlisted,
       endpointVerified: false,
@@ -168,6 +197,7 @@ export async function checkGeminiProviderAvailability(options?: {
     return {
       enabled: true,
       apiKeyConfigured: true,
+      detectedKeyEnvVar: envVarName,
       modelId,
       modelAllowlisted,
       endpointVerified: true,
@@ -182,6 +212,7 @@ export async function checkGeminiProviderAvailability(options?: {
     return {
       enabled: true,
       apiKeyConfigured: true,
+      detectedKeyEnvVar: envVarName,
       modelId,
       modelAllowlisted,
       endpointVerified: false,
@@ -295,11 +326,15 @@ You must obey these 10 absolute system constraints without exception:
 3. Never introduce unsupported facts from model pre-training or external knowledge.
 4. Never use external browsing or undocumented sources.
 5. Clearly distinguish every supporting claim as 'source_fact', 'deterministic_arithmetic', 'modelled_scenario', 'reported_unverified', or 'interpretation'.
-6. Never invent financial commitments, dates, prices, probabilities, or relationships. Every quantitativeValue you emit must match a number present in the supplied bundle. When citing compute commitments, use the deduplicated commitment ledger ($895.4B parent envelope) and never add child sub-commitments ($44.6B Nscale Monarch) on top.
-7. Explicitly abstain (set supportStatus='unsupported' and populate abstentionReason) when the supplied bundle does not contain sufficient evidence to answer the question.
-8. Identify conflicting claims (e.g., cancelled Loughton v1 vs v2, or reported journalism vs primary filings) and evidence gaps in contradictoryEvidence and missingInformation.
+6. Never invent financial commitments, dates, prices, probabilities, or relationships:
+   - Every supportingClaim MUST include at least one valid docId from bundle.sources (or claimId from bundle.quantitativeClaims) in evidenceIds, and only valid relationshipId values from bundle.relationships in relationshipIds.
+   - If you populate quantitativeValue on a supportingClaim, it MUST equal the exact principalAmount, capacityMw, or quantitativeValue of the specific relationship/claim/scenario cited in that claim (or set quantitativeValue=null if the claim synthesises multiple figures).
+   - Never cite any date after bundle.historicalCutoffIso in periodOrAsOf.
+   - When citing compute commitments, use bundle.commitmentLedger.deduplicatedComputeCommitmentsUsd ($895.4B parent envelope) and never add child sub-commitments ($44.6B Nscale Monarch) on top as a naive $940.0B total.
+7. Explicitly abstain (set supportStatus='unsupported', supportingClaims=[], contradictoryEvidence=[], and populate abstentionReason with a clear explanation) whenever the supplied bundle does not contain sufficient evidence to answer the question or when bundle.relationships is empty.
+8. Identify conflicting claims (e.g., cancelled Loughton v1 vs v2, or reported journalism vs primary filings) in contradictoryEvidence (each item MUST include at least one valid docId from bundle.sources in evidenceIds) and evidence gaps in missingInformation.
 9. Distinguish historical facts from modelled macroeconomic scenarios (e.g., Central Bank of Ireland and Irish Dept of Finance equity-shock scenarios).
-10. Never propose, recommend, or execute a brokerage order. You hold executionAuthority='none'.`;
+10. Never propose, recommend, or execute a brokerage order. You hold executionAuthority='none'. Keep shortAnswer under 700 characters, executiveTldr to 3-4 bullets under 320 characters each, and provide 3-4 suggestedFollowUpQuestions.`;
 
 /**
  * Deterministic closed-evidence synthesiser for verified evidence-bundle answers.
@@ -945,8 +980,12 @@ export async function generateAndValidateEvidenceLockedAnswer(
   }
 
   // 5. Explicit deterministic synthesis mode (used when `mode === 'deterministic_evidence_synthesis'`)
-  const apiKey = env.GEMINI_API_KEY?.trim();
-  const liveEnabled = env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true';
+  const { apiKey } = resolveGeminiApiKey(env);
+  const liveEnabled =
+    env.EVIDENCE_CHAT_GEMINI_ENABLED === 'true' ||
+    (options.env === undefined &&
+      Boolean(apiKey) &&
+      env.EVIDENCE_CHAT_GEMINI_ENABLED !== 'false');
 
   if (options.mode === 'deterministic_evidence_synthesis') {
     const candidate = synthesizeDeterministicEvidenceAnswer(bundle);

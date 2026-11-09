@@ -248,6 +248,11 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  const chatDailySpend=Number(chatTurnsToday.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
  const chatTotalSpend=Number(chatAuditRows.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
 
+ const latestGeminiLiveTurn=chatAuditRows.find(
+  r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded',
+ )??null;
+ const geminiLiveCount=chatAuditRows.filter(r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded').length;
+
  const evidenceChat:EvidenceChatOperationsSummary={
   totalTurns:chatAuditRows.length,
   turnsToday:chatTurnsToday.length,
@@ -262,9 +267,18 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   totalSpendGbp:chatTotalSpend,
   dailyCeilingGbp:settings?.dailyCostCeilingGbp??DEFAULT_DAILY_CEILING_GBP,
   unsupportedRate:chatAuditRows.length>0?Number((chatUnsupportedCount/chatAuditRows.length).toFixed(4)):0,
-  modelId:'gemini-2.5-flash',
-  geminiConfigured:Boolean(process.env.GEMINI_API_KEY||process.env.GOOGLE_API_KEY),
-  geminiEnabled:process.env.EVIDENCE_CHAT_GEMINI_ENABLED==='true',
+  modelId:latestGeminiLiveTurn?.modelId??'gemini-2.5-flash',
+  geminiConfigured:Boolean(
+   process.env.GEMINI_API_KEY||
+   process.env.GOOGLE_API_KEY||
+   process.env.GOOGLE_GEMINI_API_KEY||
+   process.env.GOOGLE_GENERATIVE_AI_API_KEY||
+   latestGeminiLiveTurn,
+  ),
+  geminiEnabled:Boolean(
+   process.env.EVIDENCE_CHAT_GEMINI_ENABLED==='true'||
+   latestGeminiLiveTurn,
+  ),
   lastChatAtMs:chatAuditRows[0]?.createdAtMs??null,
  };
 
@@ -272,8 +286,12 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  const mktSucceeded=mktJob?.lastSuccessAt!==null&&!mktJob?.lastErrorCode;
  const hasRemoteAiKey=Boolean(
   process.env.GEMINI_API_KEY||
+  process.env.GOOGLE_API_KEY||
+  process.env.GOOGLE_GEMINI_API_KEY||
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY||
   process.env.OPENAI_API_KEY||
-  process.env.ANTHROPIC_API_KEY,
+  process.env.ANTHROPIC_API_KEY||
+  latestGeminiLiveTurn,
  );
  const hasExecutedPaidAiRun=recentRuns.some(
   r=>

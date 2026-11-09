@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { z, ZodError } from 'zod';
+import type { MacroGraphDataset, MacroRelationship } from '../../../../lib/graph/contracts';
 import {
   SUGGESTED_STARTER_QUESTIONS,
   temporalBasisSchema,
@@ -11,7 +12,9 @@ import { retrieveClosedEvidenceBundle } from '../../../../lib/graph/evidence-ret
 import {
   checkGeminiProviderAvailability,
   generateAndValidateEvidenceLockedAnswer,
+  resolveGeminiApiKey,
 } from '../../../../lib/graph/gemini-provider-adapter';
+import { loadInitialAcceptanceDataset } from '../../../../lib/graph/query-gateway';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,6 +68,21 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
 }
 
 export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  if (url.searchParams.get('statusOnly') === '1') {
+    const providerStatus = await checkGeminiProviderAvailability({
+      verifyEndpoint: true,
+      timeoutMs: 6_000,
+    });
+    return NextResponse.json(
+      {
+        providerStatus,
+        executionAuthority: 'none',
+      },
+      { status: 200, headers: NO_STORE_HEADERS },
+    );
+  }
+
   const caller = await resolveAuthenticatedCaller(req);
   if (!caller) {
     return NextResponse.json(
@@ -76,8 +94,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const shouldVerifyEndpoint = process.env.NODE_ENV !== 'test';
   const providerStatus = await checkGeminiProviderAvailability({
-    verifyEndpoint: false,
+    verifyEndpoint: shouldVerifyEndpoint,
+    timeoutMs: 6_000,
   });
 
   let history: unknown[] = [];
@@ -103,8 +123,42 @@ export async function GET(req: NextRequest) {
   );
 }
 
+interface RetrievalContextData {
+  owner?: string;
+  checkpoint: {
+    lastProjectedSequence: number;
+    lastProjectionKey: string | null;
+    projectedCount: number;
+    reconciled: boolean;
+  } | null;
+  publicProjectedRelationships: MacroRelationship[];
+  dailyCostCeilingGbp: number;
+  dailyChatSpendGbp: number;
+}
+
 export async function POST(req: NextRequest) {
-  const caller = await resolveAuthenticatedCaller(req);
+  const acceptanceNonce = req.headers.get('x-aci-acceptance-nonce')?.trim() || null;
+  let caller = await resolveAuthenticatedCaller(req);
+  let acceptanceCtx: RetrievalContextData | null = null;
+
+  if (!caller && acceptanceNonce && process.env.NEXT_PUBLIC_CONVEX_URL) {
+    try {
+      const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+      const consumeFn = makeFunctionReference<'mutation'>(
+        'evidenceChat:consumeAcceptanceNonceAndGetContext',
+      );
+      const res = (await client.mutation(consumeFn, {
+        nonce: acceptanceNonce,
+      })) as ({ valid: false } | ({ valid: true; owner: string } & RetrievalContextData));
+      if (res && res.valid) {
+        caller = { callerId: res.owner, convexToken: null };
+        acceptanceCtx = res;
+      }
+    } catch {
+      caller = null;
+    }
+  }
+
   if (!caller) {
     return NextResponse.json(
       {
@@ -118,10 +172,10 @@ export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.json();
     const parsed = chatRequestSchema.parse(rawBody);
+    const serverHasGeminiKey = Boolean(resolveGeminiApiKey(process.env).apiKey);
 
-    // If caller has a live Clerk->Convex JWT, invoke the Convex Action so the immutable
-    // EvidenceBundleV1, Answer, and Validation Report are persisted in `evidenceChatAudit`.
-    if (caller.convexToken && process.env.NEXT_PUBLIC_CONVEX_URL) {
+    // If the Next.js server does NOT have GEMINI_API_KEY configured locally, try Convex action first
+    if (!serverHasGeminiKey && caller.convexToken && process.env.NEXT_PUBLIC_CONVEX_URL) {
       try {
         const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
         client.setAuth(caller.convexToken);
@@ -143,27 +197,127 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json(result, { status: 200, headers: NO_STORE_HEADERS });
       } catch {
-        // Fall through to direct server-side execution if Convex action transport is unavailable
+        // Fall through to direct server-side execution
       }
+    }
+
+    // Load retrieval context from Convex if authenticated via Clerk JWT or acceptance nonce
+    let retrievalCtx: RetrievalContextData | null = acceptanceCtx;
+    if (!retrievalCtx && caller.convexToken && process.env.NEXT_PUBLIC_CONVEX_URL) {
+      try {
+        const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+        client.setAuth(caller.convexToken);
+        const ctxFn = makeFunctionReference<'query'>(
+          'evidenceChat:getChatRetrievalContext',
+        );
+        retrievalCtx = (await client.query(ctxFn, {})) as RetrievalContextData;
+      } catch {
+        retrievalCtx = null;
+      }
+    }
+
+    let mergedDataset: MacroGraphDataset | undefined;
+    if (retrievalCtx && retrievalCtx.publicProjectedRelationships.length > 0) {
+      const baseDataset = loadInitialAcceptanceDataset();
+      const mergedRelMap = new Map<string, MacroRelationship>();
+      for (const r of baseDataset.relationships) {
+        mergedRelMap.set(r.relationshipId, r);
+      }
+      for (const r of retrievalCtx.publicProjectedRelationships) {
+        mergedRelMap.set(r.relationshipId, r);
+      }
+      mergedDataset = {
+        ...baseDataset,
+        relationships: [...mergedRelMap.values()],
+      };
     }
 
     const bundle = await retrieveClosedEvidenceBundle({
       question: parsed.question,
-      requesterId: caller.callerId,
+      requesterId: retrievalCtx?.owner ?? caller.callerId,
       historicalCutoffMs: parsed.historicalCutoffMs,
       temporalBasis: parsed.temporalBasis ?? 'receipt',
+      ...(mergedDataset ? { dataset: mergedDataset } : {}),
+      ...(retrievalCtx?.checkpoint
+        ? { projectionCheckpoint: retrievalCtx.checkpoint }
+        : {}),
       graphDatabaseName: process.env.TYPEDB_DATABASE ?? 'aci_macro_intelligence_prod',
       preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
     });
 
     const turnResult = await generateAndValidateEvidenceLockedAnswer({
       bundle,
-      callerId: caller.callerId,
+      callerId: retrievalCtx?.owner ?? caller.callerId,
       mode: parsed.mode ?? 'auto',
+      ...(retrievalCtx
+        ? {
+            dailySpentGbpSoFar: retrievalCtx.dailyChatSpendGbp,
+            dailyCostCeilingGbp: retrievalCtx.dailyCostCeilingGbp,
+          }
+        : {}),
       simulateProviderFailure: parsed.simulateProviderFailure ?? false,
     });
 
-    return NextResponse.json(turnResult, { status: 200, headers: NO_STORE_HEADERS });
+    // Persist audit record to Convex if Clerk JWT or single-use acceptance nonce is active
+    let auditId: string | null = null;
+    if (process.env.NEXT_PUBLIC_CONVEX_URL && (caller.convexToken || acceptanceNonce)) {
+      try {
+        const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+        const turnFields = {
+          turnId: turnResult.turnId,
+          bundleId: bundle.bundleId,
+          bundleSha256: bundle.bundleSha256,
+          question: bundle.question,
+          queryType: bundle.selectedQuery.queryType,
+          intentCategory: bundle.selectedQuery.intentCategory,
+          historicalCutoffMs: bundle.historicalCutoffMs,
+          temporalBasis: bundle.temporalBasis,
+          graphDatabaseName: bundle.graphDatabaseName,
+          graphSchemaVersion: bundle.graphSchemaVersion,
+          lastProjectedSequence: bundle.projectionCheckpoint.lastProjectedSequence,
+          supportStatus: turnResult.answer.supportStatus,
+          validationValid: turnResult.validation.valid,
+          validationAction: turnResult.validation.actionTaken,
+          modelId: turnResult.telemetry.modelId,
+          generationMode: turnResult.telemetry.generationMode,
+          providerStatus: turnResult.telemetry.providerStatus,
+          inputTokens: turnResult.telemetry.inputTokens,
+          outputTokens: turnResult.telemetry.outputTokens,
+          cachedTokens: turnResult.telemetry.cachedTokens,
+          estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
+          actualCostGbp: turnResult.telemetry.actualCostGbp,
+          latencyMs: turnResult.telemetry.latencyMs,
+          bundleJson: JSON.stringify(bundle),
+          answerJson: JSON.stringify(turnResult.answer),
+          validationJson: JSON.stringify(turnResult.validation),
+          createdAtMs: turnResult.createdAtMs,
+        };
+        if (caller.convexToken) {
+          client.setAuth(caller.convexToken);
+          const recFn = makeFunctionReference<'mutation'>(
+            'evidenceChat:recordEvidenceChatTurn',
+          );
+          const rec = (await client.mutation(recFn, turnFields)) as { auditId: string };
+          auditId = rec.auditId;
+        } else if (acceptanceNonce) {
+          const recFn = makeFunctionReference<'mutation'>(
+            'evidenceChat:recordAcceptanceChatTurn',
+          );
+          const rec = (await client.mutation(recFn, {
+            nonce: acceptanceNonce,
+            ...turnFields,
+          })) as { auditId: string };
+          auditId = rec.auditId;
+        }
+      } catch {
+        auditId = null;
+      }
+    }
+
+    return NextResponse.json(
+      auditId ? { ...turnResult, auditId } : turnResult,
+      { status: 200, headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     if (err instanceof ZodError) {
       return NextResponse.json(

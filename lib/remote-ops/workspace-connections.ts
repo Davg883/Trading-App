@@ -333,9 +333,13 @@ export function buildWorkspaceConnectionsReport(
   let modelStatus: WorkspaceConnectionStatus = 'Not configured';
   let modelEnv: WorkspaceConnectionEnvironment = 'Disabled';
   let modelVerifiedAt: number | null = null;
-  const dailyActual = health?.dailyCostGbp.actual ?? 0;
+  const chatTurns = health?.evidenceChat?.totalTurns ?? 0;
+  const dailyActual = Math.max(
+    health?.dailyCostGbp.actual ?? 0,
+    health?.evidenceChat?.dailySpendGbp ?? 0,
+  );
   const dailyCeiling = health?.dailyCostGbp.ceiling ?? 2;
-  const modelCheckpoint = `0 model calls · £${dailyActual.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling`;
+  const modelCheckpoint = `${chatTurns} model call${chatTurns === 1 ? '' : 's'} · £${dailyActual.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling`;
   let modelDetail =
     'No external LLM API key configured in Production. News discovery & morning briefing operate in deterministic SEC XBRL fallback mode.';
 

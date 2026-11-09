@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import ConnectedWorkspace from '../../integrations/connected-workspace';
 import { verifyBrokerVaultSelfTest } from '../../lib/brokers/vault';
+import {
+  checkGeminiProviderAvailability,
+  resolveGeminiApiKey,
+} from '../../lib/graph/gemini-provider-adapter';
 import { fetchLiveOperationsOverview } from '../../lib/remote-ops/server';
 import { buildWorkspaceConnectionsReport } from '../../lib/remote-ops/workspace-connections';
 
@@ -11,8 +15,34 @@ export default async function WorkspacePage() {
   const liveOps = await fetchLiveOperationsOverview();
   const vaultSelfTest = verifyBrokerVaultSelfTest();
   const vaultReady = vaultSelfTest.ready;
+  const hasGeminiKey = Boolean(resolveGeminiApiKey(process.env).apiKey);
+  const geminiStatus = hasGeminiKey
+    ? await checkGeminiProviderAvailability({ verifyEndpoint: true, timeoutMs: 5_000 })
+    : null;
+  const modelProviderConfigured = Boolean(
+    hasGeminiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
+  );
+  const reconciledLiveOps =
+    liveOps && geminiStatus?.status === 'connected'
+      ? {
+          ...liveOps,
+          health: {
+            ...liveOps.health,
+            environmentAudit: liveOps.health.environmentAudit?.map((svc) =>
+              svc.serviceId === 'remote_ai_models' && svc.status !== 'connected'
+                ? {
+                    ...svc,
+                    status: 'connected' as const,
+                    lastVerifiedAt: Date.now(),
+                    detail: geminiStatus.detail,
+                  }
+                : svc,
+            ),
+          },
+        }
+      : liveOps;
   const report = buildWorkspaceConnectionsReport({
-    liveOps,
+    liveOps: reconciledLiveOps,
     convexUrlConfigured: Boolean(process.env.NEXT_PUBLIC_CONVEX_URL),
     convexIsProduction: Boolean(process.env.NEXT_PUBLIC_CONVEX_URL?.includes('benevolent-magpie-921')),
     authenticationConfigured: configured,
@@ -21,7 +51,7 @@ export default async function WorkspacePage() {
     typedbConfigured: Boolean(process.env.TYPEDB_HTTP_ADDRESS && process.env.TYPEDB_DATABASE),
     typedbDatabase: process.env.TYPEDB_DATABASE ?? null,
     licensedMarketDataConfigured: Boolean(process.env.LICENSED_MARKET_DATA_API_KEY),
-    modelProviderConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY),
+    modelProviderConfigured,
     brokerVaultKeyConfigured: vaultReady,
     brokerStorageConfigured: Boolean(configured && vaultReady),
     liveTradingEnabled: process.env.LIVE_TRADING_ENABLED === 'true',
