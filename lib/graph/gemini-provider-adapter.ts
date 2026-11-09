@@ -68,7 +68,22 @@ export function computeGeminiCostGbp(inputTokens: number, outputTokens: number):
 }
 
 export function sanitiseProviderError(error: unknown, apiKey?: string): string {
-  const raw = error instanceof Error ? error.message : 'gemini_provider_unavailable';
+  let raw = error instanceof Error ? error.message : 'gemini_provider_unavailable';
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        error?: { code?: number; message?: string; status?: string };
+      };
+      if (parsed?.error?.message) {
+        const codePart = parsed.error.code ? `HTTP ${parsed.error.code}` : 'API Error';
+        const statusPart = parsed.error.status ? ` (${parsed.error.status})` : '';
+        raw = `${codePart}${statusPart}: ${parsed.error.message.trim()}`;
+      }
+    }
+  } catch {
+    // Keep raw message if not JSON
+  }
   let cleaned = raw
     .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_KEY]')
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')

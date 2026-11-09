@@ -16,11 +16,13 @@ try {
   await expect(page.getByTestId('evidence-chat-panel')).toBeVisible();
   await expect(page.getByTestId('chat-namespace-badge')).toContainText('public_research only');
   await expect(page.getByTestId('chat-broker-lock-badge')).toContainText('ZERO ACCESS');
+  await expect(page.getByTestId('chat-provider-readiness-badge')).toBeVisible();
 
   // 2. Click Starter Question 1 ("Which AI infrastructure investments share documented financial counterparties?")
   await page.getByTestId('starter-q-1').click();
   await expect(page.getByTestId('chat-turn-0')).toBeVisible({ timeout: 20000 });
   await expect(page.getByTestId('chat-support-status-0')).toContainText('FULLY SUPPORTED');
+  await expect(page.getByTestId('chat-synthesis-mode-0')).toBeVisible();
   await expect(page.getByTestId('chat-validator-badge-0')).toContainText('9/9 Checks Passed');
   await expect(page.getByTestId('chat-short-answer-0')).toContainText('Anthropic');
   await expect(page.getByTestId('chat-short-answer-0')).toContainText('Nscale');
@@ -44,6 +46,9 @@ try {
   await expect(page.getByTestId('chat-turn-1')).toBeVisible({ timeout: 20000 });
   await expect(page.getByTestId('chat-support-status-0')).toContainText(
     'NO SUPPORTING EVIDENCE (EXPLICIT ABSTENTION)',
+  );
+  await expect(page.getByTestId('chat-synthesis-mode-0')).toContainText(
+    'SYNTHESIS: EXPLICIT ABSTENTION',
   );
   await expect(page.getByTestId('chat-abstention-banner-0')).toBeVisible();
   await expect(page.getByTestId('chat-abstention-banner-0')).toContainText('2029 net income');

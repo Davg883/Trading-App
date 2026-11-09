@@ -49,11 +49,14 @@ export default async function Home(){
         };
       }
       if(svc.serviceId==="remote_ai_models"&&svc.status!=="connected"&&modelProviderConfigured){
+        const hasProviderErrors=(liveOps.health.evidenceChat?.providerErrorCount??0)>0;
         return {
           ...svc,
-          status:"connected" as const,
+          status:hasProviderErrors?"degraded" as const:"configured_not_tested" as const,
           lastVerifiedAt:Date.now(),
-          detail:"Google Gemini API key configured in Vercel Production server runtime (gemini-2.5-flash).",
+          detail:hasProviderErrors
+            ?"GEMINI_API_KEY configured & models/gemini-2.5-flash endpoint verified on Vercel Production, but live generateContent returned HTTP 402 (RESOURCE_EXHAUSTED: Google AI Studio prepayment credits depleted). Explicit safe abstention enforced."
+            :"Google Gemini API key configured in Vercel Production server runtime (gemini-2.5-flash); awaiting first verified live generateContent call.",
         };
       }
       return svc;

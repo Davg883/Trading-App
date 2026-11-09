@@ -348,6 +348,14 @@ export function buildWorkspaceConnectionsReport(
     modelEnv = 'Production';
     modelVerifiedAt = modelEnvEntry.lastVerifiedAt;
     modelDetail = modelEnvEntry.detail;
+  } else if (
+    modelEnvEntry?.status === 'degraded' ||
+    modelEnvEntry?.status === 'configured_not_tested'
+  ) {
+    modelStatus = 'Configured, not yet verified';
+    modelEnv = 'Production';
+    modelVerifiedAt = modelEnvEntry.lastVerifiedAt;
+    modelDetail = modelEnvEntry.detail;
   } else if (options.modelProviderConfigured) {
     modelStatus = 'Configured, not yet verified';
     modelEnv = 'Production';

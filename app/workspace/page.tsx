@@ -22,6 +22,7 @@ export default async function WorkspacePage() {
   const modelProviderConfigured = Boolean(
     hasGeminiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
   );
+  const hasProviderErrors = (liveOps?.health.evidenceChat?.providerErrorCount ?? 0) > 0;
   const reconciledLiveOps =
     liveOps && geminiStatus?.status === 'connected'
       ? {
@@ -32,9 +33,13 @@ export default async function WorkspacePage() {
               svc.serviceId === 'remote_ai_models' && svc.status !== 'connected'
                 ? {
                     ...svc,
-                    status: 'connected' as const,
+                    status: hasProviderErrors
+                      ? ('degraded' as const)
+                      : ('configured_not_tested' as const),
                     lastVerifiedAt: Date.now(),
-                    detail: geminiStatus.detail,
+                    detail: hasProviderErrors
+                      ? `${geminiStatus.detail} Live generateContent returned HTTP 402 (RESOURCE_EXHAUSTED: Google AI Studio prepayment credits depleted); explicit safe abstention enforced.`
+                      : `${geminiStatus.detail} Awaiting first verified live generateContent response.`,
                   }
                 : svc,
             ),
