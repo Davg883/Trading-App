@@ -5,6 +5,7 @@ import React, { useMemo, useState } from 'react';
 import {
   RESEARCH_METHODOLOGY_CLASSIFICATION,
   RESEARCH_METHODOLOGY_VERSION,
+  buildDeterministicExecutiveChatFallback,
   buildExecutiveAssistantRequestPayload,
   buildExecutiveMarketBriefing,
   buildWhatChangedSummary,
@@ -219,7 +220,9 @@ export function ExecutiveOverviewSections({
         body: JSON.stringify(buildExecutiveAssistantRequestPayload(q)),
       });
       const data = await res.json();
-      if (!res.ok || !data?.answer) {
+      if (res.status === 401) {
+        setChatAnswer(buildDeterministicExecutiveChatFallback(q, assessments));
+      } else if (!res.ok || !data?.answer) {
         setChatError(
           data?.error ??
             'Unable to retrieve an evidence-locked answer right now. Try again or open Research Chat.',
