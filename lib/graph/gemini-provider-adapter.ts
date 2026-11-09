@@ -1145,7 +1145,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? 24_000;
+  const timeoutMs = options.timeoutMs ?? 42_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
     ? [modelId, 'gemini-3.8-flash']
     : ['gemini-3.8-flash', 'gemini-3.8-flash'];
@@ -1234,7 +1234,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     `  "suggestedFollowUpQuestions": ["question 1", "question 2", "question 3"]`,
     `}`,
     `MANDATORY GROUNDING RULES:`,
-    `- Keep output compact and fast: include AT MOST 3 supportingClaims (each statement under 160 chars), AT MOST 1 contradictoryEvidence item, AT MOST 2 missingInformation items, and 3 executiveTldr bullets (each under 160 chars).`,
+    `- Keep output ultra-concise (total JSON under 900 characters): include AT MOST 2 supportingClaims (each statement under 140 chars), AT MOST 1 contradictoryEvidence item, AT MOST 1 missingInformation item, and 2 executiveTldr bullets (each under 140 chars).`,
     `- ALLOWED_EVIDENCE_IDS (every supportingClaim.evidenceIds and contradictoryEvidence.evidenceIds MUST only use IDs from this list): ${JSON.stringify(allowedEvidenceIds)}`,
     `- ALLOWED_RELATIONSHIP_IDS (every supportingClaim.relationshipIds, contradictoryEvidence.relationshipIds, and relevantRelationshipIds MUST only use IDs from this list): ${JSON.stringify(allowedRelationshipIds)}`,
     `- HISTORICAL_CUTOFF_DATE: ${cutoffDateOnly} (${bundle.temporalBasis} clock). Never cite any date after ${cutoffDateOnly} in periodOrAsOf.`,
@@ -1268,7 +1268,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
-            maxOutputTokens: 8192,
+            maxOutputTokens: 2048,
             ...(thinkingConfig ? { thinkingConfig } : {}),
             responseMimeType: 'application/json',
           },
@@ -1283,7 +1283,32 @@ export async function generateAndValidateEvidenceLockedAnswer(
         typeof (response as { responseId?: unknown }).responseId === 'string'
           ? (response as { responseId: string }).responseId
           : null;
-      const parsedModelJson = JSON.parse(rawText) as Record<string, unknown>;
+      let parsedModelJson: Record<string, unknown>;
+      try {
+        parsedModelJson = JSON.parse(rawText) as Record<string, unknown>;
+      } catch (parseErr) {
+        // Attempt deterministic tail-truncation recovery if maxOutputTokens cut off the final array/field
+        let repaired: Record<string, unknown> | null = null;
+        for (let cut = rawText.length - 1; cut > 80; cut -= 1) {
+          const ch = rawText[cut];
+          if (ch !== '}' && ch !== ']' && ch !== '"') continue;
+          const prefix = rawText.slice(0, cut + 1);
+          for (const suffix of ['}', ']}', '"}]}', ']}]}', 'null,"suggestedFollowUpQuestions":[]}']) {
+            try {
+              const candidate = JSON.parse(prefix + suffix) as Record<string, unknown>;
+              if (candidate && typeof candidate === 'object' && typeof candidate.shortAnswer === 'string') {
+                repaired = candidate;
+                break;
+              }
+            } catch {
+              // continue
+            }
+          }
+          if (repaired) break;
+        }
+        if (!repaired) throw parseErr;
+        parsedModelJson = repaired;
+      }
       const fallbackFollowUps = [...SUGGESTED_STARTER_QUESTIONS.slice(0, 3)];
       const rawFollowUps = Array.isArray(parsedModelJson.suggestedFollowUpQuestions)
         ? (parsedModelJson.suggestedFollowUpQuestions as unknown[])
@@ -1471,10 +1496,16 @@ export async function generateAndValidateEvidenceLockedAnswer(
         continue;
       }
       const isTransientOrRetired =
-        /503|UNAVAILABLE|429|timeout|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
+        /503|UNAVAILABLE|429|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
           msg,
         );
-      if (!isTransientOrRetired || attempt === candidateModels.length - 1) break;
+      if (
+        !isTransientOrRetired ||
+        attempt === candidateModels.length - 1 ||
+        Date.now() - startMs > 18_000
+      ) {
+        break;
+      }
       if (options.env === undefined) {
         await new Promise((r) => setTimeout(r, 400));
       }
