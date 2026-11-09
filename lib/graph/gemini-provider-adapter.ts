@@ -1127,7 +1127,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
   const ai = new GoogleGenAI({ apiKey });
-  const timeoutMs = options.timeoutMs ?? EVIDENCE_RETRIEVAL_LIMITS.maxRequestDurationMs;
+  const timeoutMs = options.timeoutMs ?? 28_000;
   const candidateModels = env.GEMINI_MODEL_ID?.trim()
     ? [modelId, ACTIVE_GEMINI_GENERATION_MODEL_ID]
     : [ACTIVE_GEMINI_GENERATION_MODEL_ID, modelId];
@@ -1138,7 +1138,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     await Promise.race([
       ai.models.get({ model: activeModelId }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('models_endpoint_timeout')), 5_000),
+        setTimeout(() => reject(new Error('models_endpoint_timeout')), 2_500),
       ),
     ]);
     endpointVerified = true;
@@ -1177,7 +1177,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
   ].join('\n');
 
   let lastError: unknown = null;
-  let useThinkingConfig = activeModelId.startsWith('gemini-2.5');
+  let useThinkingConfig = true;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await Promise.race([
@@ -1192,8 +1192,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
           config: {
             systemInstruction: EVIDENCE_LOCKED_SYSTEM_INSTRUCTION,
             temperature: 0.0,
-            maxOutputTokens: 8192,
-            ...(useThinkingConfig ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
+            maxOutputTokens: 3072,
+            ...(useThinkingConfig ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
             responseMimeType: 'application/json',
             responseSchema: GEMINI_RESPONSE_SCHEMA,
           },
@@ -1328,11 +1328,11 @@ export async function generateAndValidateEvidenceLockedAnswer(
         useThinkingConfig = false;
         continue;
       }
-      if (/thinking/i.test(msg) && useThinkingConfig) {
+      if (/thinking|budget|INVALID_ARGUMENT/i.test(msg) && useThinkingConfig) {
         useThinkingConfig = false;
         continue;
       }
-      const isTransient = /429|503|timeout|UNAVAILABLE/i.test(msg);
+      const isTransient = /503|UNAVAILABLE/i.test(msg);
       if (!isTransient || attempt === 2) break;
     }
   }

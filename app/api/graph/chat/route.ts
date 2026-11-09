@@ -18,7 +18,7 @@ import { loadInitialAcceptanceDataset } from '../../../../lib/graph/query-gatewa
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',

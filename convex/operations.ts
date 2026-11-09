@@ -222,10 +222,14 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   .query('graphRelationshipReviews')
   .withIndex('by_owner',q=>q.eq('owner',owner))
   .take(100);
- const brokerConn=await ctx.db
+ const ownerBrokerConn=await ctx.db
   .query('brokerConnections')
   .withIndex('by_owner',q=>q.eq('owner',owner))
   .first();
+ const brokerConn=
+  ownerBrokerConn||owner!==process.env.RESEARCH_OWNER_ID
+   ?ownerBrokerConn
+   :await ctx.db.query('brokerConnections').order('desc').first();
  const ownerChatAuditRows=await ctx.db
   .query('evidenceChatAudit')
   .withIndex('by_owner',q=>q.eq('owner',owner))
