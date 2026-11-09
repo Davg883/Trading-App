@@ -1144,7 +1144,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
   }
 
   // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
-  const timeoutMs = options.timeoutMs ?? 20_000;
+  const timeoutMs = options.timeoutMs ?? 42_000;
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
@@ -1558,13 +1558,13 @@ export async function generateAndValidateEvidenceLockedAnswer(
         continue;
       }
       const isTransientOrRetired =
-        /503|UNAVAILABLE|429|timeout|ABORT|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
+        /503|UNAVAILABLE|504|DEADLINE_EXCEEDED|429|timeout|ABORT|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
           msg,
         );
       if (
         !isTransientOrRetired ||
         attempt === candidateModels.length - 1 ||
-        Date.now() - startMs > 42_000
+        Date.now() - startMs > 50_000
       ) {
         break;
       }
