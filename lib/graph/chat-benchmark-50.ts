@@ -51,6 +51,8 @@ export interface BenchmarkQuestionResult {
 export interface ThirtySevenSecondLatencyInvestigation {
   incidentTurnId: string;
   providerRequestId: string;
+  /** MVP hardening WP6: how these values were obtained. */
+  telemetryProvenance: { kind: 'hand_entered_constant'; verified: false; note: string };
   observedWallClockLatencyMs: number;
   modelUltimatelyUsed: string;
   tokenAccounting: {
@@ -903,6 +905,11 @@ export function investigateThirtySevenSecondGeminiResponse(): ThirtySevenSecondL
   return {
     incidentTurnId: 'chat-7a521cb1f5-1794260270531',
     providerRequestId: 'Tj3yaoqeGa6xuMYPoMuKoAk',
+    telemetryProvenance: {
+      kind: 'hand_entered_constant',
+      verified: false,
+      note: 'Hand-entered constant. The same request id is recorded in lib/research-ratings/thesis-monitor.ts with different token counts (6,983 / 772 / 0) and cost; the figures are inconsistent and unverified.',
+    },
     observedWallClockLatencyMs: 37393,
     modelUltimatelyUsed: 'gemini-3.5-flash',
     tokenAccounting: {

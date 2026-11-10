@@ -26,7 +26,7 @@
     "test:browser:command-centre:signed-in": "node scripts/command-centre-signed-in-check.mjs",
     "lint:baseline": "node scripts/eslint-baseline-check.mjs",
     "test:integration:typedb": "ACI_LIVE_TYPEDB_TESTS=1 vitest run tests/typedb-graph.test.ts tests/evidence-locked-chat.test.ts",
-    "eval:live": "node scripts/run-live-evaluation.mjs"
+    "eval:live": "vitest run tests/live/live-evaluation.test.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.22",

@@ -291,31 +291,23 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
   });
 
   describe('Section D: Genuine Gemini 5-Question Evaluation', () => {
-    it('7. executes the 5-question portfolio research suite and verifies ground-truth conformance & telemetry separation', async () => {
+    // Corrected in MVP hardening WP6. The previous assertions (100 % conformance, placeholder bundle hashes,
+    // token counts >= 500) encoded the defect: with no provider the runner graded the expected answer against
+    // itself. Without a provider nothing may be reported as evaluated, passed or live.
+    it('7. without a configured provider the 5-question suite reports nothing as evaluated, passed or live', async () => {
       expect(FIVE_PORTFOLIO_RESEARCH_QUESTIONS.length).toBe(5);
 
-      const summary = await runFiveQuestionPortfolioEvaluation();
+      const summary = await runFiveQuestionPortfolioEvaluation({ env: {} });
       expect(summary.totalQuestions).toBe(5);
-      expect(summary.conformingAnswersCount).toBe(5);
-      expect(summary.conformanceRatePct).toBe(100.0);
-      expect(summary.citationValidityRatePct).toBe(100.0);
-
-      // Verify each turn captures complete telemetry and meets independent ground truth
+      expect(summary.byMode).toEqual({ live_provider: 0, provider_failed: 0, unconfigured: 5 });
+      expect(summary.livePassRatePct).toBeNull();
+      expect(summary.totalReportedCostGbp).toBe(0);
       for (const turn of summary.results) {
-        expect(turn.allSubstringsPresent).toBe(true);
-        expect(turn.citationValidityPassed).toBe(true);
-        expect(turn.independentAnswerReview).toBe('conforms_to_independent_ground_truth');
-        expect(turn.bundleSha256).toMatch(/^bundle-sha256-g82-gate-0[1-5]$/);
-        expect(turn.inputTokens).toBeGreaterThanOrEqual(500);
-        expect(turn.outputTokens).toBeGreaterThanOrEqual(100);
-        expect(turn.totalTokens).toBe(turn.inputTokens + turn.outputTokens);
-        expect(turn.latencyMs).toBeGreaterThanOrEqual(1);
-        expect(turn.citedSources.length).toBeGreaterThanOrEqual(1);
-
-        // Verify generation mode is strictly labelled
-        expect(['gemini_live', 'deterministic_evidence_synthesis']).toContain(
-          turn.generationMode,
-        );
+        expect(turn.outcome).toBe('not_evaluated');
+        expect(turn.generatedAnswer).toBeNull();
+        expect(turn.bundleSha256).toBeNull();
+        expect(turn.inputTokens).toBeNull();
+        expect(turn.providerResponseId).toBeNull();
       }
     });
   });

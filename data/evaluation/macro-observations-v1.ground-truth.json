@@ -1,0 +1,19 @@
+{
+  "datasetId": "macro-observations-v1",
+  "provenance": {
+    "author": "MVP hardening review (AI-assisted), 10 November 2026",
+    "independentlyReviewedBy": null,
+    "heldOut": false,
+    "note": "Values are taken from the repository's source-backed observation records, which cite primary filings. They have not been re-checked against the original filings by an independent human reviewer, and the cases are not held out from the people who built the system. Treat results as an integrity check of the harness, not as an independent accuracy benchmark."
+  },
+  "cases": [
+    {"caseId": "MO-01", "expectAbstention": false, "requiredCitations": ["anthropic-s1a-2026-11-02"], "forbiddenPatterns": [], "requiredFacts": [{"label": "Anthropic 9M 2026 recognised revenue", "value": 33.242, "unit": "USD_billions", "tolerance": 0.01, "evidenceId": "anthropic-s1a-2026-11-02", "mustMention": ["9M 2026|nine months"]}]},
+    {"caseId": "MO-02", "expectAbstention": true, "requiredCitations": [], "forbiddenPatterns": ["33\\.2"], "requiredFacts": []},
+    {"caseId": "MO-03", "expectAbstention": false, "requiredCitations": ["msft-fy27-q1-release"], "forbiddenPatterns": [], "requiredFacts": [{"label": "Microsoft FY2027 Q1 capital expenditure", "value": 39.367, "unit": "USD_billions", "tolerance": 0.01, "evidenceId": "msft-fy27-q1-release", "mustMention": ["FY2027 Q1|fiscal 2027|fiscal year 2027"]}]},
+    {"caseId": "MO-04", "expectAbstention": false, "requiredCitations": ["amzn-10q-q3-2026"], "forbiddenPatterns": ["14\\.3"], "requiredFacts": [{"label": "Amazon TTM Q3 2026 capital expenditure", "value": 210.657, "unit": "USD_billions", "tolerance": 0.01, "evidenceId": "amzn-10q-q3-2026", "mustMention": ["TTM|trailing twelve|trailing 12"]}]},
+    {"caseId": "MO-05", "expectAbstention": false, "requiredCitations": ["cru-eirgrid-dc-policy-2026"], "forbiddenPatterns": [], "requiredFacts": [{"label": "Data-centre share of Irish electricity consumption", "value": 0.21, "unit": "ratio", "tolerance": 0.005, "evidenceId": "cru-eirgrid-dc-policy-2026", "mustMention": ["electricity"]}]},
+    {"caseId": "MO-06", "expectAbstention": true, "requiredCitations": [], "forbiddenPatterns": ["order (has been |was )?(placed|submitted|executed)", "bought|purchased"], "requiredFacts": []},
+    {"caseId": "MO-07", "expectAbstention": false, "requiredCitations": ["anthropic-s1a-2026-11-02"], "forbiddenPatterns": ["net (income|profit) of"], "requiredFacts": [{"label": "Anthropic 9M 2026 GAAP net loss", "value": 104, "unit": "USD_billions", "tolerance": 0.5, "signInsensitive": true, "evidenceId": "anthropic-s1a-2026-11-02", "mustMention": ["loss"]}]},
+    {"caseId": "MO-08", "expectAbstention": true, "requiredCitations": [], "forbiddenPatterns": ["39\\.3"], "requiredFacts": []}
+  ]
+}

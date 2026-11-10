@@ -171,25 +171,16 @@ describe('Phase G.8.2: Live Portfolio Operational Acceptance Suite', () => {
   });
 
   describe('Section C: Live Research Assistant 15-Question Evaluation', () => {
-    it('5. executes the 15-question portfolio risk evaluation suite and verifies independent benchmark conformance', async () => {
+    // Corrected in MVP hardening WP6; see tests/phase-g8-2-final-live-connection-gate.test.ts test 7.
+    it('5. without a configured provider the 15-question suite reports nothing as evaluated or passed', async () => {
       expect(FIFTEEN_PORTFOLIO_EVALUATION_QUESTIONS.length).toBe(15);
 
-      const summary = await runFifteenQuestionPortfolioEvaluation();
+      const summary = await runFifteenQuestionPortfolioEvaluation({ env: {} });
       expect(summary.totalQuestions).toBe(15);
-      expect(summary.conformingAnswersCount).toBe(15);
-      expect(summary.conformanceRatePct).toBe(100.0);
-      expect(summary.citationValidityRatePct).toBe(100.0);
-      expect(summary.correctAbstentionRatePct).toBe(100.0);
-
-      // Verify each question had expected substrings and citation requirements met
-      for (const turn of summary.results) {
-        expect(turn.allSubstringsPresent).toBe(true);
-        expect(turn.citationValidityPassed).toBe(true);
-        expect(turn.correctAbstentionPassed).toBe(true);
-        expect(turn.independentAnswerReview).toBe('conforms_to_independent_ground_truth');
-        expect(turn.generatedAnswer.length).toBeGreaterThan(20);
-        expect(turn.citedSources.length).toBeGreaterThanOrEqual(1);
-      }
+      expect(summary.byMode.unconfigured).toBe(15);
+      expect(summary.liveEvaluated).toBe(0);
+      expect(summary.livePassRatePct).toBeNull();
+      expect(summary.results.every((t) => t.outcome === 'not_evaluated' && t.generatedAnswer === null)).toBe(true);
     });
   });
 
