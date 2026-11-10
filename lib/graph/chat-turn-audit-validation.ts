@@ -36,6 +36,29 @@ export const CHAT_RECORDED_VIA = [
 ] as const;
 export type ChatRecordedVia = (typeof CHAT_RECORDED_VIA)[number];
 
+/** Paths on which trusted server code produced the turn. Only these may evidence live provider inference. */
+export const ATTESTED_RECORDED_VIA: readonly ChatRecordedVia[] = ['convex_action', 'server_gateway', 'server_gateway_acceptance'];
+
+/** True only for a successful live provider turn recorded by trusted server code. Rows without provenance are not attested. */
+export function isAttestedLiveTurn(row: { generationMode: string; providerStatus: string; recordedVia?: string | null }): boolean {
+  return (
+    row.generationMode === 'gemini_live' &&
+    row.providerStatus === 'succeeded' &&
+    typeof row.recordedVia === 'string' &&
+    (ATTESTED_RECORDED_VIA as readonly string[]).includes(row.recordedVia)
+  );
+}
+
+/** Violations specific to turns recorded by the client's own credential (not server-attested). */
+export function clientRecordedTurnViolations(input: { generationMode: string; providerStatus: string; estimatedCostGbp: number; actualCostGbp: number | null }): string[] {
+  const reasons: string[] = [];
+  if (input.generationMode === 'gemini_live' || input.providerStatus === 'succeeded')
+    reasons.push('live provider inference can only be recorded by the trusted server gateway');
+  if (input.estimatedCostGbp > 0 || (input.actualCostGbp ?? 0) > 0)
+    reasons.push('provider cost can only be recorded by the trusted server gateway');
+  return reasons;
+}
+
 export const MAX_TURN_TOKENS = 2_000_000;
 export const MAX_TURN_COST_GBP = 5;
 export const MAX_TURN_LATENCY_MS = 15 * 60_000;

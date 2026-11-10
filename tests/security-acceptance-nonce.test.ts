@@ -277,8 +277,12 @@ describe('WP2 — signed-in compatibility path',()=>{
   const t=setup(),asB=t.withIdentity({subject:'user_b',tokenIdentifier:B,issuer:ISSUER});
   await expect(t.mutation(recRef,turn())).rejects.toThrow('Sign in required');
   await expect(asB.mutation(recRef,{...turn(),owner:A} as never)).rejects.toThrow();
-  await expect(asB.mutation(recRef,turn({estimatedCostGbp:9999}))).rejects.toThrow('estimatedCostGbp out of range');
-  await asB.mutation(recRef,turn());
+  // Since the H1 correction the caller's own credential cannot record live inference or provider cost at all.
+  await expect(asB.mutation(recRef,turn({estimatedCostGbp:9999}))).rejects.toThrow('provider cost can only be recorded by the trusted server gateway');
+  await expect(asB.mutation(recRef,turn())).rejects.toThrow('live provider inference can only be recorded by the trusted server gateway');
+  const nonLive={generationMode:'deterministic_evidence_synthesis',providerStatus:'not_invoked',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0};
+  await expect(asB.mutation(recRef,turn({...nonLive,latencyMs:-1}))).rejects.toThrow('latencyMs out of range');
+  await asB.mutation(recRef,turn(nonLive));
   expect(await chatRows(t)).toMatchObject([{owner:B,recordedVia:'client_jwt_legacy'}]);
  });
 });

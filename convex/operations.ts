@@ -23,6 +23,7 @@ import {
 } from '../lib/remote-ops/health-monitor';
 import {generateMorningBriefing,londonBriefingDate,nextLondonMorningBriefAt} from '../lib/remote-ops/morning-briefing';
 import {assessPipelineStages} from '../lib/remote-ops/pipeline-stages';
+import {isAttestedLiveTurn} from '../lib/graph/chat-turn-audit-validation';
 import {
  MARKET_DATA_SYMBOLS,
  authorisedMarketObservationSchema,
@@ -264,10 +265,9 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  const chatDailySpend=Number(chatTurnsToday.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
  const chatTotalSpend=Number(chatAuditRows.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
 
- const latestGeminiLiveTurn=chatAuditRows.find(
-  r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded',
- )??null;
- const geminiLiveCount=chatAuditRows.filter(r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded').length;
+ // Only server-attested rows evidence live provider inference (pre-merge risk H1).
+ const latestGeminiLiveTurn=chatAuditRows.find(isAttestedLiveTurn)??null;
+ const geminiLiveCount=chatAuditRows.filter(isAttestedLiveTurn).length;
 
  const evidenceChat:EvidenceChatOperationsSummary={
   totalTurns:chatAuditRows.length,

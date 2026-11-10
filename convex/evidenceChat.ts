@@ -23,6 +23,7 @@ import {
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
 import { insertValidatedChatTurn, turnAuditArgs } from './acceptanceNonces';
+import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalQuery: QueryBuilder<DataModel, 'internal'> = internalQueryGeneric;
@@ -364,10 +365,9 @@ export const getChatOperationsTelemetry = query({
       if (!t.validationValid) validationRejectedCount += 1;
     }
 
-    const latestGeminiLiveTurn =
-      recentTurns.find(
-        (t) => t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded',
-      ) ?? null;
+    // Only server-attested rows evidence live provider inference (pre-merge risk H1).
+    const attestedLiveTurns = recentTurns.filter(isAttestedLiveTurn);
+    const latestGeminiLiveTurn = attestedLiveTurns[0] ?? null;
 
     const geminiConfigured = Boolean(
       process.env.GEMINI_API_KEY ||
@@ -387,6 +387,7 @@ export const getChatOperationsTelemetry = query({
         'gemini-2.5-flash',
       geminiConfigured,
       geminiEnabled,
+      attestedLiveTurns: attestedLiveTurns.length,
       totalTurnsRecorded: recentTurns.length,
       totalInputTokens,
       totalOutputTokens,
@@ -490,6 +491,11 @@ export const recordEvidenceChatTurn = mutation({
   args: turnAuditArgs,
   handler: async (ctx, args) => {
     const user = await researcher(ctx);
+    // Pre-merge risk H1: the caller's own credential cannot evidence live provider inference or provider cost.
+    const clientViolations = clientRecordedTurnViolations(args);
+    if (clientViolations.length > 0) {
+      throw new Error(`Invalid evidence chat audit record: ${clientViolations.join('; ')}`);
+    }
     const inserted = await insertValidatedChatTurn(
       ctx,
       user.tokenIdentifier,
