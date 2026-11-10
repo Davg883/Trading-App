@@ -5,7 +5,7 @@ import {
  MAX_STAGING_PAYLOAD_BYTES,
  stagedSubmissionRequestSchema,
 } from '../lib/remote-ops/contracts';
-import {parseAcceptanceToken,questionDigest,randomHex,sha256Hex} from './acceptanceNonces';
+import {parseAcceptanceToken,pickTurnAuditFields,questionDigest,randomHex,sha256Hex} from './acceptanceNonces';
 import {verifyIdentityClaims} from './authz';
 
 const http=httpRouter();
@@ -251,17 +251,18 @@ http.route({
   const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
   const token=str(parsed.body.token,200),reservation=str(parsed.body.reservation,64);
   const tokenParts=token?parseAcceptanceToken(token):null;
-  const turn=parsed.body.turn as Record<string,unknown>|undefined;
-  if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation)||!turn||typeof turn!=='object'||typeof turn.question!=='string'){
-   return Response.json({error:{code:'invalid_request',message:'token, reservation and turn are required.'}},{status:400,headers});
+  const picked=pickTurnAuditFields(parsed.body.turn);
+  if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation)||!picked.ok){
+   return Response.json({error:{code:'invalid_request',message:'token, reservation and a turn containing only audit fields are required.'}},{status:400,headers});
   }
   try{
+   // Trusted values are set after the allowlisted turn fields and cannot be supplied by the caller. The
+   // question binding is verified inside the mutation against the hash persisted on the nonce row.
    const result=await ctx.runMutation(nonceM('recordNonceTurnInternal'),{
+    ...picked.turn,
     nonceId:tokenParts.nonceId,
     secretSha256:await sha256Hex(tokenParts.secret),
     reservationSha256:await sha256Hex(reservation),
-    turnQuestionSha256:await questionDigest(turn.question),
-    ...turn,
    }) as {ok:false;reason:string;violations?:string[]}|{ok:true;auditId:string;duplicate:boolean};
    if(!result.ok)return nonceRejected(result.reason,result.violations);
    return Response.json({auditId:result.auditId,duplicate:result.duplicate,executionAuthority:'none'},{status:200,headers});
@@ -313,10 +314,11 @@ http.route({
    return Response.json({error:{code:'forbidden_identity',message:'This identity cannot record research chat turns.'}},{status:403,headers});
   }
   const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
-  const turn=parsed.body.turn as Record<string,unknown>|undefined;
-  if(!turn||typeof turn!=='object')return Response.json({error:{code:'invalid_request',message:'turn is required.'}},{status:400,headers});
+  const picked=pickTurnAuditFields(parsed.body.turn);
+  if(!picked.ok)return Response.json({error:{code:'invalid_request',message:'turn must contain only audit fields.'}},{status:400,headers});
   try{
-   const result=await ctx.runMutation(chatM('recordEvidenceChatTurnInternal'),{owner,recordedVia:'server_gateway',...turn}) as {auditId:string};
+   // Owner and provenance come only from the verified token and this route; they are applied last.
+   const result=await ctx.runMutation(chatM('recordEvidenceChatTurnInternal'),{...picked.turn,owner,recordedVia:'server_gateway'}) as {auditId:string};
    return Response.json({auditId:result.auditId,executionAuthority:'none'},{status:200,headers});
   }catch{
    return Response.json({error:{code:'invalid_request',message:'Turn record failed validation.'}},{status:400,headers});

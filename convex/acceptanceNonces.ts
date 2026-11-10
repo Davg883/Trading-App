@@ -10,6 +10,7 @@ import {
   type QueryBuilder,
 } from 'convex/server';
 import type { DataModel } from './server';
+import { sha256HexSync } from '../lib/crypto/sha256';
 import { macroRelationshipSchema, type MacroRelationship } from '../lib/graph/contracts';
 import {
   chatTurnAuditViolations,
@@ -298,6 +299,7 @@ export const consumeNonceInternal = internalMutation({
   },
 });
 
+/** The only fields a caller may supply for an audit record. Everything else is set by trusted server code. */
 export const turnAuditArgs = {
   turnId: v.string(),
   bundleId: v.string(),
@@ -334,6 +336,26 @@ export const turnAuditArgs = {
 
 type TurnAudit = Parameters<typeof chatTurnAuditViolations>[0];
 
+export const TURN_AUDIT_FIELDS = Object.keys(turnAuditArgs) as Array<keyof typeof turnAuditArgs>;
+
+/**
+ * Copies exactly the allowlisted audit fields from an untrusted object. Any other key (for example `owner`,
+ * `recordedVia`, `nonceId` or `turnQuestionSha256`) makes the whole record invalid rather than being ignored,
+ * so a caller can never smuggle trusted values through the turn payload. Missing fields are left to the
+ * mutation's argument validator.
+ */
+export function pickTurnAuditFields(
+  raw: unknown,
+): { ok: true; turn: Record<string, unknown> } | { ok: false; unexpected: string[] } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, unexpected: ['<turn is not an object>'] };
+  const allowed = new Set<string>(TURN_AUDIT_FIELDS);
+  const unexpected = Object.keys(raw).filter((k) => !allowed.has(k));
+  if (unexpected.length) return { ok: false, unexpected };
+  const turn: Record<string, unknown> = {};
+  for (const k of TURN_AUDIT_FIELDS) if (k in (raw as Record<string, unknown>)) turn[k] = (raw as Record<string, unknown>)[k];
+  return { ok: true, turn };
+}
+
 /** Shared, validated insert used by every path that writes an `evidenceChatAudit` row. */
 export async function insertValidatedChatTurn(
   ctx: GenericMutationCtx<DataModel>,
@@ -369,7 +391,6 @@ export const recordNonceTurnInternal = internalMutation({
     nonceId: v.string(),
     secretSha256: v.string(),
     reservationSha256: v.string(),
-    turnQuestionSha256: v.string(),
     ...turnAuditArgs,
   },
   handler: async (ctx, args) => {
@@ -378,7 +399,7 @@ export const recordNonceTurnInternal = internalMutation({
       reason,
       ...(violations ? { violations } : {}),
     });
-    const { nonceId, secretSha256, reservationSha256, turnQuestionSha256, ...turn } = args;
+    const { nonceId, secretSha256, reservationSha256, ...turn } = args;
     const { row, rejection } = await loadVerifiedNonce(ctx, nonceId, secretSha256);
     if (!row) return reject(rejection);
     const reservationMatches =
@@ -393,7 +414,9 @@ export const recordNonceTurnInternal = internalMutation({
     if (!reservationMatches) return reject('invalid_reservation');
     const now = Date.now();
     if (row.recordDeadlineMs === null || now > row.recordDeadlineMs) return reject('record_window_elapsed');
-    if (!constantTimeEqual(row.questionSha256, turnQuestionSha256)) return reject('question_mismatch');
+    // The question binding is checked against the hash persisted at mint time, computed here from the turn's
+    // own question. No caller-supplied hash is accepted.
+    if (!constantTimeEqual(row.questionSha256, sha256HexSync(turn.question.trim()))) return reject('question_mismatch');
 
     const inserted = await insertValidatedChatTurn(ctx, row.owner, turn, 'server_gateway_acceptance', now);
     if (!inserted.ok) return reject('invalid_audit_record', inserted.violations);
