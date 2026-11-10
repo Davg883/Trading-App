@@ -59,6 +59,9 @@ beforeEach(() => {
   resetGeminiChatRateLimitsForTests();
 });
 
+/** Requires a live TypeDB 3.14.2 server; see tests/typedb-graph.test.ts. Skipped (not passed) by default. */
+const LIVE_TYPEDB = process.env.ACI_LIVE_TYPEDB_TESTS === '1';
+
 describe('Phase G.4: Evidence-Locked AI Chat & Knowledge Graph Demonstration (Tests 1–10)', () => {
   it('Phase A: Verifies official @google/genai SDK adapter, pinned gemini-2.5-flash model, disabled-by-default activation, token/cost accounting, and key redaction', async () => {
     expect(PINNED_GEMINI_FLASH_MODEL_ID).toBe('gemini-2.5-flash');
@@ -308,7 +311,7 @@ describe('Phase G.4: Evidence-Locked AI Chat & Knowledge Graph Demonstration (Te
     expect(turn.answer.shortAnswer).toContain('No supporting evidence');
   });
 
-  it('Test 6 — Graph-addition proof (Staging Isolation): Adding a new approved infrastructure relationship in staging makes it immediately retrievable with citations while keeping aci_macro_intelligence_prod untouched', async () => {
+  it.skipIf(!LIVE_TYPEDB)('Test 6 — Graph-addition proof (Staging Isolation): Adding a new approved infrastructure relationship in staging makes it immediately retrievable with citations while keeping aci_macro_intelligence_prod untouched', async () => {
     // 1. Verify production DB is protected from recreation/test overwrites
     expect(() =>
       assertCanRecreateTypeDbDatabase(PRODUCTION_TYPEDB_DATABASE),

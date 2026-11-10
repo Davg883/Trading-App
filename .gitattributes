@@ -1,0 +1,8 @@
+# Pinned research source packages.
+# lib/research-packages.ts pins the SHA-256 of these files' exact bytes. The pins were registered from a Windows
+# working tree (CRLF line endings), so a default Linux or macOS checkout (LF) produced different bytes and the
+# hash check failed. Fixing the working-tree line ending makes the pinned evidence hash reproducible on every
+# platform, including CI, without re-registering the source versions.
+data/recovery/november-3-2026.json text eol=crlf
+data/recovery/november-3-2026-v2.json text eol=crlf
+data/policy-risk/midterm-2026-11-03.json text eol=crlf

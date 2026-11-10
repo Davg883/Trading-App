@@ -45,6 +45,13 @@ beforeEach(() => {
   resetGraphGatewayRateLimitsForTests();
 });
 
+/**
+ * Live TypeDB integration tests are separated from the hermetic suite (MVP hardening WP5).
+ * They require a reachable TypeDB 3.14.2 server and run only when ACI_LIVE_TYPEDB_TESTS=1
+ * (`npm run test:integration:typedb`). In the default run they are reported as skipped, never as passed.
+ */
+const LIVE_TYPEDB = process.env.ACI_LIVE_TYPEDB_TESTS === '1';
+
 describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', () => {
   it('1. Disambiguates canonical identities via SEC CIK/LEI and blocks fuzzy name merges', () => {
     const dataset = loadInitialAcceptanceDataset();
@@ -398,7 +405,7 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     ).toThrow('Security violation');
   });
 
-  it('7. Projects schema and dataset into live TypeDB CE 3.14.2 and executes end-to-end TypeQL 3 read transactions', async () => {
+  it.skipIf(!LIVE_TYPEDB)('7. Projects schema and dataset into live TypeDB CE 3.14.2 and executes end-to-end TypeQL 3 read transactions', async () => {
     const probe = await probeTypeDbServer();
     expect(probe.reachable).toBe(true);
     expect(probe.version).toBe('3.14.2');
@@ -591,8 +598,13 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
       typedbServer: { reachable: boolean; version: string };
     };
     expect(metaJson.executionAuthority).toBe('none');
-    expect(metaJson.typedbServer.reachable).toBe(true);
-    expect(metaJson.typedbServer.version).toBe('3.14.2');
+    // Hermetic part ends here; the live-server assertions run only in the TypeDB integration job.
+    if (LIVE_TYPEDB) {
+      expect(metaJson.typedbServer.reachable).toBe(true);
+      expect(metaJson.typedbServer.version).toBe('3.14.2');
+    } else {
+      expect(typeof metaJson.typedbServer.reachable).toBe('boolean');
+    }
   });
 
   it('9. Enforces Stage 4 reviewer promotion workflow, correction history, and Stage 5 projection lag / staleness detection', async () => {
@@ -715,7 +727,7 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     expect(lagStale.staleReason).toContain('Projection lag');
   });
 
-  it('10. Verifies Macro Case 001 (US to Ireland AI Contagion): discovery guardrails, 6-class claims, non-double-counting ledger, historical cutoffs, and live TypeDB Cloud investigations', async () => {
+  it.skipIf(!LIVE_TYPEDB)('10. Verifies Macro Case 001 (US to Ireland AI Contagion): discovery guardrails, 6-class claims, non-double-counting ledger, historical cutoffs, and live TypeDB Cloud investigations', async () => {
     const dataset = loadInitialAcceptanceDataset();
     const sourcesById = new Map(dataset.sources.map((s) => [s.sourceDocId, s]));
 

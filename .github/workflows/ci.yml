@@ -1,0 +1,133 @@
+name: CI quality gate
+
+# Hermetic checks only. This workflow uses no repository secrets, makes no paid model calls, never contacts a
+# broker and never deploys. Live TypeDB tests and live model evaluation are separate, manually authorised runs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Defence in depth: even if a secret or flag were added to the repository later, these jobs pin the
+  # research-only, provider-less configuration explicitly.
+  LIVE_TRADING_ENABLED: 'false'
+  DEMO_TRADING_ENABLED: 'false'
+  EVIDENCE_CHAT_GEMINI_ENABLED: 'false'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  typescript:
+    name: Type check, lint baseline, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies from the lockfile
+        run: npm ci
+
+      - name: Assert no provider, broker or deployment credentials are present
+        run: |
+          for name in GEMINI_API_KEY GOOGLE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY \
+                      BROKER_VAULT_KEY_B64 CONVEX_BROKER_ADMIN_KEY CONVEX_DEPLOY_KEY CLERK_SECRET_KEY \
+                      TYPEDB_PASSWORD EVIDENCE_CHAT_GATEWAY_SECRET OPERATIONS_SCHEDULER_SECRET; do
+            if [ -n "${!name:-}" ]; then
+              echo "::error::$name must not be available to the hermetic CI job"
+              exit 1
+            fi
+          done
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: ESLint non-regression gate
+        run: npm run lint:baseline
+
+      - name: Vitest unit and integration tests (hermetic)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  python:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Run worker test suite
+        run: python -m unittest discover -s worker -p "test_*.py"
+
+  workflows:
+    name: GitHub Actions semantic validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Full advisory report (informational)
+        run: npm audit || true
+
+      - name: Fail on high or critical advisories
+        run: npm audit --audit-level=high
+
+  gate:
+    # Single stable check name for branch protection: require "CI gate" on main.
+    name: CI gate
+    if: always()
+    needs: [typescript, python, workflows, dependencies]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every job to have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A required job did not succeed ($result)"
+              exit 1
+            fi
+          done
