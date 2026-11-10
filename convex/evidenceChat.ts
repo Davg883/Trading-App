@@ -348,24 +348,23 @@ export const askEvidenceLockedQuestion = action({
 });
 
 /**
- * Public read-only query to inspect Gemini provider availability and Evidence Chat telemetry summary.
+ * Owner-scoped Evidence Chat telemetry summary.
+ *
+ * Security (MVP hardening): this query previously accepted anonymous callers, substituted `RESEARCH_OWNER_ID`
+ * for the missing identity and, when that owner had no rows, scanned the whole `evidenceChatAudit` table.
+ * It now requires a verified human identity and reads only that identity's rows through the owner index.
  */
 export const getChatOperationsTelemetry = query({
   args: {},
   handler: async (ctx) => {
-    const rawIdentity = await ctx.auth.getUserIdentity();
-    const owner = rawIdentity?.tokenIdentifier ?? process.env.RESEARCH_OWNER_ID;
-    if (!owner) return null;
+    const user = await researcher(ctx);
+    const owner = user.tokenIdentifier;
 
-    const ownerTurns = await ctx.db
+    const recentTurns = await ctx.db
       .query('evidenceChatAudit')
       .withIndex('by_owner', (q) => q.eq('owner', owner))
       .order('desc')
       .take(50);
-    const recentTurns =
-      ownerTurns.length > 0 || rawIdentity !== null
-        ? ownerTurns
-        : await ctx.db.query('evidenceChatAudit').order('desc').take(50);
 
     const dayStartMs = Date.now() - 86_400_000;
     let totalInputTokens = 0;
