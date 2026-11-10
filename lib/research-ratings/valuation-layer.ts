@@ -47,6 +47,25 @@ export type ValuationMetricStatus =
   | 'not_meaningful_negative_book_equity'
   | 'not_meaningful_non_positive_ev';
 
+/**
+ * Phase G.7.1 Financial Integrity Gate — Independent Metric Verification Classification:
+ * - `independently_verified`: Verified directly against primary SEC XBRL filing passages / concepts
+ *   or computed purely from verified SEC XBRL numerator & denominator in the same period.
+ * - `calculated_provisionally_suitable`: Spot valuation metric (Market Cap, EV, P/B, P/E, EV/Rev, EV/EBIT, FCF Yield)
+ *   calculated deterministically from verified SEC XBRL diluted shares + TTM/BS fundamentals + contemporaneous
+ *   unadjusted spot close. Because spot valuation at t_0 has cumulative split adjustment factor = 1.0000 and no splits
+ *   occurred between the 2026 10-Q period end and the spot close date, spot valuation is mathematically identical
+ *   to split-adjusted spot valuation; however, historical percentile ranking and directional ratings remain gated.
+ * - `conflicting`: Conflicting values across stored sources requiring reconciliation.
+ * - `unusable`: Missing essential inputs, period mismatch (single quarter vs TTM), or negative earnings/EBIT/FCF
+ *   making a positive valuation multiple non-meaningful.
+ */
+export type MetricVerificationClassification =
+  | 'independently_verified'
+  | 'calculated_provisionally_suitable'
+  | 'conflicting'
+  | 'unusable';
+
 export interface ValuationPriceInput {
   closeUsd: number | null;
   sessionDate: string | null;
@@ -126,6 +145,9 @@ export interface ComputedValuationMetric {
   unit: 'USD_millions' | 'multiple_x' | 'percent' | 'shares_millions';
   formattedDisplay: string;
   status: ValuationMetricStatus;
+  verificationClassification?: MetricVerificationClassification;
+  spotValuationCalculationEligible?: boolean;
+  directionalRatingEligible?: boolean;
   formula: string;
   periodLabel: string;
   periodScope: PeriodScope | 'POINT_IN_TIME';
@@ -146,6 +168,15 @@ export interface DeterministicCompanyValuationResult {
     corporateActionsReviewed: boolean;
     commerciallyLicensedForRedistribution: boolean;
     suitableForProductionValuation: boolean;
+    suitableForSpotValuationCalculation?: boolean;
+  };
+  valuationEligibility: {
+    spotValuationCalculationEligible: boolean;
+    spotValuationEligibilityRationale: string;
+    historicalPercentileComparisonEligible: boolean;
+    backtestAndMultiPeriodReturnEligible: boolean;
+    directionalInvestmentRatingEligible: boolean;
+    directionalRatingGateReasons: string[];
   };
   shareCountReconciliation: {
     hasAuthoritativeShareCount: boolean;
@@ -1009,6 +1040,62 @@ export function computeDeterministicValuationMetrics(
       capexToRevValue === null ? ['Missing matched-period Net Capex or Revenue.'] : [],
   };
 
+  const classifyMetric = (
+    m: ComputedValuationMetric,
+    dependsOnSpotPrice: boolean,
+  ): ComputedValuationMetric => {
+    let verificationClassification: MetricVerificationClassification = 'unusable';
+    let spotValuationCalculationEligible = false;
+    let directionalRatingEligible = false;
+
+    if (m.status === 'computed_verified' && m.value !== null) {
+      verificationClassification = 'independently_verified';
+      spotValuationCalculationEligible = true;
+      directionalRatingEligible = dependsOnSpotPrice ? priceIsFullyAdjustedAndLicensed : true;
+    } else if (m.status === 'computed_unadjusted_reference_price' && m.value !== null) {
+      verificationClassification = 'calculated_provisionally_suitable';
+      spotValuationCalculationEligible = true;
+      directionalRatingEligible = false;
+    } else {
+      verificationClassification = 'unusable';
+      spotValuationCalculationEligible = false;
+      directionalRatingEligible = false;
+    }
+
+    return {
+      ...m,
+      verificationClassification,
+      spotValuationCalculationEligible,
+      directionalRatingEligible,
+    };
+  };
+
+  const classifiedMetrics = {
+    marketCapUsdMillions: classifyMetric(marketCapMetric, true),
+    netDebtUsdMillions: classifyMetric(netDebtMetric, false),
+    enterpriseValueUsdMillions: classifyMetric(evMetric, true),
+    priceToBook: classifyMetric(priceToBookMetric, true),
+    trailingGaapPe: classifyMetric(trailingPeMetric, true),
+    evToTtmRevenue: classifyMetric(evToRevMetric, true),
+    evToTtmEbit: classifyMetric(evToEbitMetric, true),
+    evToTtmFcf: classifyMetric(evToFcfMetric, true),
+    fcfYieldOnMarketCapPct: classifyMetric(fcfYieldMcMetric, true),
+    fcfYieldOnEvPct: classifyMetric(fcfYieldEvMetric, true),
+    netDebtToTtmOcf: classifyMetric(netDebtToOcfMetric, false),
+    revenueYoYGrowthPct: classifyMetric(revenueYoYMetric, false),
+    gaapOperatingMarginPct: classifyMetric(opMarginMetric, false),
+    gaapNetMarginPct: classifyMetric(netMarginMetric, false),
+    fcfMarginPct: classifyMetric(fcfMarginMetric, false),
+    netCapexToOcfPct: classifyMetric(capexToOcfMetric, false),
+    netCapexToRevenuePct: classifyMetric(capexToRevMetric, false),
+  };
+
+  const spotValuationCalculationEligible =
+    classifiedMetrics.marketCapUsdMillions.spotValuationCalculationEligible === true &&
+    classifiedMetrics.enterpriseValueUsdMillions.spotValuationCalculationEligible === true &&
+    classifiedMetrics.evToTtmRevenue.spotValuationCalculationEligible === true &&
+    classifiedMetrics.fcfYieldOnMarketCapPct.spotValuationCalculationEligible === true;
+
   const allValuationMultiplesResolved =
     marketCapMetric.status === 'computed_verified' &&
     evMetric.status === 'computed_verified' &&
@@ -1018,6 +1105,21 @@ export function computeDeterministicValuationMetrics(
     (trailingPeMetric.status === 'computed_verified' ||
       trailingPeMetric.status === 'not_meaningful_negative_earnings') &&
     fcfYieldMcMetric.status === 'computed_verified';
+
+  const directionalRatingGateReasons: string[] = [];
+  if (!price.corporateActionsReviewed) {
+    directionalRatingGateReasons.push(
+      'Split- and dividend-adjusted historical price series (`corporateActionsReviewed: true`) is required for 5-year historical valuation percentiles, multi-period return comparisons, and backtesting.',
+    );
+  }
+  if (!price.commerciallyLicensedForRedistribution) {
+    directionalRatingGateReasons.push(
+      'Commercial price redistribution license (`commerciallyLicensedForRedistribution: true`) is required for production directional ratings.',
+    );
+  }
+  directionalRatingGateReasons.push(
+    '5-year historical valuation multiple percentiles and >= 252 point-in-time trading sessions are required before directional BUY/HOLD/SELL ratings can unlock.',
+  );
 
   const blockingSummary = dedupeIds([
     shareBlockingReason,
@@ -1038,6 +1140,17 @@ export function computeDeterministicValuationMetrics(
       corporateActionsReviewed: price.corporateActionsReviewed,
       commerciallyLicensedForRedistribution: price.commerciallyLicensedForRedistribution,
       suitableForProductionValuation: priceIsFullyAdjustedAndLicensed,
+      suitableForSpotValuationCalculation: spotValuationCalculationEligible,
+    },
+    valuationEligibility: {
+      spotValuationCalculationEligible,
+      spotValuationEligibilityRationale: spotValuationCalculationEligible
+        ? 'Eligible for spot valuation calculation (`calculated_provisionally_suitable`): at spot date t_0, cumulative historical split adjustment factor = 1.0000 and zero splits occurred between the 2026 SEC Form 10-Q share-count period end and the spot close date.'
+        : 'Spot valuation blocked due to missing price, missing primary SEC XBRL diluted share count, or single-quarter flow period mismatch.',
+      historicalPercentileComparisonEligible: priceIsFullyAdjustedAndLicensed,
+      backtestAndMultiPeriodReturnEligible: priceIsFullyAdjustedAndLicensed,
+      directionalInvestmentRatingEligible: false,
+      directionalRatingGateReasons,
     },
     shareCountReconciliation: {
       hasAuthoritativeShareCount: hasValidDilutedShares,
@@ -1048,25 +1161,7 @@ export function computeDeterministicValuationMetrics(
       shareClassesIncluded: shareCount.shareClassesIncluded,
       blockingReason: shareBlockingReason,
     },
-    metrics: {
-      marketCapUsdMillions: marketCapMetric,
-      netDebtUsdMillions: netDebtMetric,
-      enterpriseValueUsdMillions: evMetric,
-      priceToBook: priceToBookMetric,
-      trailingGaapPe: trailingPeMetric,
-      evToTtmRevenue: evToRevMetric,
-      evToTtmEbit: evToEbitMetric,
-      evToTtmFcf: evToFcfMetric,
-      fcfYieldOnMarketCapPct: fcfYieldMcMetric,
-      fcfYieldOnEvPct: fcfYieldEvMetric,
-      netDebtToTtmOcf: netDebtToOcfMetric,
-      revenueYoYGrowthPct: revenueYoYMetric,
-      gaapOperatingMarginPct: opMarginMetric,
-      gaapNetMarginPct: netMarginMetric,
-      fcfMarginPct: fcfMarginMetric,
-      netCapexToOcfPct: capexToOcfMetric,
-      netCapexToRevenuePct: capexToRevMetric,
-    },
+    metrics: classifiedMetrics,
     allValuationMultiplesResolved,
     blockingSummary,
     executionAuthority: 'none',

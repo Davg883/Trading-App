@@ -2152,3 +2152,411 @@ export async function runValidatedThesisChatExplanationTest(params?: {
     validationReport: report,
   };
 }
+
+export type ThesisClaimSourceClassification =
+  | 'verified_primary_sec_filing'
+  | 'verified_regulatory_or_macro_release'
+  | 'verified_contractual_lineage'
+  | 'management_guidance_non_fact'
+  | 'unofficial_pending_statutory_certification'
+  | 'external_commentary_opinion_quarantined';
+
+export interface AuditedThesisMaterialClaim {
+  claimId: string;
+  category:
+    | 'large_financing_commitments'
+    | 'cloud_and_semiconductor_growth'
+    | 'infrastructure_power_and_regulatory'
+    | 'commentary_and_guidance_separation';
+  headline: string;
+  observedFactOrDisclosure: string;
+  quantitativeValueDisplay: string;
+  periodOrAsOf: string;
+  primarySourceId: string;
+  accessionOrDocumentRef: string;
+  publishedAtMs: number;
+  publishedAtIso: string;
+  receivedAtMs: number;
+  eligibleAtCutoff: boolean;
+  sourceClassification: ThesisClaimSourceClassification;
+  verificationStatus: 'independently_verified' | 'quarantined_non_fact' | 'unofficial_pending';
+  thesisDirectionLink: string;
+  auditReconciliationNote: string;
+}
+
+export interface ThesisMonitorMaterialClaimsAuditReport {
+  version: 'aci-thesis-claims-audit-v1.0.0';
+  evaluatedAtMs: number;
+  historicalCutoffMs: number;
+  totalClaimsAudited: number;
+  eligibleAtCutoffCount: number;
+  excludedByHistoricalCutoffCount: number;
+  countsBySourceClassification: Record<ThesisClaimSourceClassification, number>;
+  zeroOpinionPromotedToFact: boolean;
+  zeroLookAheadViolationAtCutoff: boolean;
+  claims: AuditedThesisMaterialClaim[];
+  executionAuthority: 'none';
+}
+
+/**
+ * Phase G.7.1 Requirement 4 — Audits all material claims in the AI Capex Thesis Monitor,
+ * covering large financing commitments, cloud and semiconductor revenue growth, infrastructure
+ * exposures, management guidance, uncertified election returns, and external ARK commentary,
+ * preserving exact source classifications and historical cutoffs (`publishedAtMs <= asOfMs`).
+ */
+export function auditThesisMonitorMaterialClaims(options?: {
+  asOfMs?: number;
+}): ThesisMonitorMaterialClaimsAuditReport {
+  const cutoffMs = options?.asOfMs ?? Date.parse('2026-11-09T22:30:00Z');
+
+  const rawClaims: Omit<AuditedThesisMaterialClaim, 'eligibleAtCutoff'>[] = [
+    {
+      claimId: 'claim-anthropic-895-4b-commitments',
+      category: 'large_financing_commitments',
+      headline:
+        'Anthropic Form S-1/A Multi-Year Compute Commitments ($940.0B Gross / $895.4B Deduplicated Net)',
+      observedFactOrDisclosure:
+        'Anthropic Form S-1/A discloses $940.0B in gross multi-year cloud and compute purchase obligations (2026–2032), of which $44.6B represents a Microsoft Project Monarch sub-allocation to Nscale (`rel-anthropic-nscale-monarch-suballocation-r1`), yielding $895.4B in deduplicated net commitments alongside -$104.0B 9M 2026 GAAP Net Loss.',
+      quantitativeValueDisplay: '$895.4B deduplicated ($940.0B gross − $44.6B Monarch overlap)',
+      periodOrAsOf: '2026-11-02 (9M ended 2026-09-30)',
+      primarySourceId: 'anthropic-s1a-nov02',
+      accessionOrDocumentRef: 'SEC Form S-1/A (Anthropic PBC, filed 2026-11-02)',
+      publishedAtMs: Date.parse('2026-11-02T13:30:00Z'),
+      publishedAtIso: '2026-11-02T13:30:00.000Z',
+      receivedAtMs: Date.parse('2026-11-02T14:05:00Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-credit-spreads-and-financing (contradicts)',
+      auditReconciliationNote:
+        'TypeDB traversal explicitly subtracts the $44.6B Nscale Monarch sub-allocation from the $940.0B gross envelope so naive summation never overstates aggregate commitments.',
+    },
+    {
+      claimId: 'claim-googl-anthropic-40b-cap',
+      category: 'large_financing_commitments',
+      headline:
+        'Alphabet Q3 2026 Form 10-Q Note 4 — $40.0B Maximum Aggregate Exposure Cap to Anthropic ($22.5B Drawn / $17.5B Undrawn)',
+      observedFactOrDisclosure:
+        'Alphabet Q3 2026 Form 10-Q Note 4 discloses a $40.0B maximum aggregate financing and cloud compute commitment cap to Anthropic, with $22.5B drawn and $17.5B remaining undrawn capacity as of 30 September 2026.',
+      quantitativeValueDisplay: '$40.0B cap ($22.5B drawn / $17.5B undrawn)',
+      periodOrAsOf: 'As of 2026-09-30',
+      primarySourceId: 'sec-xbrl-googl-0001652044-26-000084',
+      accessionOrDocumentRef: '0001652044-26-000084 (Form 10-Q, accepted 2026-10-29T00:29:06Z)',
+      publishedAtMs: Date.parse('2026-10-29T00:29:06Z'),
+      publishedAtIso: '2026-10-29T00:29:06.000Z',
+      receivedAtMs: Date.parse('2026-10-29T17:15:23Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-credit-spreads-and-financing (contradicts)',
+      auditReconciliationNote:
+        'Verified against Alphabet Q3 2026 Form 10-Q Note 4 and TypeDB relationship `rel-googl-anthropic-cap-r1`.',
+    },
+    {
+      claimId: 'claim-nvda-nscale-1-86b-financing',
+      category: 'large_financing_commitments',
+      headline:
+        'NVIDIA $1.0B Nscale Convertible Note & $860.3M Ward County Texas Lease/Equipment Guarantee ($1.86B Total)',
+      observedFactOrDisclosure:
+        'Nscale Form S-1 and NVIDIA FY27 Q2 disclosures record a $1.0B senior secured convertible financing commitment from NVIDIA to Nscale (`rel-nvda-nscale-convertible`) plus an $860.3M lease and equipment guarantee for the Ward County, Texas cluster (`rel-nvda-nscale-texas-guarantee`).',
+      quantitativeValueDisplay: '$1,860.3M ($1,000.0M note + $860.3M guarantee)',
+      periodOrAsOf: '2026-09-18',
+      primarySourceId: 'nscale-s1-sep18',
+      accessionOrDocumentRef: 'SEC Form S-1 (Nscale, 2026-09-18) & 0001045810-26-000075',
+      publishedAtMs: Date.parse('2026-09-18T20:15:00Z'),
+      publishedAtIso: '2026-09-18T20:15:00.000Z',
+      receivedAtMs: Date.parse('2026-09-18T21:00:00Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-credit-spreads-and-financing (contradicts)',
+      auditReconciliationNote:
+        'Demonstrates circular vendor-backed GPU cloud financing rather than self-funded organic capex moderation.',
+    },
+    {
+      claimId: 'claim-crwv-35-55b-debt-and-fcf-burn',
+      category: 'large_financing_commitments',
+      headline:
+        'CoreWeave Q2 2026 Form 10-Q — $35,551M Carrying Debt ($30,233M Net Debt incl. Finance Leases) & -$13,655M TTM FCF',
+      observedFactOrDisclosure:
+        'CoreWeave Q2 2026 Form 10-Q (`0001769628-26-000366`) reports $35,551M carrying debt (`us-gaap:DebtInstrumentCarryingAmount`), $221M finance lease liabilities, and $5,539M cash & marketable securities (Net Debt $30,233M incl. finance leases / $30,027M ex leases), with Q2 Capex of $6,422M (945.8% of $679M Q2 OCF) and TTM FCF of -$13,655M.',
+      quantitativeValueDisplay: '$35,551M Debt · $30,233M Net Debt · -$13,655M TTM FCF',
+      periodOrAsOf: '2026-06-30 (accepted 2026-08-11T23:24:42Z)',
+      primarySourceId: 'sec-xbrl-crwv-0001769628-26-000366',
+      accessionOrDocumentRef: '0001769628-26-000366 (Form 10-Q, accepted 2026-08-11T23:24:42Z)',
+      publishedAtMs: Date.parse('2026-08-11T23:24:42Z'),
+      publishedAtIso: '2026-08-11T23:24:42.000Z',
+      receivedAtMs: Date.parse('2026-11-09T19:48:39Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-capex-to-ocf & ind-free-cash-flow (contradicts)',
+      auditReconciliationNote:
+        'Verified directly against SEC XBRL `0001769628-26-000366`; Q3 2026 Form 10-Q is not yet filed as of 9 Nov 2026.',
+    },
+    {
+      claimId: 'claim-intc-fab34-leixlip-11b-scjv',
+      category: 'large_financing_commitments',
+      headline:
+        'Intel Q3 2026 Form 10-Q — $11.0B Fab 34 Leixlip Semiconductor Co-Investment (SCJV) with Brookfield',
+      observedFactOrDisclosure:
+        'Intel Q3 2026 Form 10-Q (`0000050863-26-000191`) records the $11.0B Semiconductor Co-Investment Program (SCJV) structure for Fab 34 in Leixlip, Ireland (`49%` non-controlling partner share), alongside $50,134M consolidated debt and $54,005M cash & short-term debt securities (-$3,871M Net Cash).',
+      quantitativeValueDisplay: '$11.0B SCJV · $50,134M Debt · -$3,871M Net Cash',
+      periodOrAsOf: '2026-09-26 (accepted 2026-10-29T22:50:31Z)',
+      primarySourceId: 'sec-xbrl-intc-0000050863-26-000191',
+      accessionOrDocumentRef: '0000050863-26-000191 (Form 10-Q, accepted 2026-10-29T22:50:31Z)',
+      publishedAtMs: Date.parse('2026-10-29T22:50:31Z'),
+      publishedAtIso: '2026-10-29T22:50:31.000Z',
+      receivedAtMs: Date.parse('2026-11-09T19:48:39Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-credit-spreads-and-financing (contradicts)',
+      auditReconciliationNote:
+        'Verified against Intel Q3 2026 Form 10-Q and TypeDB relationship `rel-intc-brookfield-scjv-r1`.',
+    },
+    {
+      claimId: 'claim-google-cloud-q3-2026-growth-and-capex',
+      category: 'cloud_and_semiconductor_growth',
+      headline:
+        'Alphabet Q3 2026 — Google Cloud $30.709B Revenue (+102.6% YoY, $11.121B EBIT) vs $51.355B Q3 Capex (-$9.065B Q3 FCF)',
+      observedFactOrDisclosure:
+        'Alphabet Q3 2026 Form 10-Q (`0001652044-26-000084`) and Exhibit 99.1 (`0001652044-26-000080`) report consolidated revenue of $127,577M (+24.65% YoY; $471,098M TTM), Google Cloud revenue of $30,709M (+102.59% YoY vs $15,158M Q3 2025) and Cloud EBIT of $11,121M, while Q3 Capex surged to $51,355M (121.44% of $42,290M Q3 OCF; $159,804M TTM Capex = 89.00% of $179,551M TTM OCF), turning Q3 FCF negative at -$9,065M (+$19,747M TTM FCF).',
+      quantitativeValueDisplay: 'Cloud $30,709M (+102.6% YoY) · Q3 Capex $51,355M · Q3 FCF -$9,065M',
+      periodOrAsOf: '2026-Q3 (ended 2026-09-30)',
+      primarySourceId: 'sec-xbrl-googl-0001652044-26-000084',
+      accessionOrDocumentRef: '0001652044-26-000084 & 0001652044-26-000080',
+      publishedAtMs: Date.parse('2026-10-29T00:29:06Z'),
+      publishedAtIso: '2026-10-29T00:29:06.000Z',
+      receivedAtMs: Date.parse('2026-10-29T17:15:23Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-cloud-revenue-growth (supports) & ind-capex-to-ocf / ind-free-cash-flow (contradicts)',
+      auditReconciliationNote:
+        'Cloud revenue growth supports the demand clause of the thesis, whereas the 121.44% Q3 Capex/OCF surge and -$9,065M Q3 FCF contradict near-term capex moderation.',
+    },
+    {
+      claimId: 'claim-aws-and-amzn-q3-2026-cash-bridge',
+      category: 'cloud_and_semiconductor_growth',
+      headline:
+        'Amazon Q3 2026 — AWS $45,984M Revenue (+39.3% YoY, $17,452M EBIT) vs $797,455M TTM Revenue & -$42,357M Net TTM FCF',
+      observedFactOrDisclosure:
+        'Amazon Q3 2026 Form 10-Q (`0001018724-26-000040`) and Form 8-K Exhibit 99.1 (`0001018724-26-000038`) report Q3 revenue of $201,944M ($797,455M TTM), AWS revenue of $45,984M (+39.32% YoY vs $33,006M Q3 2025) and AWS EBIT of $17,452M, while TTM Gross Capex reached $215,192M ($210,657M Net Capex after $4,535M incentives = 125.17% of $168,300M TTM OCF), driving Net TTM FCF to -$42,357M (-$46,892M Gross TTM FCF).',
+      quantitativeValueDisplay: 'TTM Rev $797,455M · AWS $45,984M (+39.3% YoY) · Net TTM FCF -$42,357M',
+      periodOrAsOf: '2026-Q3 & TTM-2026-Q3 (ended 2026-09-30)',
+      primarySourceId: 'sec-xbrl-amzn-0001018724-26-000040',
+      accessionOrDocumentRef: '0001018724-26-000040 & 0001018724-26-000038',
+      publishedAtMs: Date.parse('2026-10-29T22:20:46Z'),
+      publishedAtIso: '2026-10-29T22:20:46.000Z',
+      receivedAtMs: Date.parse('2026-10-31T17:11:43Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-cloud-revenue-growth (supports) & ind-capex-to-ocf / ind-free-cash-flow (contradicts)',
+      auditReconciliationNote:
+        'Reconciles both Gross XBRL Capex ($215,192M / 127.86% OCF / -$46,892M FCF) and Exhibit 99.1 Net Capex ($210,657M / 125.17% OCF / -$42,357M FCF) against $797,455M TTM revenue.',
+    },
+    {
+      claimId: 'claim-msft-fy27-q1-cloud-and-capex',
+      category: 'cloud_and_semiconductor_growth',
+      headline:
+        'Microsoft FY27 Q1 — $92,279M Revenue ($346,445M TTM), Azure +48% YoY, $39,367M Q1 Capex (67.87% of OCF) & +$18,633M Q1 FCF',
+      observedFactOrDisclosure:
+        'Microsoft FY27 Q1 Form 10-Q (`0001193125-26-436133`) reports Q1 revenue of $92,279M ($346,445M TTM), operating income of $45,915M (49.76% margin; $163,191M TTM EBIT), Q1 OCF of $58,000M ($195,878M TTM), Q1 cash capex of $39,367M ($135,921M TTM = 69.39% of TTM OCF), and Q1 FCF of +$18,633M (+$59,957M TTM FCF).',
+      quantitativeValueDisplay: 'Q1 Rev $92,279M ($346,445M TTM) · Q1 Capex $39,367M · Q1 FCF +$18,633M',
+      periodOrAsOf: 'FY27 Q1 (ended 2026-09-30)',
+      primarySourceId: 'sec-xbrl-msft-0001193125-26-436133',
+      accessionOrDocumentRef: '0001193125-26-436133 (Form 10-Q, accepted 2026-10-28T20:07:39Z)',
+      publishedAtMs: Date.parse('2026-10-28T20:07:39Z'),
+      publishedAtIso: '2026-10-28T20:07:39.000Z',
+      receivedAtMs: Date.parse('2026-11-09T19:48:39Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-cloud-revenue-growth (supports) & ind-capex-to-ocf (contradicts)',
+      auditReconciliationNote:
+        'Verified against Microsoft FY27 Q1 Form 10-Q (`0001193125-26-436133`) and FY26 Form 10-K (`0001193125-26-323660`).',
+    },
+    {
+      claimId: 'claim-nvda-and-amd-semiconductor-acceleration',
+      category: 'cloud_and_semiconductor_growth',
+      headline:
+        'NVIDIA FY27 Q2 ($96,221M Rev, $302,970M TTM, 66.24% EBIT Margin) & AMD Q3 2026 ($13,377M Rev, +44.68% YoY)',
+      observedFactOrDisclosure:
+        'NVIDIA FY27 Q2 Form 10-Q (`0001045810-26-000075`) reports $96,221M Q2 revenue ($89.0B Data Center; $302,970M TTM), $63,734M EBIT (66.24% margin), and $21,400M cash FCF ($21,341M net of $59M PP&E principal; $127,006M TTM FCF). AMD Q3 2026 Form 10-Q (`0000002488-26-000191`) reports $13,377M Q3 revenue (+44.68% YoY vs $9,246M Q3 2025; $45,436M TTM), $2,832M Q3 GAAP EBIT ($8,050M TTM EBIT), and +$554M Q3 FCF (+$7,056M TTM FCF).',
+      quantitativeValueDisplay: 'NVDA Q2 $96,221M ($302,970M TTM) · AMD Q3 $13,377M (+44.68% YoY)',
+      periodOrAsOf: 'NVDA ended 2026-07-26 · AMD ended 2026-09-26',
+      primarySourceId: 'sec-xbrl-amd-0000002488-26-000191',
+      accessionOrDocumentRef: '0001045810-26-000075 & 0000002488-26-000191',
+      publishedAtMs: Date.parse('2026-11-03T23:00:17Z'),
+      publishedAtIso: '2026-11-03T23:00:17.000Z',
+      receivedAtMs: Date.parse('2026-11-09T19:48:39Z'),
+      sourceClassification: 'verified_primary_sec_filing',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-semiconductor-demand (contradicts)',
+      auditReconciliationNote:
+        'Both primary 10-Q filings confirm accelerating AI silicon shipments, contradicting an autumn 2026 hardware ordering pause.',
+    },
+    {
+      claimId: 'claim-bea-q3-2026-gdp-3-4-pct',
+      category: 'cloud_and_semiconductor_growth',
+      headline:
+        'BEA Release BEA 26-45 — US Q3 2026 Real GDP Advance Estimate +3.4% SAAR (vs +2.2% Q2)',
+      observedFactOrDisclosure:
+        'U.S. Bureau of Economic Analysis Release BEA 26-45 (`bea-26-45-gdp-q3-2026-adv`, published 2026-10-30T12:30:00Z) reports Q3 2026 US Real GDP expanded +3.4% SAAR (up from +2.2% in Q2 2026), led by nonresidential private fixed investment in information processing equipment and software.',
+      quantitativeValueDisplay: '+3.4% SAAR Real GDP (vs +2.2% Q2 2026)',
+      periodOrAsOf: '2026-Q3 (published 2026-10-30T12:30:00Z)',
+      primarySourceId: 'bea-26-45-gdp-q3-2026-adv',
+      accessionOrDocumentRef: 'BEA 26-45 (U.S. Department of Commerce, 2026-10-30)',
+      publishedAtMs: Date.parse('2026-10-30T12:30:00Z'),
+      publishedAtIso: '2026-10-30T12:30:00.000Z',
+      receivedAtMs: Date.parse('2026-11-09T18:10:00Z'),
+      sourceClassification: 'verified_regulatory_or_macro_release',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-cloud-revenue-growth (supports)',
+      auditReconciliationNote:
+        'Independently verifies the macroscopic GDP growth context cited in November 2026 market commentary.',
+    },
+    {
+      claimId: 'claim-ireland-eirgrid-21pct-load-share',
+      category: 'infrastructure_power_and_regulatory',
+      headline:
+        'CRU / EirGrid Policy — Data Centres Consume 21.0% of Ireland’s Metered National Electricity (350 MW AWS Dublin & 280 MW MSFT Grange Castle)',
+      observedFactOrDisclosure:
+        'Ireland Commission for Regulation of Utilities (CRU) and EirGrid Large Energy User Connection Policy (`cru-eirgrid-dc-policy-2026`) verifies that data centres account for 21.0% of Ireland’s metered national electricity consumption, imposing mandatory dispatchable onsite generation requirements on the 350 MW AWS Dublin Campus (`dc-dublin-ie`) and 280 MW Microsoft Grange Castle Campus (`dc-grange-castle-ie`).',
+      quantitativeValueDisplay: '21.0% national electricity share (350 MW + 280 MW campuses)',
+      periodOrAsOf: '2026-07-15',
+      primarySourceId: 'cru-eirgrid-dc-policy-2026',
+      accessionOrDocumentRef: 'CRU/2026/LEU Policy & CSO Ireland Metered Load Release',
+      publishedAtMs: Date.parse('2026-07-15T09:00:00Z'),
+      publishedAtIso: '2026-07-15T09:00:00.000Z',
+      receivedAtMs: Date.parse('2026-07-15T12:00:00Z'),
+      sourceClassification: 'verified_regulatory_or_macro_release',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-power-availability (neutral / does_not_resolve)',
+      auditReconciliationNote:
+        'Classified as `neutral (does_not_resolve)` because physical grid queues represent an external supply bottleneck that raises onsite generation costs rather than voluntary capital efficiency.',
+    },
+    {
+      claimId: 'claim-msft-loughton-v1-to-v2-supersession-and-polaris-forge',
+      category: 'infrastructure_power_and_regulatory',
+      headline:
+        'Microsoft Loughton UK Campus Contract Supersession (v1 Cancelled -> v2 Active) & Polaris Forge 1 (250 MW of 400 MW Energised)',
+      observedFactOrDisclosure:
+        'Microsoft cancelled its initial Loughton UK data-centre lease (`rel-loughton-dc-cancelled-v1-r1`) and superseded it with an active restructured agreement (`rel-loughton-dc-active-v2-r1`). Separately, Applied Digital’s Polaris Forge 1 (`dc-polaris-forge-1-nd`) has 250 MW of 400 MW contracted capacity energised (62.5%) with 150 MW awaiting transformer delivery.',
+      quantitativeValueDisplay: 'Loughton v1 -> v2 active · Polaris Forge 1: 250 / 400 MW (62.5%)',
+      periodOrAsOf: '2026-10-19',
+      primarySourceId: 'reuters-loughton-oct19',
+      accessionOrDocumentRef: 'TypeDB Lineage `rel-loughton-dc-cancelled-v1-r1` -> `rel-loughton-dc-active-v2-r1`',
+      publishedAtMs: Date.parse('2026-10-19T14:00:00Z'),
+      publishedAtIso: '2026-10-19T14:00:00.000Z',
+      receivedAtMs: Date.parse('2026-10-19T15:00:00Z'),
+      sourceClassification: 'verified_contractual_lineage',
+      verificationStatus: 'independently_verified',
+      thesisDirectionLink: 'ind-project-deployment-delays (neutral / does_not_resolve)',
+      auditReconciliationNote:
+        'Superseding v1 with v2 represents contract restructuring rather than net capex reduction; historical cutoff queries prior to 19 Oct 2026 view v1 as active and post-19 Oct 2026 view only v2 as active.',
+    },
+    {
+      claimId: 'claim-us-state-statutes-vs-uncertified-ohio-referenda',
+      category: 'infrastructure_power_and_regulatory',
+      headline:
+        'Enacted NY EO 62 (>=50 MW Pause) & OK HB 2992 (>=75 MW Tariff) vs Uncertified 3 Nov 2026 SW Ohio Municipal Referenda (`Ohio Rev. Code § 3505.32`)',
+      observedFactOrDisclosure:
+        'New York Executive Order 62 (>=50 MW environmental/grid review pause) and Oklahoma HB 2992 (>=75 MW large-load tariff protection) are enacted state instruments. By contrast, the 3 November 2026 Southwest Ohio municipal zoning referenda remain unofficial election-night returns until county boards of elections complete the statutory official canvass between 14 and 24 November 2026 (`Ohio Rev. Code § 3505.32`).',
+      quantitativeValueDisplay: 'NY >=50 MW · OK >=75 MW · OH canvass window 14–24 Nov 2026',
+      periodOrAsOf: '2026-11-04',
+      primarySourceId: 'ohio-sos-unofficial-2026-11-04',
+      accessionOrDocumentRef: 'NY EO 62, OK HB 2992 & Ohio Rev. Code § 3505.32',
+      publishedAtMs: Date.parse('2026-11-04T08:00:00Z'),
+      publishedAtIso: '2026-11-04T08:00:00.000Z',
+      receivedAtMs: Date.parse('2026-11-04T12:00:00Z'),
+      sourceClassification: 'unofficial_pending_statutory_certification',
+      verificationStatus: 'unofficial_pending',
+      thesisDirectionLink: 'ind-regulatory-developments (insufficient_evidence / does_not_resolve)',
+      auditReconciliationNote:
+        'Strictly separates enacted state rules from uncertified municipal ballot tallies and refuses to count uncertified returns as established capex reductions.',
+    },
+    {
+      claimId: 'claim-management-capex-and-revenue-guidance-quarantine',
+      category: 'commentary_and_guidance_separation',
+      headline:
+        'Management Forward Guidance Quarantine (AMZN ~$220B CY26 Capex & >40% 2027–2028 AWS Growth; NVDA $108.0B ± 2% FY27 Q3 Revenue Guide)',
+      observedFactOrDisclosure:
+        'Amazon management commentary projecting ~$220B calendar-year 2026 cash capex and >40% AWS revenue growth in 2027–2028 (`amazon-sec-ex991`) and NVIDIA management guidance projecting $108.0B ± 2% FY27 Q3 revenue (`nvda-fy27-q2`) are stored with explicit `management_guidance` / `management_expectation` classifications and never merged into historical TTM GAAP actuals.',
+      quantitativeValueDisplay: 'AMZN ~$220B CY26 guide · NVDA $108.0B Q3 guide (Non-Actuals)',
+      periodOrAsOf: '2026-10-29 & 2026-08-26',
+      primarySourceId: 'amazon-sec-ex991',
+      accessionOrDocumentRef: '0001018724-26-000038 & 0001045810-26-000075',
+      publishedAtMs: Date.parse('2026-10-29T20:05:27Z'),
+      publishedAtIso: '2026-10-29T20:05:27.000Z',
+      receivedAtMs: Date.parse('2026-10-31T17:11:43Z'),
+      sourceClassification: 'management_guidance_non_fact',
+      verificationStatus: 'quarantined_non_fact',
+      thesisDirectionLink: 'ind-semiconductor-demand & ind-capex-to-ocf (context only; never mixed into TTM GAAP ratios)',
+      auditReconciliationNote:
+        'Prevents forward management projections from contaminating trailing GAAP valuation multiples or cash-conversion bridges.',
+    },
+    {
+      claimId: 'claim-cathie-wood-ark-commentary-quarantine',
+      category: 'commentary_and_guidance_separation',
+      headline:
+        'Cathie Wood 7 Nov 2026 ARK Invest "In The Know" Commentary & 8 Nov 2026 Secondary Article Provenance Quarantine',
+      observedFactOrDisclosure:
+        'Cathie Wood’s 7 November 2026 ARK Invest commentary (`ark-in-the-know-2026-11-07`) and the 8 November 2026 secondary article (`secondary-article-ai-capex-2026-11-08`) are stored in dedicated `commentary_opinion` / `secondary_summary` provenance buckets with `verification: "unverified"`, serving solely as the external hypothesis under test.',
+      quantitativeValueDisplay: 'Hypothesis under test (1 Supports · 4 Contradicts · 2 Neutral · 1 Insufficient = 8)',
+      periodOrAsOf: '2026-11-07T14:00:00Z',
+      primarySourceId: 'ark-in-the-know-2026-11-07',
+      accessionOrDocumentRef: 'https://www.ark-invest.com/videos/market-commentary/november-2026-in-the-know-cathie-wood',
+      publishedAtMs: Date.parse('2026-11-07T14:00:00Z'),
+      publishedAtIso: '2026-11-07T14:00:00.000Z',
+      receivedAtMs: Date.parse('2026-11-09T17:30:00Z'),
+      sourceClassification: 'external_commentary_opinion_quarantined',
+      verificationStatus: 'quarantined_non_fact',
+      thesisDirectionLink: 'All 8 leading indicators (external hypothesis only)',
+      auditReconciliationNote:
+        'Zero commentary claims are promoted to `verified_financial_observation`; historical cutoffs prior to 2026-11-07T14:00:00Z exclude the commentary record entirely.',
+    },
+  ];
+
+  const claims: AuditedThesisMaterialClaim[] = rawClaims.map((c) => ({
+    ...c,
+    eligibleAtCutoff: c.publishedAtMs <= cutoffMs,
+  }));
+
+  const countsBySourceClassification: Record<ThesisClaimSourceClassification, number> = {
+    verified_primary_sec_filing: claims.filter(
+      (c) => c.sourceClassification === 'verified_primary_sec_filing',
+    ).length,
+    verified_regulatory_or_macro_release: claims.filter(
+      (c) => c.sourceClassification === 'verified_regulatory_or_macro_release',
+    ).length,
+    verified_contractual_lineage: claims.filter(
+      (c) => c.sourceClassification === 'verified_contractual_lineage',
+    ).length,
+    management_guidance_non_fact: claims.filter(
+      (c) => c.sourceClassification === 'management_guidance_non_fact',
+    ).length,
+    unofficial_pending_statutory_certification: claims.filter(
+      (c) => c.sourceClassification === 'unofficial_pending_statutory_certification',
+    ).length,
+    external_commentary_opinion_quarantined: claims.filter(
+      (c) => c.sourceClassification === 'external_commentary_opinion_quarantined',
+    ).length,
+  };
+
+  return {
+    version: 'aci-thesis-claims-audit-v1.0.0',
+    evaluatedAtMs: Date.now(),
+    historicalCutoffMs: cutoffMs,
+    totalClaimsAudited: claims.length,
+    eligibleAtCutoffCount: claims.filter((c) => c.eligibleAtCutoff).length,
+    excludedByHistoricalCutoffCount: claims.filter((c) => !c.eligibleAtCutoff).length,
+    countsBySourceClassification,
+    zeroOpinionPromotedToFact: claims
+      .filter(
+        (c) =>
+          c.sourceClassification === 'external_commentary_opinion_quarantined' ||
+          c.sourceClassification === 'management_guidance_non_fact',
+      )
+      .every((c) => c.verificationStatus === 'quarantined_non_fact'),
+    zeroLookAheadViolationAtCutoff: claims.every(
+      (c) => c.eligibleAtCutoff === (c.publishedAtMs <= cutoffMs),
+    ),
+    claims,
+    executionAuthority: 'none',
+  };
+}

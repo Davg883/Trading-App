@@ -51,7 +51,7 @@ const PROMPT_INJECTION_PATTERNS: Array<{ code: string; pattern: RegExp }> = [
   {
     code: 'broker_or_trading_access',
     pattern:
-      /\b(trading\s*212\s+(api\s*key|secret|password|balance|positions|account\s+summary)|submit\s+(a\s+)?(live|demo|market|limit)\s+order|place\s+(a\s+)?trade|execute\s+buy\s+order|api\/trading|api\/brokers)\b/i,
+      /\b(trading\s*212\s+(api\s*key|secret|password|balance|positions|account\s+summary)|submit\s+(a\s+)?(live|demo|market|limit)\s+order|place\s+(a\s+)?((live|demo|market|limit)\s+)*(trade|order)|execute\s+buy\s+order|api\/trading|api\/brokers)\b/i,
   },
   {
     code: 'cross_tenant_or_db_mutation',
@@ -136,7 +136,7 @@ export function classifyResearchQuestionIntent(
 
   // Check for out-of-scope / unsupported topics or general-knowledge trivia absent from the evidence store
   const outOfScopeKeywords =
-    /\b(bitcoin|ethereum|dogecoin|solana|tesla|tsla|apple|aapl|meta\s+platforms|netflix|nflx|gold\s+price|crude\s+oil|weather\s+forecast|2028\s+share\s+price\s+target|intraday\s+stock\s+price\s+prediction|projected\s+202[789]\s+net\s+income|202[789]\s+net\s+income|dividend\s+per\s+share\s+in\s+202[89]|founding\s+city|who\s+co-founded|original\s+1975|amphitheatre\s+parkway|headquarters\s+street\s+address|199[79]\s+ipo\s+share\s+price)\b/i;
+    /\b(bitcoin|ethereum|dogecoin|solana|tesla|tsla|apple|aapl|meta\s+platforms|netflix|nflx|bytedance|samsung|openai['’]?s\s+audited\s+gaap|gold\s+price|crude\s+oil|weather\s+forecast|2028\s+share\s+price\s+target|intraday\s+stock\s+price\s+prediction|projected\s+202[789]\s+net\s+income|202[789]\s+net\s+income|dividend\s+per\s+share\s+in\s+202[89]|founding\s+city|who\s+co-founded|original\s+1975|amphitheatre\s+parkway|headquarters\s+street\s+address|199[79]\s+ipo\s+share\s+price)\b/i;
   if (outOfScopeKeywords.test(q)) {
     return {
       queryType: 'as_known_at_date_graph',

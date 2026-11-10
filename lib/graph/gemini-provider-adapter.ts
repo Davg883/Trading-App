@@ -45,6 +45,11 @@ const INPUT_COST_GBP_PER_TOKEN = 0.117 / 1_000_000;
 const OUTPUT_COST_GBP_PER_TOKEN = 0.468 / 1_000_000;
 
 const callerChatRateWindow = new Map<string, number[]>();
+let cachedVerifiedModelEndpoint: {
+  modelId: string;
+  verifiedAtMs: number;
+} | null = null;
+const MODEL_ENDPOINT_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export function checkGeminiChatRateLimit(
   callerId: string,
@@ -1143,8 +1148,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
     };
   }
 
-  // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, models endpoint check, and strict JSON schema
-  const timeoutMs = options.timeoutMs ?? 25_000;
+  // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, cached models endpoint check, and strict JSON schema
+  const timeoutMs = options.timeoutMs ?? 15_000;
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
@@ -1154,39 +1159,58 @@ export async function generateAndValidateEvidenceLockedAnswer(
       },
     },
   });
-  const candidateModels = env.GEMINI_MODEL_ID?.trim()
+  const baseCandidates = env.GEMINI_MODEL_ID?.trim()
     ? [
         modelId,
+        'gemini-3.5-flash',
         'gemini-3.6-flash',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
-        'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-omni-flash-preview',
         'gemini-4-argon',
       ]
     : [
+        'gemini-3.5-flash',
         'gemini-3.6-flash',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
-        'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-omni-flash-preview',
         'gemini-4-argon',
       ];
+  const hasFreshCache =
+    options.env === undefined &&
+    cachedVerifiedModelEndpoint !== null &&
+    Date.now() - cachedVerifiedModelEndpoint.verifiedAtMs < MODEL_ENDPOINT_CACHE_TTL_MS;
+  const candidateModels =
+    hasFreshCache && cachedVerifiedModelEndpoint
+      ? [
+          cachedVerifiedModelEndpoint.modelId,
+          ...baseCandidates.filter((m) => m !== cachedVerifiedModelEndpoint!.modelId),
+        ]
+      : baseCandidates;
   let activeModelId: string = candidateModels[0]!;
-  let endpointVerified = false;
+  let endpointVerified = hasFreshCache;
 
-  try {
-    await Promise.race([
-      ai.models.get({ model: activeModelId }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('models_endpoint_timeout')), 2_500),
-      ),
-    ]);
-    endpointVerified = true;
-  } catch {
-    endpointVerified = false;
+  if (!endpointVerified) {
+    try {
+      await Promise.race([
+        ai.models.get({ model: activeModelId }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('models_endpoint_timeout')), 1_800),
+        ),
+      ]);
+      endpointVerified = true;
+      if (options.env === undefined) {
+        cachedVerifiedModelEndpoint = {
+          modelId: activeModelId,
+          verifiedAtMs: Date.now(),
+        };
+      }
+    } catch {
+      endpointVerified = false;
+    }
   }
 
   const allowedEvidenceIds = bundle.sources.map((s) => s.docId);
