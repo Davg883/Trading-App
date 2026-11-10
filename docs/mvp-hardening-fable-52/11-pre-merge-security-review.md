@@ -154,3 +154,94 @@ The branch is linear, and commit `e7cdf97` mixes Convex, Next.js and UI changes.
 - It gives the project a working CI gate.
 
 The two new defects are confined to the new gateway and need its secret, so even as written the PR exposes far less than `main`. But it should not merge while its own stated invariants are demonstrably broken and nothing can block a failing build.
+
+---
+
+## 11. Correction round (10 November 2026)
+
+**Still not independent.** The same AI session that wrote the PR made these corrections and reran this review. The evidence level remains V2 (tested locally and in CI). There is no V3 (production) and no V4 (independent review).
+
+### 11.1 Commits
+
+| Commit | Addresses | Files |
+|---|---|---|
+| `c97b84d` | C1, C2 | `convex/http.ts`, `convex/acceptanceNonces.ts`, `lib/crypto/sha256.ts` (new), `tests/security-gateway-field-allowlist.test.ts` (new), `tests/sha256.test.ts` (new) |
+| `db4dfe1` | H1 | `lib/graph/chat-turn-audit-validation.ts`, `convex/evidenceChat.ts`, `convex/operations.ts`, `tests/security-live-evidence-attestation.test.ts` (new), `tests/security-acceptance-nonce.test.ts` (one test updated) |
+| `ce0c178` | H2 | `convex/chatBudget.ts` (new), `convex/schema.ts`, `convex/acceptanceNonces.ts`, `convex/evidenceChat.ts`, `convex/http.ts`, `lib/graph/evidence-chat-gateway.ts`, `app/api/graph/chat/route.ts`, `tests/security-chat-budget-reservation.test.ts`, `tests/security-chat-route-fail-closed.test.ts`, `tests/security-chat-action-budget.test.ts` (all new), `tests/security-acceptance-nonce.test.ts` (one test updated) |
+
+### 11.2 What changed
+
+- **C1 / C2 (closed).** Both gateway routes build mutation arguments from an explicit allowlist (`pickTurnAuditFields`, derived from `turnAuditArgs`). Any other key inside `turn` (`owner`, `recordedVia`, `nonceId`, `secretSha256`, `reservationSha256`, `turnQuestionSha256`, `budgetReservationSha256`, `executionAuthority`, …) rejects the request with 400 rather than being dropped. Trusted values are applied after the allowlisted fields. `recordNonceTurnInternal` no longer accepts a question hash: it hashes the turn's own question (deterministic pure SHA-256, checked against `node:crypto`) and compares it with the hash persisted at mint time.
+- **H1 (closed).**
+  - The public `recordEvidenceChatTurn` (`client_jwt_legacy`) refuses live inference, provider success and provider cost.
+  - Live-inference counts, the reported model and `geminiConfigured`/`geminiEnabled` use only rows that are `gemini_live` + `succeeded` **and** recorded via `convex_action`, `server_gateway` or `server_gateway_acceptance`.
+  - Historical rows without provenance are no longer counted as attested live inference.
+- **H2 (closed for the code paths reviewed).**
+  - Every paid provider call is preceded by an atomic per-owner reservation (`convex/chatBudget.ts`). It is taken in one transaction that reads recorded spend, every active reservation and the shared per-minute limit.
+  - The Next.js route returns **503 `budget_unavailable` without calling the provider** when the reservation cannot be obtained: Convex down, server error, an old deployment without the route, gateway unconfigured, or no Convex token. It returns 429 on the rate limit. When the ceiling is reached, it returns an explicit `budget_exceeded` abstention without calling the provider.
+  - A `gemini_live` audit record must settle an active reservation of the same owner.
+  - Acceptance nonces reserve at consumption; the Convex action reserves before calling the provider.
+  - A live turn is never written through the client-credential mutation.
+  - Provider failures are recorded as `abstention_only` / `provider_error` with zero cost.
+
+### 11.3 Original failing tests → corrected passing tests
+
+| Suite | Against previous commit | Now |
+|---|---|---|
+| `security-gateway-field-allowlist` (C1, C2: cross-owner write, forged provenance, question-hash override, nested nonce overrides, replay with altered content) | **5 of 7 failed** (run against `1aad7f8`) | 7 / 7 |
+| `security-live-evidence-attestation` (H1: client-recorded live claim, legacy/unprovenanced rows counted as live) | **4 of 5 failed** (against `c97b84d`) | 5 / 5 |
+| `security-chat-budget-reservation` + `security-chat-route-fail-closed` (H2) | **20 of 22 failed** (against `db4dfe1`) | 11 / 11 and 11 / 11 |
+| `security-chat-action-budget` (H2, Convex action) | written after the fix | 3 / 3 |
+
+Caveat on the H2 "before" figure: many of those tests also fail because the reserve route did not exist. The cases that show the actual defect are the route cases where Convex is unavailable, returns 5xx, returns 404, or the user has no Convex token: the old route went on to call the provider.
+
+Two existing tests were changed, each to reflect an intended behaviour change, not to weaken a check:
+- The signed-in compatibility test now asserts that the client credential cannot record live or costed turns.
+- The gateway-authentication test records a non-live turn, because live turns now also need a reservation.
+
+### 11.4 Regression check (`ce0c178`, local)
+
+| Check | Result |
+|---|---|
+| Owner isolation (`security-convex-data-isolation`) | 15 / 15 |
+| Graph access and runtime hardening (`security-runtime-hardening`) | 17 / 17 |
+| Research-only trading boundary (`security-research-only-boundary`) | 20 / 20 |
+| Acceptance nonces (`security-acceptance-nonce`) | 26 / 26 |
+| Full Vitest | **684 passed, 4 skipped** (3 live TypeDB, 1 billable live evaluation) |
+| Python | 218 passed, 1 skipped (live TypeDB) |
+| Next.js `tsc` / Convex `tsc -p convex` | pass / pass |
+| `next build` | pass |
+| actionlint | pass |
+| ESLint gate | 29 errors, all pre-existing (baseline 29); no new errors |
+| `npm audit --audit-level=high` | pass; 8 moderate advisories remain in dev-only ESLint tooling |
+
+### 11.5 Production migration requirements (additions)
+
+- **Schema (additive):** new table `chatBudgetReservations`; optional field `acceptanceNonces.budgetReservationSha256`. No data migration.
+- **Deployment order is now mandatory, not just recommended:** Convex first, then Vercel. A new Next.js server paired with an old Convex deployment gets 404 from the reserve route, so it **fails closed**: paid chat returns 503 until Convex is deployed.
+- `EVIDENCE_CHAT_GATEWAY_SECRET` must be set in both Convex and Vercel before the Vercel deploy. Without it, paid chat fails closed (503). Explicit deterministic mode still works.
+- With an old Next.js server and the new Convex deployment, live turns recorded through the old client-credential path are now refused. They are answered but not audited until Vercel is updated.
+- **Behaviour change:** while Convex is unreachable, paid chat is unavailable (by design).
+
+### 11.6 Remaining release blockers
+
+| # | Blocker | Owner action |
+|---|---|---|
+| C3 | `main` is still unprotected, so CI cannot block a merge. GitHub settings were not changed (not authorised). | Require **CI gate** and an approval on `main` |
+| — | Live TypeDB integration tests have not been run after the TypeDB configuration changes | Run `npm run test:integration:typedb` against staging |
+| — | Nonce and reservation concurrency verified only under convex-test's serial transaction model | Run the 10-way consume and reserve tests against a non-production Convex deployment |
+| — | No independent review | Commission a separate security review of this branch |
+
+The open risks from §2 (H3 rollout-window cancel path, H4 Convex admin key in Next.js, M1–M7) are unchanged. They should be tracked, but they do not block this release candidate, with one exception: H3 needs production trading flags confirmed off before the Convex deploy.
+
+### 11.7 Revised decision
+
+**APPROVE WITH CONDITIONS — as a release candidate for independent review, not for merge.** The confirmed code-level blockers (C1, C2) and the high integrity and cost risks (H1, H2) are fixed and regression-tested. The conditions:
+
+1. Enable branch protection on `main` (C3).
+2. A separate security reviewer assesses this branch.
+3. Run the TypeDB integration suite and real-backend concurrency tests on non-production infrastructure.
+4. Confirm production trading flags are off before the Convex deploy.
+5. Deploy only with owner approval, in the order in §11.5, followed by the post-deployment checks in `03` §7.
+
+This document must not be read as production-verified.
