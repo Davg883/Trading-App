@@ -28,8 +28,6 @@ jobs:
     timeout-minutes: 10
     env:
       RESEARCH_SCHEDULER_ENV: 'remote'
-      LIVE_TRADING_ENABLED: 'false'
-      DEMO_TRADING_ENABLED: 'false'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
