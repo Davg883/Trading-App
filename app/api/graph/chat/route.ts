@@ -21,7 +21,9 @@ import {
   gatewayConfigured,
   recordAcceptanceTurn,
   recordAuthenticatedTurn,
+  reserveChatBudget,
 } from '../../../../lib/graph/evidence-chat-gateway';
+import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
 
 /** Must match `SHARED_CHAT_TURNS_PER_MINUTE` in convex/evidenceChat.ts. */
 const SHARED_CHAT_TURNS_PER_MINUTE = 10;
@@ -146,6 +148,17 @@ interface RetrievalContextData {
 }
 
 type AcceptanceSession = { token: string; reservation: string };
+
+function budgetUnavailable() {
+  return NextResponse.json(
+    {
+      error: 'The research budget service is unavailable, so no paid model call was made. Please try again shortly.',
+      code: 'budget_unavailable',
+      executionAuthority: 'none',
+    },
+    { status: 503, headers: { ...NO_STORE_HEADERS, 'Retry-After': '30' } },
+  );
+}
 
 function unauthenticated() {
   return NextResponse.json(
@@ -289,16 +302,44 @@ export async function POST(req: NextRequest) {
       preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
     });
 
+    // Pre-merge risk H2: a paid provider call requires an authoritative, atomically reserved budget. When the
+    // budget cannot be checked or reserved, no provider call is made: the route fails closed (503), or, when the
+    // ceiling is reached, the adapter returns an explicit budget abstention without calling the provider.
+    const mode = parsed.mode ?? 'auto';
+    const paidCallPossible = serverHasGeminiKey && mode !== 'deterministic_evidence_synthesis';
+    let budgetReservation: string | null = null;
+    let budgetOverride: { dailySpentGbpSoFar: number; dailyCostCeilingGbp: number } | null = null;
+    if (paidCallPossible && !acceptance) {
+      if (!caller.convexToken) return budgetUnavailable();
+      const reserved = await reserveChatBudget(caller.convexToken);
+      if (reserved.ok) {
+        budgetReservation = reserved.value.reservation;
+        budgetOverride = { dailySpentGbpSoFar: reserved.value.spentGbp, dailyCostCeilingGbp: reserved.value.ceilingGbp };
+      } else if (reserved.kind === 'rejected' && reserved.reason === 'rate_limited') {
+        return NextResponse.json(
+          { error: 'Rate limit exceeded: too many research chat turns in the last minute', executionAuthority: 'none' },
+          { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+        );
+      } else if (reserved.kind === 'rejected' && reserved.reason === 'budget_exceeded') {
+        const ceiling = retrievalCtx?.dailyCostCeilingGbp ?? EVIDENCE_RETRIEVAL_LIMITS.defaultDailyBudgetCeilingGbp;
+        budgetOverride = { dailySpentGbpSoFar: ceiling, dailyCostCeilingGbp: ceiling };
+      } else {
+        return budgetUnavailable();
+      }
+    }
+
     const turnResult = await generateAndValidateEvidenceLockedAnswer({
       bundle,
       callerId: retrievalCtx?.owner ?? caller.callerId,
-      mode: parsed.mode ?? 'auto',
-      ...(retrievalCtx
-        ? {
-            dailySpentGbpSoFar: retrievalCtx.dailyChatSpendGbp,
-            dailyCostCeilingGbp: retrievalCtx.dailyCostCeilingGbp,
-          }
-        : {}),
+      mode,
+      ...(budgetOverride
+        ? budgetOverride
+        : retrievalCtx
+          ? {
+              dailySpentGbpSoFar: retrievalCtx.dailyChatSpendGbp,
+              dailyCostCeilingGbp: retrievalCtx.dailyCostCeilingGbp,
+            }
+          : {}),
       simulateProviderFailure: parsed.simulateProviderFailure ?? false,
     });
 
@@ -345,13 +386,15 @@ export async function POST(req: NextRequest) {
       }
     } else if (caller.convexToken) {
       if (gatewayConfigured()) {
-        const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields);
+        const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields, { budgetReservation });
         if (rec.ok) {
           auditId = rec.value.auditId;
           auditRecorded = 'server_gateway';
         }
       }
-      if (!auditId && process.env.NEXT_PUBLIC_CONVEX_URL) {
+      // The caller's own credential cannot record live provider turns (pre-merge risk H1), so the legacy
+      // mutation is attempted only for non-live turns.
+      if (!auditId && turnFields.generationMode !== 'gemini_live' && process.env.NEXT_PUBLIC_CONVEX_URL) {
         try {
           const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
           client.setAuth(caller.convexToken);

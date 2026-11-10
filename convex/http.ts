@@ -187,6 +187,7 @@ const GATEWAY_HEADER='x-aci-gateway-authorization';
 const MAX_GATEWAY_PAYLOAD_BYTES=1_900_000;
 const nonceM=(name:string)=>makeFunctionReference<'mutation'>(`acceptanceNonces:${name}`);
 const chatM=(name:string)=>makeFunctionReference<'mutation'>(`evidenceChat:${name}`);
+const budgetM=(name:string)=>makeFunctionReference<'mutation'>(`chatBudget:${name}`);
 
 /** Current and (during rotation) previous gateway secrets. A secret shared with another machine credential is refused. */
 function gatewaySecrets():string[]|null{
@@ -237,9 +238,9 @@ http.route({
    secretSha256:await sha256Hex(tokenParts.secret),
    questionSha256:await questionDigest(question),
    reservationSha256:await sha256Hex(reservation),
-  }) as {ok:false;reason:string}|{ok:true;owner:string;recordDeadlineMs:number;context:unknown};
+  }) as {ok:false;reason:string}|{ok:true;owner:string;recordDeadlineMs:number;budget:unknown;context:unknown};
   if(!result.ok)return nonceRejected(result.reason);
-  return Response.json({owner:result.owner,reservation,recordDeadlineMs:result.recordDeadlineMs,context:result.context,executionAuthority:'none'},{status:200,headers});
+  return Response.json({owner:result.owner,reservation,recordDeadlineMs:result.recordDeadlineMs,budget:result.budget,context:result.context,executionAuthority:'none'},{status:200,headers});
  }),
 });
 
@@ -293,6 +294,36 @@ http.route({
  }),
 });
 
+/** Resolves the verified human owner of a gateway request, or returns the refusal response. */
+async function gatewayOwner(ctx:{auth:{getUserIdentity():Promise<import('convex/server').UserIdentity|null>}}):Promise<{ok:true;owner:string}|{ok:false;response:Response}>{
+ const rawIdentity=await ctx.auth.getUserIdentity();
+ if(!rawIdentity)return {ok:false,response:Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401,headers})};
+ try{
+  const identity=verifyIdentityClaims(rawIdentity);
+  if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('automated actor');
+  return {ok:true,owner:identity.tokenIdentifier};
+ }catch{
+  return {ok:false,response:Response.json({error:{code:'forbidden_identity',message:'This identity cannot use research chat.'}},{status:403,headers})};
+ }
+}
+
+/**
+ * Atomic paid-inference budget reservation for a signed-in user (pre-merge risk H2). Requires the gateway
+ * credential and the user's verified JWT. The caller must not call the paid provider unless this returns 200.
+ */
+http.route({
+ path:'/api/evidence-chat/budget/reserve',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const reservation=randomHex(32);
+  const result=await ctx.runMutation(budgetM('reserveChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(reservation),source:'gateway'}) as {ok:true;spentGbp:number;ceilingGbp:number;expiresAtMs:number}|{ok:false;reason:string;spentGbp:number;ceilingGbp:number};
+  if(!result.ok)return Response.json({error:{code:result.reason,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp}},{status:result.reason==='rate_limited'?429:409,headers});
+  return Response.json({reservation,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp,expiresAtMs:result.expiresAtMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
 /**
  * Attested audit record for an ordinary signed-in chat turn. Requires BOTH the gateway credential (the request
  * comes from the application server, not a browser) and the end user's Convex-verified JWT in `Authorization`
@@ -303,22 +334,23 @@ http.route({
  method:'POST',
  handler:httpActionGeneric(async(ctx,request)=>{
   const denied=gatewayGuard(request);if(denied)return denied;
-  const rawIdentity=await ctx.auth.getUserIdentity();
-  if(!rawIdentity)return Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401,headers});
-  let owner:string;
-  try{
-   const identity=verifyIdentityClaims(rawIdentity);
-   if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('automated actor');
-   owner=identity.tokenIdentifier;
-  }catch{
-   return Response.json({error:{code:'forbidden_identity',message:'This identity cannot record research chat turns.'}},{status:403,headers});
-  }
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const owner=who.owner;
   const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
   const picked=pickTurnAuditFields(parsed.body.turn);
   if(!picked.ok)return Response.json({error:{code:'invalid_request',message:'turn must contain only audit fields.'}},{status:400,headers});
+  const budgetReservation=parsed.body.budgetReservation;
+  if(budgetReservation!==undefined&&(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))){
+   return Response.json({error:{code:'invalid_request',message:'budgetReservation must be the value returned by the reserve route.'}},{status:400,headers});
+  }
   try{
-   // Owner and provenance come only from the verified token and this route; they are applied last.
-   const result=await ctx.runMutation(chatM('recordEvidenceChatTurnInternal'),{...picked.turn,owner,recordedVia:'server_gateway'}) as {auditId:string};
+   // Owner, provenance and the reservation digest come only from the verified token and this route; applied last.
+   const result=await ctx.runMutation(chatM('recordEvidenceChatTurnInternal'),{
+    ...picked.turn,
+    owner,
+    recordedVia:'server_gateway',
+    ...(typeof budgetReservation==='string'?{budgetReservationSha256:await sha256Hex(budgetReservation)}:{}),
+   }) as {auditId:string};
    return Response.json({auditId:result.auditId,executionAuthority:'none'},{status:200,headers});
   }catch{
    return Response.json({error:{code:'invalid_request',message:'Turn record failed validation.'}},{status:400,headers});

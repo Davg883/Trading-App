@@ -104,6 +104,7 @@ export function consumeAcceptanceNonce(token: string, question: string, options:
     owner: string;
     reservation: string;
     recordDeadlineMs: number;
+    budget?: { reserved: boolean; reason?: string };
     context: GatewayRetrievalContext;
   }>('/api/evidence-chat/acceptance/consume', { token, question }, options);
 }
@@ -138,7 +139,25 @@ export function failAcceptanceNonce(
 export function recordAuthenticatedTurn(
   userToken: string,
   turn: Record<string, unknown>,
-  options: Options = {},
+  options: Options & { budgetReservation?: string | null } = {},
 ) {
-  return post<{ auditId: string }>('/api/evidence-chat/turn', { turn }, { ...options, userToken });
+  const { budgetReservation, ...rest } = options;
+  return post<{ auditId: string }>(
+    '/api/evidence-chat/turn',
+    { turn, ...(budgetReservation ? { budgetReservation } : {}) },
+    { ...rest, userToken },
+  );
+}
+
+/**
+ * Atomic paid-inference budget reservation for the signed-in user. Callers must treat any result other than
+ * `ok` as "do not call the paid provider": `rejected` with reason `budget_exceeded` or `rate_limited`, or
+ * `unavailable` when the authoritative budget cannot be checked.
+ */
+export function reserveChatBudget(userToken: string, options: Options = {}) {
+  return post<{ reservation: string; spentGbp: number; ceilingGbp: number; expiresAtMs: number }>(
+    '/api/evidence-chat/budget/reserve',
+    {},
+    { ...options, userToken },
+  );
 }

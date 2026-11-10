@@ -20,9 +20,12 @@ import { retrieveClosedEvidenceBundle } from '../lib/graph/evidence-retrieval-ga
 import {
   checkGeminiProviderAvailability,
   generateAndValidateEvidenceLockedAnswer,
+  resolveGeminiApiKey,
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
 import { insertValidatedChatTurn, turnAuditArgs } from './acceptanceNonces';
+import { loadActiveReservation, settleReservation } from './chatBudget';
+import { sha256HexSync } from '../lib/crypto/sha256';
 import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
@@ -122,13 +125,25 @@ export const recordEvidenceChatTurnInternal = internalMutation({
   args: {
     owner: v.string(),
     recordedVia: v.union(v.literal('convex_action'), v.literal('server_gateway')),
+    /** SHA-256 of the budget reservation taken before the provider call; required for live turns. */
+    budgetReservationSha256: v.optional(v.string()),
     ...turnAuditArgs,
   },
   handler: async (ctx, args) => {
     validOwner(args.owner);
-    const { owner, recordedVia, ...turn } = args;
-    const inserted = await insertValidatedChatTurn(ctx, owner, turn, recordedVia, Date.now());
+    const { owner, recordedVia, budgetReservationSha256, ...turn } = args;
+    const now = Date.now();
+    const budgetRes = budgetReservationSha256
+      ? await loadActiveReservation(ctx, owner, budgetReservationSha256, now)
+      : null;
+    if (turn.generationMode === 'gemini_live' && !budgetRes?.row) {
+      throw new Error(
+        `Invalid evidence chat audit record: a live provider turn requires an active budget reservation (${budgetRes?.reason ?? 'none supplied'})`,
+      );
+    }
+    const inserted = await insertValidatedChatTurn(ctx, owner, turn, recordedVia, now);
     if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
+    if (budgetRes?.row) await settleReservation(ctx, budgetRes.row._id, inserted.auditId, now);
     return { auditId: inserted.auditId };
   },
 });
@@ -284,17 +299,42 @@ export const askEvidenceLockedQuestion = action({
       preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
     });
 
+    // Pre-merge risk H2: reserve paid-inference budget atomically before any possible provider call. If it
+    // cannot be reserved, the adapter is told the ceiling is reached, so it abstains without calling the provider.
+    const mode = args.mode ?? 'auto';
+    const paidCallPossible = mode !== 'deterministic_evidence_synthesis' && Boolean(resolveGeminiApiKey(process.env).apiKey);
+    let budgetReservationSha256: string | undefined;
+    let dailySpent = retrievalCtx.dailyChatSpendGbp;
+    let dailyCeiling = retrievalCtx.dailyCostCeilingGbp;
+    if (paidCallPossible) {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      const reservationSha256 = sha256HexSync(`convex-action-budget:${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`);
+      const reservation = (await ctx.runMutation(makeFunctionReference<'mutation'>('chatBudget:reserveChatBudgetInternal'), {
+        owner,
+        reservationSha256,
+        source: 'convex_action',
+      })) as { ok: boolean; reason?: string; spentGbp: number; ceilingGbp: number };
+      if (!reservation.ok && reservation.reason === 'rate_limited') {
+        throw new Error('Rate limit exceeded: too many research chat turns in the last minute');
+      }
+      dailyCeiling = reservation.ceilingGbp;
+      dailySpent = reservation.ok ? reservation.spentGbp : Math.max(reservation.spentGbp, reservation.ceilingGbp);
+      if (reservation.ok) budgetReservationSha256 = reservationSha256;
+    }
+
     const turnResult = await generateAndValidateEvidenceLockedAnswer({
       bundle,
       callerId: owner,
-      mode: args.mode ?? 'auto',
-      dailySpentGbpSoFar: retrievalCtx.dailyChatSpendGbp,
-      dailyCostCeilingGbp: retrievalCtx.dailyCostCeilingGbp,
+      mode,
+      dailySpentGbpSoFar: dailySpent,
+      dailyCostCeilingGbp: dailyCeiling,
       simulateProviderFailure: args.simulateProviderFailure ?? false,
     });
 
     await ctx.runMutation(imRef('recordEvidenceChatTurnInternal'), {
       owner,
+      ...(budgetReservationSha256 ? { budgetReservationSha256 } : {}),
       recordedVia: 'convex_action',
       turnId: turnResult.turnId,
       bundleId: bundle.bundleId,

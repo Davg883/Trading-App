@@ -129,7 +129,9 @@ describe('WP2 — gateway authentication',()=>{
   expect((await gateway(t,'/api/evidence-chat/turn',{turn:turn()})).status).toBe(401);
   expect((await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({turn:turn()})})).status).toBe(401);
   expect(await chatRows(t)).toHaveLength(0);
-  const ok=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn()})});
+  // Non-live turn: since the H2 correction a live turn additionally needs a budget reservation (tests/security-chat-budget-reservation.test.ts).
+  const nonLive={generationMode:'abstention_only',providerStatus:'provider_error',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:null};
+  const ok=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn(nonLive)})});
   expect(ok.status).toBe(200);
   expect(await chatRows(t)).toMatchObject([{owner:A,recordedVia:'server_gateway'}]);
   const model=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});

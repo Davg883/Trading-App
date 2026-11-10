@@ -11,6 +11,7 @@ import {
 } from 'convex/server';
 import type { DataModel } from './server';
 import { sha256HexSync } from '../lib/crypto/sha256';
+import { loadActiveReservation, reserveChatBudget, settleReservation } from './chatBudget';
 import { macroRelationshipSchema, type MacroRelationship } from '../lib/graph/contracts';
 import {
   chatTurnAuditViolations,
@@ -277,11 +278,16 @@ export const consumeNonceInternal = internalMutation({
     if (!constantTimeEqual(row.questionSha256, args.questionSha256)) return reject('question_mismatch');
 
     const recordDeadlineMs = now + RECORD_WINDOW_MS;
+    // Reserve paid-inference budget in the same transaction (pre-merge risk H2). If it cannot be reserved the
+    // nonce is still consumed, but the returned context forces a budget abstention: no provider call may be made.
+    const budgetReservationSha256 = sha256HexSync(`acceptance-budget:${args.reservationSha256}`);
+    const budget = await reserveChatBudget(ctx, row.owner, budgetReservationSha256, 'acceptance', now);
     await ctx.db.patch(row._id, {
       status: 'consumed',
       consumedAtMs: now,
       reservationSha256: args.reservationSha256,
       recordDeadlineMs,
+      budgetReservationSha256: budget.ok ? budgetReservationSha256 : null,
     });
     await ctx.db.insert('audit', {
       owner: row.owner,
@@ -290,11 +296,15 @@ export const consumeNonceInternal = internalMutation({
       detail: `record deadline ${new Date(recordDeadlineMs).toISOString()}`,
       at: now,
     });
+    const context = await loadRetrievalContext(ctx, row.owner, now);
     return {
       ok: true as const,
       owner: row.owner,
       recordDeadlineMs,
-      context: await loadRetrievalContext(ctx, row.owner, now),
+      budget: budget.ok ? { reserved: true as const } : { reserved: false as const, reason: budget.reason },
+      context: budget.ok
+        ? { ...context, dailyChatSpendGbp: budget.spentGbp, dailyCostCeilingGbp: budget.ceilingGbp }
+        : { ...context, dailyChatSpendGbp: Math.max(budget.spentGbp, budget.ceilingGbp), dailyCostCeilingGbp: budget.ceilingGbp },
     };
   },
 });
@@ -418,8 +428,15 @@ export const recordNonceTurnInternal = internalMutation({
     // own question. No caller-supplied hash is accepted.
     if (!constantTimeEqual(row.questionSha256, sha256HexSync(turn.question.trim()))) return reject('question_mismatch');
 
+    const budgetRes = row.budgetReservationSha256
+      ? await loadActiveReservation(ctx, row.owner, row.budgetReservationSha256, now)
+      : { row: null, reason: 'invalid_budget_reservation' as const };
+    if (turn.generationMode === 'gemini_live' && !budgetRes.row) {
+      return reject('invalid_audit_record', ['a live provider turn requires an active budget reservation']);
+    }
     const inserted = await insertValidatedChatTurn(ctx, row.owner, turn, 'server_gateway_acceptance', now);
     if (!inserted.ok) return reject('invalid_audit_record', inserted.violations);
+    if (budgetRes.row) await settleReservation(ctx, budgetRes.row._id, inserted.auditId, now);
     await ctx.db.patch(row._id, {
       status: 'recorded',
       recordedAtMs: now,
