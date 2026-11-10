@@ -540,6 +540,7 @@ describe('Phase G.4: Evidence-Locked AI Chat & Knowledge Graph Demonstration (Te
     );
     await t.mutation(recordTurnRef, {
       owner: OWNER_A,
+      recordedVia: 'convex_action',
       turnId: blockedTurn.turnId,
       bundleId: blockedBundle.bundleId,
       bundleSha256: blockedBundle.bundleSha256,

@@ -22,6 +22,7 @@ import {
   generateAndValidateEvidenceLockedAnswer,
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
+import { insertValidatedChatTurn, turnAuditArgs } from './acceptanceNonces';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalQuery: QueryBuilder<DataModel, 'internal'> = internalQueryGeneric;
@@ -104,55 +105,23 @@ export const getChatRetrievalContextInternal = internalQuery({
   },
 });
 
+/**
+ * Internal audit write for turns produced by trusted server code: the Convex action below
+ * (`convex_action`) or the authenticated gateway HTTP action in `http.ts` (`server_gateway`).
+ * The record is range- and consistency-checked at the write boundary.
+ */
 export const recordEvidenceChatTurnInternal = internalMutation({
   args: {
     owner: v.string(),
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
+    recordedVia: v.union(v.literal('convex_action'), v.literal('server_gateway')),
+    ...turnAuditArgs,
   },
   handler: async (ctx, args) => {
     validOwner(args.owner);
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      ...args,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner: args.owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
+    const { owner, recordedVia, ...turn } = args;
+    const inserted = await insertValidatedChatTurn(ctx, owner, turn, recordedVia, Date.now());
+    if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
+    return { auditId: inserted.auditId };
   },
 });
 
@@ -314,6 +283,7 @@ export const askEvidenceLockedQuestion = action({
 
     await ctx.runMutation(imRef('recordEvidenceChatTurnInternal'), {
       owner,
+      recordedVia: 'convex_action',
       turnId: turnResult.turnId,
       bundleId: bundle.bundleId,
       bundleSha256: bundle.bundleSha256,
@@ -495,242 +465,31 @@ export const getChatRetrievalContext = query({
 
 /**
  * Owner-authenticated mutation to record a completed Evidence-Locked Chat turn executed on the Next.js server.
+ *
+ * Compatibility path. The owner is always the verified caller, so a caller can only ever write to their own
+ * audit trail, and the record is validated at the write boundary. Because the caller's own JWT is the only
+ * credential, such rows are marked `client_jwt_legacy` and are not server-attested telemetry; the gateway
+ * route (`POST /api/evidence-chat/turn`, `server_gateway`) is the attested path.
  */
 export const recordEvidenceChatTurn = mutation({
-  args: {
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
-  },
+  args: turnAuditArgs,
   handler: async (ctx, args) => {
     const user = await researcher(ctx);
-    const owner = user.tokenIdentifier;
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      owner,
-      ...args,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
-  },
-});
-
-/**
- * Internal mutation (callable only via deployment admin / `npx convex run`) to mint a single-use,
- * 120-second acceptance nonce for verifying server-side Gemini inference on Vercel Production.
- */
-export const mintServerAcceptanceTokenInternal = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const randomPart = Array.from({ length: 4 }, () =>
-      Math.floor(Math.random() * 0xffffffff)
-        .toString(16)
-        .padStart(8, '0'),
-    ).join('');
-    const nonce = `aci-accept-${now}-${randomPart}`;
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.acceptance_nonce',
-      recordId: nonce,
-      detail: 'issued',
-      at: now,
-    });
-    return { nonce, owner, expiresAtMs: now + 120_000 };
-  },
-});
-
-export const consumeAcceptanceNonceAndGetContext = mutation({
-  args: { nonce: v.string() },
-  handler: async (ctx, args) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const recentAudits = await ctx.db
-      .query('audit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(40);
-    const match = recentAudits.find(
-      (a) =>
-        a.action === 'graph.evidence_chat.acceptance_nonce' &&
-        a.recordId === args.nonce &&
-        a.detail === 'issued' &&
-        now - a.at <= 120_000,
+    const inserted = await insertValidatedChatTurn(
+      ctx,
+      user.tokenIdentifier,
+      args,
+      'client_jwt_legacy',
+      Date.now(),
     );
-    if (!match) {
-      return { valid: false as const };
-    }
-    await ctx.db.patch(match._id, { detail: 'consumed' });
-
-    const checkpoint = await ctx.db
-      .query('graphProjectionCheckpoints')
-      .withIndex('by_owner_key', (q) =>
-        q.eq('owner', owner).eq('checkpointKey', `ckpt:${owner}:main`),
-      )
-      .first();
-
-    const projectedRows = await ctx.db
-      .query('graphProjectionOutbox')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .take(200);
-
-    const publicProjectedRelationships: MacroRelationship[] = [];
-    for (const row of projectedRows) {
-      if (row.visibility !== 'public_research' || row.status !== 'projected') continue;
-      try {
-        const parsed = macroRelationshipSchema.parse(JSON.parse(row.payloadJson));
-        publicProjectedRelationships.push(parsed);
-      } catch {
-        // Ignore malformed legacy rows
-      }
-    }
-
-    const settings = await ctx.db
-      .query('operationsSettings')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .first();
-
-    const dayStartMs = now - 86_400_000;
-    const recentChatTurns = await ctx.db
-      .query('evidenceChatAudit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(100);
-
-    let dailyChatSpendGbp = 0;
-    for (const t of recentChatTurns) {
-      if (t.createdAtMs >= dayStartMs) {
-        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
-      }
-    }
-
-    return {
-      valid: true as const,
-      owner,
-      checkpoint: checkpoint
-        ? {
-            lastProjectedSequence: checkpoint.lastProjectedSequence,
-            lastProjectionKey: checkpoint.lastProjectionKey,
-            projectedCount: checkpoint.projectedCount,
-            reconciled:
-              checkpoint.pendingCount === 0 &&
-              checkpoint.retryingCount === 0 &&
-              checkpoint.deadLetterCount === 0,
-          }
-        : null,
-      publicProjectedRelationships,
-      dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
-      dailyChatSpendGbp,
-    };
+    if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
+    return { auditId: inserted.auditId };
   },
 });
 
-export const recordAcceptanceChatTurn = mutation({
-  args: {
-    nonce: v.string(),
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const recentAudits = await ctx.db
-      .query('audit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(40);
-    const match = recentAudits.find(
-      (a) =>
-        a.action === 'graph.evidence_chat.acceptance_nonce' &&
-        a.recordId === args.nonce &&
-        a.detail === 'consumed' &&
-        now - a.at <= 120_000,
-    );
-    if (!match) {
-      throw new Error('Invalid or expired acceptance nonce');
-    }
-    await ctx.db.patch(match._id, { detail: 'recorded' });
-
-    const { nonce: _unusedNonce, ...turnFields } = args;
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      owner,
-      ...turnFields,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
-  },
-});
+// The former public mutations `consumeAcceptanceNonceAndGetContext` and `recordAcceptanceChatTurn`, and the
+// `Math.random` based `mintServerAcceptanceTokenInternal`, were removed in MVP hardening work package 2.
+// Acceptance nonces now live in `acceptanceNonces.ts` and are reachable only through the gateway in `http.ts`.
 
 /**
  * Action to check the live Gemini models endpoint availability from Convex server runtime.

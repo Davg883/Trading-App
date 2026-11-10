@@ -15,6 +15,13 @@ import {
   resolveGeminiApiKey,
 } from '../../../../lib/graph/gemini-provider-adapter';
 import { loadInitialAcceptanceDataset } from '../../../../lib/graph/query-gateway';
+import {
+  consumeAcceptanceNonce,
+  failAcceptanceNonce,
+  gatewayConfigured,
+  recordAcceptanceTurn,
+  recordAuthenticatedTurn,
+} from '../../../../lib/graph/evidence-chat-gateway';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -136,42 +143,68 @@ interface RetrievalContextData {
   dailyChatSpendGbp: number;
 }
 
+type AcceptanceSession = { token: string; reservation: string };
+
+function unauthenticated() {
+  return NextResponse.json(
+    {
+      error: 'Authentication required to query the Evidence-Locked Research Assistant.',
+      executionAuthority: 'none',
+    },
+    { status: 401, headers: NO_STORE_HEADERS },
+  );
+}
+
 export async function POST(req: NextRequest) {
-  const acceptanceNonce = req.headers.get('x-aci-acceptance-nonce')?.trim() || null;
+  // The acceptance token is a single-use bearer credential minted by the deployment administrator. It is the
+  // only acceptance header this route reads: no request header or body field can name the owner of a turn.
+  const acceptanceToken = req.headers.get('x-aci-acceptance-nonce')?.trim() || null;
   let caller = await resolveAuthenticatedCaller(req);
-  let acceptanceCtx: RetrievalContextData | null = null;
+  if (!caller && !acceptanceToken) return unauthenticated();
 
-  if (!caller && acceptanceNonce && process.env.NEXT_PUBLIC_CONVEX_URL) {
-    try {
-      const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
-      const consumeFn = makeFunctionReference<'mutation'>(
-        'evidenceChat:consumeAcceptanceNonceAndGetContext',
-      );
-      const res = (await client.mutation(consumeFn, {
-        nonce: acceptanceNonce,
-      })) as ({ valid: false } | ({ valid: true; owner: string } & RetrievalContextData));
-      if (res && res.valid) {
-        caller = { callerId: res.owner, convexToken: null };
-        acceptanceCtx = res;
-      }
-    } catch {
-      caller = null;
-    }
-  }
-
-  if (!caller) {
+  let parsed: z.infer<typeof chatRequestSchema>;
+  try {
+    parsed = chatRequestSchema.parse(await req.json());
+  } catch (err) {
+    // An unauthenticated caller learns nothing about payload validity.
+    if (!caller) return unauthenticated();
     return NextResponse.json(
       {
-        error: 'Authentication required to query the Evidence-Locked Research Assistant.',
+        error: 'Invalid research chat request payload',
+        ...(err instanceof ZodError ? { issues: err.issues } : {}),
         executionAuthority: 'none',
       },
-      { status: 401, headers: NO_STORE_HEADERS },
+      { status: 400, headers: NO_STORE_HEADERS },
     );
   }
 
+  let acceptanceCtx: RetrievalContextData | null = null;
+  let acceptance: AcceptanceSession | null = null;
+  if (!caller && acceptanceToken) {
+    // One attempt, never retried: the nonce is bound to this exact question and is spent by this call.
+    const consumed = await consumeAcceptanceNonce(acceptanceToken, parsed.question);
+    if (!consumed.ok) {
+      if (consumed.kind === 'unavailable' && consumed.reason !== 'gateway_not_configured') {
+        return NextResponse.json(
+          {
+            error: 'Acceptance gateway unavailable. Treat the nonce as spent and mint a new one.',
+            executionAuthority: 'none',
+          },
+          { status: 503, headers: NO_STORE_HEADERS },
+        );
+      }
+      return unauthenticated();
+    }
+    caller = { callerId: consumed.value.owner, convexToken: null };
+    acceptance = { token: acceptanceToken, reservation: consumed.value.reservation };
+    acceptanceCtx = {
+      owner: consumed.value.owner,
+      ...(consumed.value.context as Omit<RetrievalContextData, 'owner'>),
+    };
+  }
+  if (!caller) return unauthenticated();
+
   try {
-    const rawBody = await req.json();
-    const parsed = chatRequestSchema.parse(rawBody);
     const serverHasGeminiKey = Boolean(resolveGeminiApiKey(process.env).apiKey);
 
     // If the Next.js server does NOT have GEMINI_API_KEY configured locally, try Convex action first
@@ -258,76 +291,80 @@ export async function POST(req: NextRequest) {
       simulateProviderFailure: parsed.simulateProviderFailure ?? false,
     });
 
-    // Persist audit record to Convex if Clerk JWT or single-use acceptance nonce is active
+    const turnFields = {
+      turnId: turnResult.turnId,
+      bundleId: bundle.bundleId,
+      bundleSha256: bundle.bundleSha256,
+      question: bundle.question,
+      queryType: bundle.selectedQuery.queryType,
+      intentCategory: bundle.selectedQuery.intentCategory,
+      historicalCutoffMs: bundle.historicalCutoffMs,
+      temporalBasis: bundle.temporalBasis,
+      graphDatabaseName: bundle.graphDatabaseName,
+      graphSchemaVersion: bundle.graphSchemaVersion,
+      lastProjectedSequence: bundle.projectionCheckpoint.lastProjectedSequence,
+      supportStatus: turnResult.answer.supportStatus,
+      validationValid: turnResult.validation.valid,
+      validationAction: turnResult.validation.actionTaken,
+      modelId: turnResult.telemetry.modelId,
+      generationMode: turnResult.telemetry.generationMode,
+      providerStatus: turnResult.telemetry.providerStatus,
+      inputTokens: turnResult.telemetry.inputTokens,
+      outputTokens: turnResult.telemetry.outputTokens,
+      cachedTokens: turnResult.telemetry.cachedTokens,
+      estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
+      actualCostGbp: turnResult.telemetry.actualCostGbp,
+      latencyMs: turnResult.telemetry.latencyMs,
+      bundleJson: JSON.stringify(bundle),
+      answerJson: JSON.stringify(turnResult.answer),
+      validationJson: JSON.stringify(turnResult.validation),
+      createdAtMs: turnResult.createdAtMs,
+    };
+
+    // Persist the audit record. A provider failure is recorded exactly as it happened (the turn carries the
+    // provider status and generation mode); it is never rewritten as a success.
     let auditId: string | null = null;
-    if (process.env.NEXT_PUBLIC_CONVEX_URL && (caller.convexToken || acceptanceNonce)) {
-      try {
-        const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
-        const turnFields = {
-          turnId: turnResult.turnId,
-          bundleId: bundle.bundleId,
-          bundleSha256: bundle.bundleSha256,
-          question: bundle.question,
-          queryType: bundle.selectedQuery.queryType,
-          intentCategory: bundle.selectedQuery.intentCategory,
-          historicalCutoffMs: bundle.historicalCutoffMs,
-          temporalBasis: bundle.temporalBasis,
-          graphDatabaseName: bundle.graphDatabaseName,
-          graphSchemaVersion: bundle.graphSchemaVersion,
-          lastProjectedSequence: bundle.projectionCheckpoint.lastProjectedSequence,
-          supportStatus: turnResult.answer.supportStatus,
-          validationValid: turnResult.validation.valid,
-          validationAction: turnResult.validation.actionTaken,
-          modelId: turnResult.telemetry.modelId,
-          generationMode: turnResult.telemetry.generationMode,
-          providerStatus: turnResult.telemetry.providerStatus,
-          inputTokens: turnResult.telemetry.inputTokens,
-          outputTokens: turnResult.telemetry.outputTokens,
-          cachedTokens: turnResult.telemetry.cachedTokens,
-          estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
-          actualCostGbp: turnResult.telemetry.actualCostGbp,
-          latencyMs: turnResult.telemetry.latencyMs,
-          bundleJson: JSON.stringify(bundle),
-          answerJson: JSON.stringify(turnResult.answer),
-          validationJson: JSON.stringify(turnResult.validation),
-          createdAtMs: turnResult.createdAtMs,
-        };
-        if (caller.convexToken) {
+    let auditRecorded: 'server_gateway' | 'server_gateway_acceptance' | 'client_jwt_legacy' | 'not_recorded' =
+      'not_recorded';
+    if (acceptance) {
+      const rec = await recordAcceptanceTurn(acceptance.token, acceptance.reservation, turnFields);
+      if (rec.ok) {
+        auditId = rec.value.auditId;
+        auditRecorded = 'server_gateway_acceptance';
+      }
+    } else if (caller.convexToken) {
+      if (gatewayConfigured()) {
+        const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields);
+        if (rec.ok) {
+          auditId = rec.value.auditId;
+          auditRecorded = 'server_gateway';
+        }
+      }
+      if (!auditId && process.env.NEXT_PUBLIC_CONVEX_URL) {
+        try {
+          const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
           client.setAuth(caller.convexToken);
           const recFn = makeFunctionReference<'mutation'>(
             'evidenceChat:recordEvidenceChatTurn',
           );
           const rec = (await client.mutation(recFn, turnFields)) as { auditId: string };
           auditId = rec.auditId;
-        } else if (acceptanceNonce) {
-          const recFn = makeFunctionReference<'mutation'>(
-            'evidenceChat:recordAcceptanceChatTurn',
-          );
-          const rec = (await client.mutation(recFn, {
-            nonce: acceptanceNonce,
-            ...turnFields,
-          })) as { auditId: string };
-          auditId = rec.auditId;
+          auditRecorded = 'client_jwt_legacy';
+        } catch {
+          auditId = null;
         }
-      } catch {
-        auditId = null;
       }
     }
 
     return NextResponse.json(
-      auditId ? { ...turnResult, auditId } : turnResult,
+      { ...turnResult, ...(auditId ? { auditId } : {}), auditRecorded },
       { status: 200, headers: NO_STORE_HEADERS },
     );
-  } catch (err) {
-    if (err instanceof ZodError) {
-      return NextResponse.json(
-        {
-          error: 'Invalid research chat request payload',
-          issues: err.issues,
-          executionAuthority: 'none',
-        },
-        { status: 400, headers: NO_STORE_HEADERS },
-      );
+  } catch {
+    // The nonce was consumed but no turn could be produced: record the failure so the nonce is not left
+    // ambiguous. The nonce stays unusable either way.
+    if (acceptance) {
+      await failAcceptanceNonce(acceptance.token, acceptance.reservation, 'server_error_after_consumption');
     }
     return NextResponse.json(
       {

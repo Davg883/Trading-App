@@ -345,6 +345,7 @@ export type GeminiInferenceTelemetry = {
   generationMode: 'gemini_live' | 'deterministic_evidence_synthesis' | 'abstention_only';
   providerStatus:
     | 'succeeded'
+    | 'not_invoked'
     | 'disabled_by_default'
     | 'api_key_not_configured'
     | 'budget_exceeded'
