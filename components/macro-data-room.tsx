@@ -692,7 +692,7 @@ export default function MacroDataRoom({
     </span>
   );
 
-  const renderEvidenceDrawerContent = (rel: MacroRelationship) => {
+  const renderEvidenceDrawerContent = (rel: MacroRelationship, isMobile: boolean = false) => {
     const linkedSources = rel.sourceDocIds
       .map((id) => sourcesById.get(id))
       .filter((s): s is NonNullable<typeof s> => Boolean(s));
@@ -701,7 +701,7 @@ export default function MacroDataRoom({
       : null;
 
     return (
-      <div data-testid="evidence-drawer-content">
+      <div data-testid="evidence-drawer-content" className="dr-drawer-inner">
         <div className="dr-drawer-header">
           <div>
             <span className="eyebrow">IMMUTABLE EVIDENCE DRAWER</span>
@@ -714,7 +714,7 @@ export default function MacroDataRoom({
               <span className="tag">{rel.contractualStatus}</span>
             </div>
           </div>
-          {mobileDrawerOpen && (
+          {isMobile && (
             <button
               type="button"
               className="button secondary"
@@ -726,9 +726,16 @@ export default function MacroDataRoom({
           )}
         </div>
 
-        <p style={{ fontSize: '12px', color: '#2b394a', marginBottom: '12px' }}>
-          {rel.conditionsSummary}
-        </p>
+        <div
+          className="dr-drawer-scrollable-body"
+          data-testid="evidence-drawer-scrollable-body"
+          tabIndex={0}
+          role="region"
+          aria-label="Evidence details and source records"
+        >
+          <p style={{ fontSize: '12px', color: '#2b394a', marginBottom: '12px' }}>
+            {rel.conditionsSummary}
+          </p>
 
         <dl className="dr-drawer-meta">
           <div>
@@ -984,6 +991,7 @@ export default function MacroDataRoom({
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
     );
@@ -2938,7 +2946,7 @@ export default function MacroDataRoom({
           aria-label="Relationship Evidence Drawer"
           data-testid="desktop-evidence-drawer"
         >
-          {renderEvidenceDrawerContent(selectedRelationship)}
+          {renderEvidenceDrawerContent(selectedRelationship, false)}
         </aside>
       </div>
 
@@ -2952,8 +2960,26 @@ export default function MacroDataRoom({
           data-testid="mobile-evidence-drawer"
         >
           <div className="dr-mobile-drawer-sheet">
-            {renderEvidenceDrawerContent(selectedRelationship)}
+            {renderEvidenceDrawerContent(selectedRelationship, true)}
           </div>
+        </div>
+      )}
+
+      {/* Accessible Floating Trigger Bar on Mobile */}
+      {!mobileDrawerOpen && (
+        <div className="dr-mobile-drawer-trigger-bar mobile-only">
+          <button
+            type="button"
+            className="button primary dr-mobile-drawer-trigger-btn"
+            onClick={() => setMobileDrawerOpen(true)}
+            aria-label="Open evidence drawer"
+            data-testid="mobile-drawer-trigger-btn"
+          >
+            <span>View Evidence Drawer</span>
+            <span className="dr-trigger-badge">
+              {selectedRelationship.relationshipId} (v{selectedRelationship.version})
+            </span>
+          </button>
         </div>
       )}
     </div>
