@@ -3,6 +3,7 @@
 **Document Reference:** `docs/phase-g8-2-live-portfolio-operational-acceptance.md`  
 **Execution Authority:** Strictly `none` (`LIVE_TRADING_ENABLED=false`, `DEMO_TRADING_ENABLED=false`)  
 **Production Host:** `https://capital.aiguides.co.uk`  
+**Deployed Commit ID:** `77ed6ae` (`origin/main`)  
 **Convex Deployment:** `benevolent-magpie-921` (Production)  
 **Clerk Owner Identity:** `user_3LjSsuJX398YIJRdss5Q7PqsSH9`  
 **Date of Assessment:** 10 November 2026  
@@ -181,8 +182,12 @@ Full automated testing was executed across the entire repository:
   - Turbopack route generation: Passed in 2.7s
   - `/portfolio`: Dynamic server-rendered (`ƒ /portfolio`)
 - **End-to-End Playwright Browser Verification (`scripts/test-portfolio-browser.mjs`):**
-  - Desktop Viewport (1440x1000): 0 horizontal overflow; all 7 sections present; interactive model toggles verified; Scenario G verified; Evidence-Locked Q&A verified; BoE SONIA drawer verified.
-  - Mobile Viewport (390x844): 0 horizontal overflow; responsive grid stacking; all 7 sections present.
+  - **Live URL:** `https://capital.aiguides.co.uk/portfolio` (HTTP 200)
+  - **Execution Time:** 2026-11-10T10:44:51.711Z
+  - **Overall Success:** `true` (0 failures)
+  - **Desktop Viewport (1440x1000):** 0 horizontal overflow; all 7 sections verified (`portfolio-overview-section`, `portfolio-diversification-section`, `portfolio-stress-section`, `portfolio-alerts-section`, `portfolio-ai-chat-section`, `portfolio-operational-health-section`, `portfolio-drawers-section`); interactive model toggles verified; Scenario G verified; Evidence-Locked Q&A verified; BoE SONIA drawer verified (`IUDSOIA`, 3.98520%, Bank Rate 4.00%); Section F operational health cards verified; navigation back to `/` verified.
+  - **Mobile Viewport (390x844):** 0 horizontal overflow; responsive grid stacking; all 7 sections present; 4 model selector buttons accessible.
+  - **Screenshots Saved:** `test-results/portfolio-desktop.png` and `test-results/portfolio-mobile.png`.
 
 ---
 
