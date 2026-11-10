@@ -8,6 +8,11 @@
  * - Benchmark portfolios are strictly educational reference models using a hypothetical £100,000 GBP basis.
  * - No paid market-data subscriptions have been purchased (`purchaseStatus: "awaiting_owner_approval_no_purchase_made"`).
  */
+import {
+  ILLUSTRATIVE_GBP_CASH_CARRY,
+  classifyInputFreshness,
+  type ObservedInput,
+} from './financial-arithmetic';
 
 export type AssetClassCategory =
   | 'sterling_cash_and_deposits'
@@ -51,7 +56,8 @@ export interface MultiAssetInstrumentSpec {
   embeddedSevenStockAiWeight: number;
   /** Embedded weight (0..1) in broader US information technology & communication services */
   embeddedUsTechSectorWeight: number;
-  dataCoverageStatus: 'verified_primary_or_reference' | 'reference_delayed_awaiting_adjusted_feed';
+  /** MVP hardening WP8: the former value `verified_primary_or_reference` overstated hand-entered yields and durations. */
+  dataCoverageStatus: 'hand_entered_reference_unverified' | 'reference_delayed_awaiting_adjusted_feed';
   provenanceSource: string;
   isaEligibilityStatus: IsaEligibilityStatus;
 }
@@ -179,7 +185,9 @@ export interface EducationalBenchmarkPortfolio {
 }
 
 export interface OwnerLiveAccountRiskSummary {
-  accountSource: 'trading212_live_read_only';
+  /** MVP hardening WP8: this summary is a static development fixture; it was previously labelled `trading212_live_read_only`. */
+  accountSource: 'development_fixture_not_live';
+  dataSourceNotice: string;
   asOfIso: string;
   totalCashGbp: number;
   investedPositionsValueGbp: number;
@@ -237,7 +245,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'intraday_t0',
     embeddedSevenStockAiWeight: 0,
     embeddedUsTechSectorWeight: 0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'Bank of England SONIA Benchmark / Trading 212 GBP Cash Summary',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'uk_clearing_cash',
@@ -262,7 +270,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'notice_deposit',
     embeddedSevenStockAiWeight: 0,
     embeddedUsTechSectorWeight: 0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'HM Treasury / NS&I Published Rate Schedule',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'unlisted_or_otc_ineligible',
@@ -701,7 +709,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC EDGAR XBRL Phase G.7.1 + Stooq US Daily Close Reference',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -726,7 +734,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0001045810-26-000078)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -751,7 +759,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0000789019-26-000085)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -776,7 +784,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0001652044-26-000088)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -801,7 +809,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0001018724-26-000040)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -826,7 +834,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0000002488-26-000072)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -851,7 +859,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0001769628-26-000366)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -876,7 +884,7 @@ export const PHASE_G8_MULTI_ASSET_UNIVERSE: MultiAssetInstrumentSpec[] = [
     liquidityTier: 'exchange_t1_t2',
     embeddedSevenStockAiWeight: 1.0,
     embeddedUsTechSectorWeight: 1.0,
-    dataCoverageStatus: 'verified_primary_or_reference',
+    dataCoverageStatus: 'hand_entered_reference_unverified',
     provenanceSource: 'SEC Form 10-Q (0000050863-26-000080)',
     isaEligibilityStatus: {
       qualifyingExchangeStatus: 'hmrc_recognised_exchange',
@@ -1797,7 +1805,8 @@ export function evaluatePhaseG8MultiAssetPilot(): PhaseG8MultiAssetPilotReport {
     assetClassOpportunityScreening: PHASE_G8_ASSET_CLASS_SCREENING,
     stressScenarioCatalog: PHASE_G8_STRESS_SCENARIOS,
     ownerLiveAccountRiskSummary: {
-      accountSource: 'trading212_live_read_only',
+      accountSource: 'development_fixture_not_live',
+      dataSourceNotice: 'Static development fixture written into source code. It is not read from any broker account and says nothing about a real account.',
       asOfIso: '2026-11-09T18:00:00.000Z',
       totalCashGbp: 250.0,
       investedPositionsValueGbp: 0.0,
@@ -1809,7 +1818,7 @@ export function evaluatePhaseG8MultiAssetPilot(): PhaseG8MultiAssetPilotReport {
       effectiveDurationYears: 0.0,
       maxStressDrawdownAcrossAllScenariosPct: 0.0,
       capitalPreservationStatus:
-        '100% Sterling Cash (£250.00 uninvested cash, 0 open positions). Zero equity, duration, or foreign-exchange drawdown exposure across Scenarios A–G.',
+        'Fixture: 100% sterling cash (£250.00, 0 positions). Zero equity, duration or foreign-exchange drawdown exposure across Scenarios A–G for this illustrative holding.',
       executionAuthority: 'none',
     },
     educationalBenchmarkPortfolios: PHASE_G8_EDUCATIONAL_BENCHMARK_PORTFOLIOS,
@@ -2477,6 +2486,8 @@ export interface PortfolioConcentrationReport {
   portfolioEffectiveDurationYears: number;
   dv01Per100BpsParallelShiftGbp: number;
   isDevelopmentFixture: boolean;
+  /** Inputs behind the cash carry figure, with their status (MVP hardening WP8). */
+  cashCarryInput: ObservedInput;
   freshnessState: 'fresh' | 'stale' | 'fixture' | 'unavailable';
   connectionStatus: 'connected' | 'disconnected' | 'fixture_baseline';
   dataSourceNotice: string;
@@ -2508,6 +2519,10 @@ export function calculatePortfolioConcentrationIntelligence(input: {
   freshnessState?: 'fresh' | 'stale' | 'fixture' | 'unavailable';
   connectionStatus?: 'connected' | 'disconnected' | 'fixture_baseline';
   dataSourceNotice?: string;
+  /** When the account snapshot was retrieved from the broker; required for a live account to be called fresh. */
+  snapshotRetrievedAtMs?: number | null;
+  nowMs?: number;
+  cashCarryInput?: ObservedInput;
   etfConstituentsMap?: Record<
     string,
     {
@@ -2521,15 +2536,24 @@ export function calculatePortfolioConcentrationIntelligence(input: {
   const cashVal = Math.max(0, input.accountSummary.cash);
   const investedVal = Math.max(0, totalVal - cashVal);
   const positions = input.positions ?? [];
-  const isFixture = input.isDevelopmentFixture ?? (input.accountSource === 'educational_benchmark_model' || (positions.length === 0 && totalVal === 250));
-  const freshnessState = input.freshnessState ?? (isFixture ? 'fixture' : 'fresh');
-  const connectionStatus = input.connectionStatus ?? (isFixture ? 'fixture_baseline' : 'connected');
+  // MVP hardening WP8: source and freshness are never inferred from the amounts held. A live account is called
+  // fresh only with a retrieval time within 24 hours; anything not explicitly a live snapshot is not live.
+  const isLiveSnapshot = input.accountSource === 'trading212_live_read_only' && input.isDevelopmentFixture !== true;
+  const isFixture = input.isDevelopmentFixture ?? !isLiveSnapshot;
+  const liveFreshness = classifyInputFreshness(input.snapshotRetrievedAtMs ?? null, input.nowMs ?? Date.now(), 24 * 3600_000);
+  const freshnessState = input.freshnessState ?? (isFixture ? 'fixture' : liveFreshness);
+  const connectionStatus = input.connectionStatus ?? (isFixture ? 'fixture_baseline' : liveFreshness === 'unavailable' ? 'disconnected' : 'connected');
   const dataSourceNotice = input.dataSourceNotice ?? (
     isFixture
-      ? 'Development Baseline Fixture (£250.00 cash / 0 positions) — Not Live Broker Data. Connect and authorise Trading 212 via Settings to sync live holdings.'
-      : 'Authorised read-only Trading 212 account snapshot synchronised via secure AES-256-GCM vault.'
+      ? input.accountSource === 'educational_benchmark_model'
+        ? 'Educational benchmark model with illustrative holdings — not account data.'
+        : 'Development Baseline Fixture — illustrative data, not live broker data.'
+      : freshnessState === 'fresh'
+        ? 'Authorised read-only Trading 212 account snapshot synchronised via secure AES-256-GCM vault.'
+        : 'Read-only Trading 212 account snapshot without a recent retrieval time — treat as stale.'
   );
-  const annualCashCarryYieldPct = 3.99;
+  const cashCarryInput = input.cashCarryInput ?? ILLUSTRATIVE_GBP_CASH_CARRY;
+  const annualCashCarryYieldPct = cashCarryInput.value ?? 0;
   const annualCashCarryPnlGbp = Math.round(cashVal * (annualCashCarryYieldPct / 100));
 
   const assetClassAllocation: Record<
@@ -2875,6 +2899,7 @@ export function calculatePortfolioConcentrationIntelligence(input: {
     portfolioEffectiveDurationYears,
     dv01Per100BpsParallelShiftGbp,
     isDevelopmentFixture: isFixture,
+    cashCarryInput,
     freshnessState,
     connectionStatus,
     dataSourceNotice,
