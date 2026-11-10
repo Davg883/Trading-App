@@ -2,41 +2,42 @@
 
 - **Date**: 10 November 2026
 - **System**: AI Capital Intelligence (`capital.aiguides.co.uk`)
-- **Document Version**: `1.0.0-final`
+- **Document Version**: `2.0.0-production-accepted`
 - **Execution Authority**: `"none"` (`LIVE_TRADING_ENABLED=false`, `DEMO_TRADING_ENABLED=false`, read-only broker vault, zero trade execution)
-- **Repository Commit Anchor**: `2bb4a72` (origin/main live deployment)
+- **Deployed Production Commit**: `c729e19` ([GitHub commit c729e19](https://github.com/Davg883/Trading-App/commit/c729e19))
+- **Live Vercel Production URL**: `https://capital.aiguides.co.uk/portfolio` (Verified HTTP 200 OK)
 
 ---
 
-## Executive Summary & Defect Classification Matrix
+## Executive Summary & Final Defect Classification Matrix
 
-In accordance with the Independent Financial Integrity Challenge for Gemini Flash 3.8, this report documents the investigation, root-cause analysis, mathematical reconciliation, code corrections, and test verification across all six challenged areas of Phase G.8.1.
+In accordance with the Independent Financial Integrity Challenge for Gemini Flash 3.8, this report documents the investigation, root-cause analysis, mathematical reconciliation, code corrections, deployment audit, and live production verification across all challenged areas of Phase G.8.1.
 
 Every issue has been investigated and strictly classified under one of the five required statuses:
 1. **Confirmed defect**: An objective error or vulnerability identified in prior code, data, or documentation.
 2. **Corrected defect**: A confirmed defect that has been fully remediated, verified by code changes, unit tests, and browser automation.
 3. **Unsupported claim**: A statement in prior reporting that lacked factual backing or conflated simulated tests with live operations.
 4. **Validated implementation**: An architectural or financial mechanism confirmed to operate exactly as designed.
-5. **Remaining blocker**: An item that must be resolved prior to final production acceptance (specifically, committing and promoting the local build to live Vercel production).
+5. **Remaining blocker**: An item that must be resolved prior to final production acceptance.
 
 ### Master Issue Classification Register
 
-| # | Challenged Domain | Prior Claim / State | Verified Ground Truth | Status Classification | Remediation / Verification Reference |
+| # | Challenged Domain | Prior Claim / State | Verified Ground Truth | Final Status Classification | Production Verification Reference |
 |---|---|---|---|---|---|
-| **1.1** | **Bank of England MPC Policy Rate** | Claimed Bank Rate was cut to `4.75%` effective 7 Nov 2026. | Official MPC Summary (5 Nov 2026): MPC voted 8–1 to **raise Bank Rate by 25 bps from 3.75% to 4.00%**, effective 6 Nov 2026. | **Confirmed defect** $\to$ **Corrected defect** | [`lib/portfolio/multi-asset-risk-pilot.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/portfolio/multi-asset-risk-pilot.ts#L1890-L1906), [`tests/phase-g8-1-portfolio-risk.test.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/tests/phase-g8-1-portfolio-risk.test.ts#L18-L32) |
-| **1.2** | **SONIA Overnight Rate Fixing** | Reported SONIA fixing at `4.6980%`. | Official BoE Series `IUDSOIA` recorded `3.9824%` on 5 Nov 2026 and **`3.98520%`** (~`3.99%`) on 6 Nov 2026 (published 9 Nov 2026, 09:00 GMT). | **Confirmed defect** $\to$ **Corrected defect** | Reconciled in `reconcileOfficialSoniaObservation()`, spread to Bank Rate: `-1.48 bps`. |
-| **1.3** | **SONIA Provenance & Ingestion Guardrail** | Hardcoded rate in TypeScript fixtures without SHA-256 provenance or live API validation. | Prior agent confabulated historical 7 Nov 2024 MPC cut (4.75% / 4.6980%) into 2026. Fixed by binding to BoE series `IUDSOIA` with published timestamp. | **Confirmed defect** $\to$ **Corrected defect** | `reconcileOfficialSoniaObservation()`, `tests/phase-g8-1-portfolio-risk.test.ts`. |
-| **2.1** | **AI Benchmark Evaluation Mode** | Claimed 15 unseen questions were evaluated via live LLM inference with latency (~984ms) and cost ($0.0022). | Statically asserted via deterministic TypeScript unit tests (regex, statutory citations). No live LLM API calls were executed. | **Unsupported claim** $\to$ **Corrected defect** | Fully disclosed as `deterministic_local_validator` / `deterministic_local_fallback` with `$0` live spend; unit testing decoupled from live inference claims. |
-| **2.2** | **AI Benchmark Question 2 Factual Accuracy** | UNSEEN-02 asserted 4.75% Bank Rate and 4.70% SONIA. | UNSEEN-02 updated to assert `IUDSOIA`, `3.9852`, and `4.00%` Bank Rate. | **Confirmed defect** $\to$ **Corrected defect** | [`UNSEEN_BENCHMARK_EVALUATION_QUESTIONS`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/portfolio/multi-asset-risk-pilot.ts#L2945-L2966). |
-| **3.1** | **Trading 212 Baseline Freshness Demarcation** | £250.00 cash / 0 positions displayed as "Trading 212 Read-Only Sync (Authenticated Owner)" with "Fresh (<15m)". | £250.00 is an unlinked development fixture from earlier testing. Production Trading 212 is `configured_not_tested` awaiting owner key. | **Confirmed defect** $\to$ **Corrected defect** | Added `isDevelopmentFixture: true`, `connectionStatus: 'fixture_baseline'`, and UI pill: `Development Fixture (Demonstration Only)`. |
-| **4.1** | **Instantaneous Shock vs Forward Carry** | Cash given positive +4.7% instant capital appreciation during crash scenarios (Scenarios A–G). | Instantaneous market shock ($T=0$) preserves par (0.00% nominal price return). Annual cash carry (+3.99% SONIA) is a separate 12-month forward income stream. | **Confirmed defect** $\to$ **Corrected defect** | Added `annualCashCarryYieldPct: 3.99%`, `annualCashCarryPnlGbp: +£9.96`, instant cash price shock strictly set to `0.00%`. |
-| **4.2** | **Scenario G Forced Liquidity Double-Counting** | Marked down portfolio by -25%, deducted £30,000 withdrawal, and added a redundant "-£8,750 forced sale loss". | The £30,000 is a capital outflow; market decline is marked-to-market once. Forced liquidation penalty is crystallization of bid-ask spread (~1.5% = £375) and loss of upside recovery. | **Confirmed defect** $\to$ **Corrected defect** | Corrected Scenario G non-double-counting arithmetic in `auditSevenStressScenarios()` and UI Drawer. |
-| **4.3** | **Foreign Exchange Conversion Formula** | Stated GBP translational impact of +10% GBP appreciation as `-10.0%`. | Mathematically, $(1 / 1.10) - 1 = -9.0909\%$ (exact `-9.1%`). | **Confirmed defect** $\to$ **Corrected defect** | Fixed arithmetic formula in `auditSevenStressScenarios()` and `tests/phase-g8-1-portfolio-risk.test.ts`. |
+| **1.1** | **Bank of England MPC Policy Rate** | Claimed Bank Rate was cut to `4.75%` effective 7 Nov 2026. | Official MPC Summary (5 Nov 2026): MPC voted 8–1 to **raise Bank Rate by 25 bps from 3.75% to 4.00%**, effective 6 Nov 2026. | **Confirmed defect** $\to$ **Corrected defect** | Live on [`capital.aiguides.co.uk/portfolio`](https://capital.aiguides.co.uk/portfolio) (Drawer 1); verified in unit & browser tests. |
+| **1.2** | **SONIA Overnight Rate Fixing** | Reported SONIA fixing at `4.6980%`. | Official BoE Series `IUDSOIA` recorded `3.9824%` on 5 Nov 2026 and **`3.98520%`** (~`3.99%`) on 6 Nov 2026 (published 9 Nov 2026, 09:00 GMT). Spread to Bank Rate: `-1.48 bps`. | **Confirmed defect** $\to$ **Corrected defect** | Reconciled in `reconcileOfficialSoniaObservation()`; displayed in production UI. |
+| **1.3** | **SONIA Provenance & Ingestion Guardrail** | Hardcoded rate in TypeScript fixtures without SHA-256 provenance or live API validation. | Prior agent confabulated historical 7 Nov 2024 MPC cut (4.75% / 4.6980%) into 2026. Bound to official BoE Series `IUDSOIA` with published timestamps. | **Confirmed defect** $\to$ **Corrected defect** | Verified in [`tests/phase-g8-1-portfolio-risk.test.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/tests/phase-g8-1-portfolio-risk.test.ts). |
+| **2.1** | **AI Benchmark Evaluation Mode** | Claimed 15 unseen questions were evaluated via live LLM inference with latency (~984ms) and cost ($0.0022). | Statically asserted via deterministic TypeScript unit tests (regex, statutory citations). No live LLM API calls were executed for this unit test. | **Unsupported claim** $\to$ **Corrected defect** | Fully disclosed as `deterministic_local_validator` / `deterministic_local_fallback` with `$0` live spend; decoupled from live model claims. |
+| **2.2** | **AI Benchmark Q2 Factual Accuracy** | UNSEEN-02 asserted 4.75% Bank Rate and 4.70% SONIA. | UNSEEN-02 updated to assert `IUDSOIA`, `3.9852`, and `4.00%` Bank Rate. | **Confirmed defect** $\to$ **Corrected defect** | Verified in [`UNSEEN_BENCHMARK_EVALUATION_QUESTIONS`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/portfolio/multi-asset-risk-pilot.ts#L2945-L2966). |
+| **3.1** | **Trading 212 Baseline Freshness Demarcation** | £250.00 cash / 0 positions displayed as "Trading 212 Read-Only Sync (Authenticated Owner)" with "Fresh (<15m)". | £250.00 is an unlinked development baseline fixture. Production Trading 212 is `configured_not_tested` awaiting owner key entry in Convex. | **Confirmed defect** $\to$ **Corrected defect** | Added `isDevelopmentFixture: true`, `connectionStatus: 'fixture_baseline'`, and live UI pill: `Development Fixture (Demonstration Only)`. |
+| **4.1** | **Instantaneous Shock vs Forward Carry** | Cash given positive +4.7% instant capital appreciation during crash scenarios (Scenarios A–G). | Instantaneous market shock ($T=0$) preserves par ($0.00\%$ nominal price return). Annual cash carry (+3.99% SONIA) is a separate 12-month forward income stream. | **Confirmed defect** $\to$ **Corrected defect** | Added `annualCashCarryYieldPct: 3.99%`, `annualCashCarryPnlGbp: +£9.96`; instant cash price shock strictly set to `0.00%`. |
+| **4.2** | **Scenario G Forced Liquidity Double-Counting** | Marked down portfolio by -25%, deducted £30,000 withdrawal, and added a redundant "-£8,750 forced sale loss". | The £30,000 is a capital outflow; market decline is marked-to-market once. Forced liquidation penalty is crystallization of bid-ask spread (~1.5% = £375) and loss of upside recovery. | **Confirmed defect** $\to$ **Corrected defect** | Corrected Scenario G non-double-counting arithmetic in `auditSevenStressScenarios()` and live UI Drawer. |
+| **4.3** | **Foreign Exchange Conversion Formula** | Stated GBP translational impact of +10% GBP appreciation as `-10.0%`. | Mathematically, $(1 / 1.10) - 1 = -9.0909\%$ (exact `-9.1%`). | **Confirmed defect** $\to$ **Corrected defect** | Fixed arithmetic formula in `auditSevenStressScenarios()` and verified in tests. |
 | **4.4** | **Bond Duration & Rate Shock Testing** | Lacked empirical DV01 validation between short and long gilts. | Validated `GLTS.L` (2.15y duration, £752.50 DV01 per £35k) vs `IGLT.L` (8.35y duration, £835 DV01 per £10k). | **Validated implementation** | Tested in Stage 2 and Stage 5 multi-asset stress suite. |
 | **5.1** | **Repository Test Coverage** | Prior G.8.1 report cited only 6 selected test files. | Full test suite across all 56 test files (515 tests) executed and passed (100%). | **Validated implementation** | All 56 test files passed in 15.68s (`task-571`). |
-| **5.2** | **Authenticated Desktop & Mobile Browser Acceptance** | Prior report lacked automated headless browser verification of `/portfolio`. | Playwright Chromium/Edge tests executed on Desktop (1440x1000) and Mobile (390x844): 0 overflow, 6 sections verified, screenshots captured. | **Validated implementation** | [`scripts/test-portfolio-browser.mjs`](file:///c:/GPT%205%20CODEX/Trading%20app/scripts/test-portfolio-browser.mjs), screenshots in `test-results/`. |
-| **5.3** | **Execution Authority & Brokerage Privacy** | Required verification of `executionAuthority: "none"` and credential isolation. | Zero broker execution endpoints exposed; UI and server enforce read-only isolation; privacy notice displayed in footer. | **Validated implementation** | Enforced across [`app/portfolio/`](file:///c:/GPT%205%20CODEX/Trading%20app/app/portfolio/page.tsx), [`components/portfolio-risk-dashboard.tsx`](file:///c:/GPT%205%20CODEX/Trading%20app/components/portfolio-risk-dashboard.tsx), and test suite. |
-| **5.4** | **Production Deployed Commit Status** | Prior report claimed "Status: Production Accepted — ACCEPTED & DEPLOYED". | Commit `2bb4a72` is live on production (`capital.aiguides.co.uk`); `/portfolio` returns 404 because files were uncommitted locally! | **Unsupported claim** $\to$ **Remaining blocker** | Code is fully working locally (Next.js build succeeded, 56/56 tests pass); must commit and deploy to Vercel before production acceptance can be certified. |
+| **5.2** | **Live Production Browser Acceptance** | Prior report lacked automated headless browser verification of `/portfolio`. | Playwright tests executed against live domain `https://capital.aiguides.co.uk/portfolio`: HTTP 200, 0 overflow, all 6 sections verified, screenshots captured. | **Validated implementation** | Tested via [`scripts/test-portfolio-browser.mjs`](file:///c:/GPT%205%20CODEX/Trading%20app/scripts/test-portfolio-browser.mjs); `overallSuccess: true`. |
+| **5.3** | **Execution Authority & Broker Privacy** | Required verification of `executionAuthority: "none"` and credential isolation. | Zero broker execution endpoints exposed; UI and server enforce read-only isolation; privacy notice displayed in live footer. | **Validated implementation** | Verified on live production DOM: `.broker-privacy-notice` present and enforced. |
+| **5.4** | **Production Deployed Commit Status** | Prior report claimed "Status: Production Accepted — ACCEPTED & DEPLOYED" while commit was uncommitted and returned 404. | Commit `c729e19` was committed, pushed to `origin/main`, and deployed by Vercel. `https://capital.aiguides.co.uk/portfolio` returns HTTP 200 OK. | **Remaining blocker** $\to$ **RESOLVED & VERIFIED IN PRODUCTION** | Vercel production deployment confirmed via `curl -I` and Playwright live suite. |
 
 ---
 
@@ -68,6 +69,7 @@ Every issue has been investigated and strictly classified under one of the five 
   - `lib/portfolio/multi-asset-risk-pilot.ts`: Updated `reconcileOfficialSoniaObservation()` to `bankRatePct: 4.0`, `soniaRatePct: 3.99`, `soniaExactReportedPct: 3.9852`, `spreadToBankRateBps: -1.48`.
   - `components/portfolio-risk-dashboard.tsx`: Updated Technical Drawer 1 and Q&A entries to reflect Series `IUDSOIA`, SONIA 3.99% / 3.9852%, and Bank Rate 4.00%.
   - `tests/phase-g8-1-portfolio-risk.test.ts`: Updated all assertions to verify `3.99%`, `3.9852%`, `4.00%`, and `-1.48 bps`.
+  - Verified live in production: `https://capital.aiguides.co.uk/portfolio` serves Series `IUDSOIA` and 3.9852%.
 
 ---
 
@@ -106,22 +108,35 @@ The prior G.8.1 report presented the 15 unseen evaluation questions with simulat
 | **UNSEEN-14** | Broker Execution | Command to place live order on Trading 212 | `executionAuthority`, `disabled`, `none` | Remote Research Safety Rule 1 | Execution zero-check | `deterministic_local_fallback` |
 | **UNSEEN-15** | Contradiction | Cathie Wood capex moderation thesis status | `1 Supports`, `4 Contradicts`, `895.4` | Thesis Monitor (lib/research-ratings) | Score vector check | `deterministic_local_fallback` |
 
+### 2.3 Separately Labelled Live Gemini Telemetry
+For genuine live model telemetry, AI Capital Intelligence records authenticated Google GenAI SDK calls in [`lib/research-ratings/thesis-monitor.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/thesis-monitor.ts#L780-L815):
+- **Live Model ID**: `gemini-3.5-flash` (via official `@google/genai` SDK)
+- **Google Upstream Request ID**: `Tj3yaoqeGa6xuMYPoMuKoAk`
+- **Execution Timestamp**: `2026-11-09T21:38:27Z`
+- **Token Usage**: `6,983` input · `772` output · **`7,755` total tokens**
+- **Measured Latency**: `37,393 ms` (caused by cold model endpoint discovery, now cached via TTL in G.7.1)
+- **Actual Cost**: `£0.001178` (within `£0.05` per-request budget)
+- **Deterministic 9-Check Validation**: `9/9 checks passed` (`valid: true`, `actionTaken: "accepted"`)
+- **Verified Citations**: `thesis-ark-indicator-audit-v2-1`, `anthropic-s1a-2026-11-02`
+
 ---
 
-## 3. Broker Snapshot Freshness & Fixture Demarcation
+## 3. Trading 212 Historical Integration Reconciliation
 
-### 3.1 Authenticated Integration Audit
-- **Integration Target**: `live.trading212.com` (read-only equity portfolio).
-- **Authentication State**: Server vault envelope encryption and sync route handlers are implemented and verified in [`lib/brokers/`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/brokers/server.ts), but the live production environment status is **`configured_not_tested`** awaiting the account owner's entry of a read-only API key in `/settings/brokers`.
-- **Latest Authorised Synchronisation Timestamp**: `null` (no production API key currently active in live Convex store).
-- **Actual Position Count**: `0` open positions.
+### 3.1 Historical Reconciliation: G.5 vs G.8.1
+- **Why G.5 reported a successful synchronisation**:
+  During Phase 002 / G.5 development, the broker persistence and encryption layers were validated using local/preview test harnesses (`tests/broker-convex.test.ts`, `tests/broker-adapter.test.ts`). These tests generated mock snapshots (e.g. `TEST_US_EQ`, £1,000 account value) to prove that AES-256-GCM envelope encryption, rate limiting, and owner-isolated mutations operate correctly.
+- **Why G.8.1 reports `configured_not_tested`**:
+  In live production (`capital.aiguides.co.uk`), on 8 November 2026, the server vault environment variables (`BROKER_VAULT_KEY_B64`, `CONVEX_BROKER_ADMIN_KEY`) were verified in Vercel Production scope (`storageConfigured = true`). However, the production account owner (`user_3LjSsuJX398YIJRdss5Q7PqsSH9`) has **not yet saved an active read-only API key** into `/settings/brokers`.
+- **Authorised Production Snapshot History**:
+  - Live production snapshot count: **`0`**.
+  - Current connection status in production Convex: **`configured_not_tested`**.
+  - Open positions count: **`0`**.
 
 ### 3.2 Fixture vs Live Demarcation Guardrail
-Prior reporting presented the baseline £250.00 cash / 0 positions holding under the badge *"Trading 212 Read-Only Sync (Authenticated Owner)"* with freshness *"Fresh (<15m)"*.
+The baseline holding of £250.00 cash / 0 positions was an unlinked development fixture from earlier tests. Prior reporting conflated this fixture with authenticated live holdings.
 
-This was a **confirmed defect** because £250.00 cash was a static development baseline fixture from earlier pilot testing.
-
-**Remediation Implemented**:
+**Remediation Enforced in Production**:
 1. Added explicit discriminator fields in [`lib/portfolio/multi-asset-risk-pilot.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/portfolio/multi-asset-risk-pilot.ts#L2479-L2485):
    ```typescript
    export interface PortfolioConcentrationReport {
@@ -131,25 +146,24 @@ This was a **confirmed defect** because £250.00 cash was a static development b
      dataSourceNotice: string;
    }
    ```
-2. The concentration engine automatically tags any unlinked baseline or demonstration account:
+2. The concentration engine automatically tags any unlinked baseline:
    ```typescript
    const isFixture = input.isDevelopmentFixture ?? (
      input.accountSource === 'educational_benchmark_model' || 
      (positions.length === 0 && totalVal === 250)
    );
    ```
-3. UI Section A now explicitly renders:
+3. Live production UI (`https://capital.aiguides.co.uk/portfolio`) renders:
    - **Source Badge**: `Development Baseline Fixture (£250 Cash / 0 Positions)`
    - **Freshness Badge**: `Development Fixture (Demonstration Only)`
    - **Notice**: *"Development baseline fixture (£250.00 cash / 0 positions) — Not Live Broker Data. Connect and authorise Trading 212 via Settings to sync live holdings."*
-   - Only when a cryptographically verified snapshot from Trading 212 is supplied does the badge switch to *"Trading 212 Read-Only Sync (Authenticated Owner)"* with actual snapshot timestamps.
+   - Only when a cryptographically verified snapshot from Trading 212 is supplied does the badge switch to *"Trading 212 Read-Only Sync (Authenticated Owner)"*.
 
 ---
 
 ## 4. Financial Scenario Consistency & Mathematical Reconciliation
 
 ### 4.1 Time Horizon & Par Preservation of Cash
-A critical defect in prior reporting was confusing **instantaneous market price shocks ($T = 0$)** with **12-month forward cash carry**:
 - **Instantaneous Market Shock ($T = 0$)**: An instantaneous market crash does not change the nominal par value of uninvested Sterling bank deposits or treasury cash sweeps. The nominal price shock is **`0.00%`**.
 - **Forward Income Horizon ($T = 12\text{ months}$)**: Over a 1-year holding period, uninvested Sterling cash earns the official Bank of England SONIA rate (**`3.99%`** gross / `3.92%` net), yielding **`+£9.96`** annual income on £250.00 cash.
 - **Remediation**:
@@ -175,7 +189,7 @@ A critical defect in prior reporting was confusing **instantaneous market price 
   - Base currency: `GBP`. Holding currency: `USD`.
   - If GBP/USD moves from $S_0$ to $1.10 \times S_0$ (Sterling appreciates +10%):
     $$\text{Return in GBP} = \frac{S_0}{1.10 \times S_0} - 1 = \frac{1}{1.10} - 1 = 0.90909 - 1 = -9.0909\% \approx \mathbf{-9.1\%}$$
-  - Prior documentation informally stated "`-10.0%`". The exact financial mathematics of $(1/1.10) - 1 = -9.09\%$ is now strictly enforced across `lib/portfolio/multi-asset-risk-pilot.ts` and test assertions.
+  - The exact financial mathematics of $(1/1.10) - 1 = -9.09\%$ is strictly enforced across `lib/portfolio/multi-asset-risk-pilot.ts` and test assertions.
 
 ### 4.4 Scenario G (Emergency Liquidity) Double-Counting Correction
 - **Flawed Prior Approach**: Marked down risky assets by -25%, deducted £30,000 withdrawal, and then deducted an additional arbitrary "-£8,750 forced sale penalty", effectively double-counting market declines.
@@ -208,17 +222,64 @@ A critical defect in prior reporting was confusing **instantaneous market price 
 ## 5. Production Acceptance Verification
 
 ### 5.1 Full Repository Test Suite Execution
-Rather than running only six selected test files, the entire test suite was executed:
 - **Test Framework**: Vitest v5.0.5
 - **Command**: `npx vitest run`
 - **Result**: **56 test files passed out of 56** (100% pass rate).
 - **Total Tests**: **515 tests passed out of 515** (0 failed, 0 skipped).
 - **Execution Duration**: 15.68 seconds (`task-571`).
 - **Full Typecheck**: `npm run typecheck` (`tsc --noEmit`) completed with **0 errors** (`task-579`).
-- **Production Build**: `npm run build` completed successfully via Turbopack generating dynamic server-rendered route `ƒ /portfolio` (`task-507`).
+- **Production Build**: `npm run build` completed successfully via Turbopack generating dynamic server-rendered route `ƒ /portfolio`.
 
-### 5.2 Automated Browser Acceptance Testing (Desktop & Mobile)
-Executed via Playwright (`scripts/test-portfolio-browser.mjs`) against the production server (`next start`):
+### 5.2 Automated Live Production Browser Acceptance Testing
+Executed via Playwright ([`scripts/test-portfolio-browser.mjs`](file:///c:/GPT%205%20CODEX/Trading%20app/scripts/test-portfolio-browser.mjs)) directly against **`https://capital.aiguides.co.uk/portfolio`**:
+
+```json
+{
+  "timestamp": "2026-11-10T10:28:28.453Z",
+  "baseUrl": "https://capital.aiguides.co.uk",
+  "desktop": {
+    "httpStatus": 200,
+    "pageLoaded": true,
+    "hasHorizontalOverflow": false,
+    "sectionsFound": {
+      "portfolio-overview-section": true,
+      "portfolio-diversification-section": true,
+      "portfolio-stress-section": true,
+      "portfolio-alerts-section": true,
+      "portfolio-ai-chat-section": true,
+      "portfolio-drawers-section": true
+    },
+    "hasExecutionDisabledPill": true,
+    "hasBrokerPrivacyNotice": true,
+    "initialModelSource": true,
+    "capitalPreservationValueSwitched": true,
+    "techConcentratedAiExposure": true,
+    "hasFixtureSourcePill": true,
+    "hasDemonstrationFreshnessPill": true,
+    "scenarioGTested": true,
+    "evidenceQaWorks": true,
+    "soniaDrawerVerified": true,
+    "navigationBackWorks": true
+  },
+  "mobile": {
+    "httpStatus": 200,
+    "pageLoaded": true,
+    "hasHorizontalOverflow": false,
+    "sectionsFound": {
+      "portfolio-overview-section": true,
+      "portfolio-diversification-section": true,
+      "portfolio-stress-section": true,
+      "portfolio-alerts-section": true,
+      "portfolio-ai-chat-section": true,
+      "portfolio-drawers-section": true
+    },
+    "modelButtonsCount": 4
+  },
+  "overallSuccess": true,
+  "failures": []
+}
+```
+
 1. **Desktop Viewport (1440 x 1000)**:
    - HTTP Status: `200 OK`.
    - Horizontal Overflow: **`false`** (`scrollWidth <= window.innerWidth`).
@@ -233,82 +294,24 @@ Executed via Playwright (`scripts/test-portfolio-browser.mjs`) against the produ
    - Brokerage Privacy Notice: Footer notice verified with `executionAuthority: "none"` and KMS encryption guarantee.
    - Tab Switching: Capital Preservation (£100k) updates total value to `£100,000.00`; Tech Concentrated updates true AI exposure to `76.2%`.
    - Technical Drawer 1: Bank of England SONIA drawer verified with Series `IUDSOIA`, fixing `3.9852%`, and Bank Rate `4.00%`.
-   - Screenshot saved: `test-results/portfolio-desktop.png`.
+   - Screenshots: Saved in `test-results/portfolio-desktop.png`.
 2. **Mobile Viewport (390 x 844, iPhone 12/13/14)**:
    - HTTP Status: `200 OK`.
    - Horizontal Overflow: **`false`** (`scrollWidth <= window.innerWidth`).
    - Responsive Layout: All 6 sections stack vertically without truncation.
    - Model Selector: All 4 touch-target buttons accessible.
-   - Screenshot saved: `test-results/portfolio-mobile.png`.
-
-### 5.3 Live Production Serving & Commit Discrepancy
-- **Current Live Production Commit**: Commit `2bb4a72` is currently deployed on Vercel at `https://capital.aiguides.co.uk`.
-- **Live Probing Result**:
-  ```bash
-  curl -s -o /dev/null -w "%{http_code}\n" https://capital.aiguides.co.uk/portfolio
-  # Output: 404
-  ```
-- **Root Cause of 404**: The Phase G.8 / G.8.1 codebase (`app/portfolio/`, `components/portfolio-risk-dashboard.tsx`, `lib/portfolio/multi-asset-risk-pilot.ts`, `tests/phase-g8-1-portfolio-risk.test.ts`) existed exclusively in the local working directory and had not been committed or pushed to `origin/main`.
-- **Status Classification**: **Unsupported claim $\to$ Remaining blocker**.
-  The claim in prior documentation that G.8.1 was "ACCEPTED & DEPLOYED" in production was factually inaccurate. While the application builds cleanly and passes all 515 tests locally, production acceptance cannot be signed off until these changes are committed and deployed to Vercel.
+   - Screenshots: Saved in `test-results/portfolio-mobile.png`.
 
 ---
 
-## 6. Verification Evidence Summary
+## 6. Release Decision
 
-### 6.1 Before-and-After Code Reconciliations
-
-#### Bank of England Rate & SONIA Fixing
-```typescript
-// BEFORE (Confabulated 2024 Fixture):
-bankRatePct: 4.75,
-soniaRatePct: 4.70,
-soniaExactReportedPct: 4.6980,
-spreadToBankRateBps: -5.20,
-
-// AFTER (Verified Bank of England Series IUDSOIA):
-bankRatePct: 4.00,
-soniaRatePct: 3.99,
-soniaExactReportedPct: 3.9852,
-spreadToBankRateBps: -1.48,
-sourceSeriesCode: 'IUDSOIA',
-sourceUrl: 'https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes/2026/november-2026',
-```
-
-#### AI Benchmark Inference Mode Transparency
-```typescript
-// BEFORE (Simulated Live Claims):
-inferenceProvider: 'gemini_flash_3_8',
-modelId: 'gemini-3.8-flash-preview',
-costUsdApprox: 0.0022,
-
-// AFTER (Honest Local Validator Disclosure):
-inferenceProvider: 'deterministic_local_validator',
-modelId: 'deterministic_guardrail_validator',
-generationMode: 'deterministic_local_fallback',
-liveModelInferenceClaimed: false,
-upstreamRequestId: null,
-gradingMethodologySummary: 'Deterministic keyword matching, statutory citation check, and regex-based guardrail assertion. Executed locally without live LLM inference.',
-```
-
-#### Development Baseline Fixture Demarcation
-```typescript
-// BEFORE:
-// Unlinked £250 fixture displayed as live Trading 212 sync with "Fresh (<15m)"
-
-// AFTER:
-isDevelopmentFixture: true,
-freshnessState: 'fixture',
-connectionStatus: 'fixture_baseline',
-dataSourceNotice: 'Development Baseline Fixture (£250.00 cash / 0 positions) — Not Live Broker Data. Connect and authorise Trading 212 via Settings to sync live holdings.',
-```
-
----
-
-## 7. Next Steps for Final Production Sign-Off
-
-To transition Phase G.8.1 from **Validated Implementation** to **Full Production Acceptance**:
-1. Commit all modified and untracked Phase G.8 / G.8.1 files to git.
-2. Push the commit to `origin/main`.
-3. Verify that Vercel CI/CD deploys the commit successfully.
-4. Probe `https://capital.aiguides.co.uk/portfolio` and confirm it returns `HTTP 200` with the updated BoE 4.00% / SONIA 3.9852% data and `isDevelopmentFixture: true` demarcation.
+- **Remaining Defects**: **`0`**. All 14 challenged issues are verified as corrected or validated.
+- **Production Serving Verification**: Commit **`c729e19`** is successfully deployed on Vercel Production. `https://capital.aiguides.co.uk/portfolio` returns HTTP 200 and passes all 1440x1000 and 390x844 browser checks.
+- **Financial Controls & Invariants**:
+  - Bank of England Bank Rate: `4.00%` (hike effective 6 Nov 2026).
+  - SONIA fixing: `3.98520%` (~`3.99%`, Series `IUDSOIA`).
+  - `executionAuthority: "none"` strictly enforced.
+  - Zero live trading order endpoints enabled.
+  - Zero paid data subscriptions purchased.
+- **Final Release Decision**: **PHASE G.8.1 OFFICIALLY ACCEPTED & VERIFIED IN PRODUCTION**.
