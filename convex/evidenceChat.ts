@@ -511,7 +511,14 @@ export const recordEvidenceChatTurn = mutation({
  */
 export const checkGeminiProviderStatusAction = action({
   args: {},
-  handler: async () => {
+  handler: async (ctx) => {
+    // MVP hardening: previously anonymous, letting any caller make this deployment call the provider with its key.
+    const rawIdentity = await ctx.auth.getUserIdentity();
+    if (!rawIdentity) throw new Error('Sign in required');
+    const identity = verifyIdentityClaims(rawIdentity);
+    if (identity.actorType !== undefined && identity.actorType !== 'human') {
+      throw new Error('Automated actors cannot probe the model provider');
+    }
     return await checkGeminiProviderAvailability({
       verifyEndpoint: true,
       timeoutMs: 8_000,

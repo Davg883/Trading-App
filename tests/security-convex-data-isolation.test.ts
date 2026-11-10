@@ -190,3 +190,10 @@ describe('WP1 — authenticated owners see only their own records',()=>{
   await expect(model.query(chatQ('getChatOperationsTelemetry'),{})).rejects.toThrow('Model or automated actors');
  });
 });
+
+describe('WP1 — no remaining anonymous provider probe',()=>{
+ it('checkGeminiProviderStatusAction requires a verified human identity',async()=>{
+  const {t}=await setup(A);
+  await expect(t.action(makeFunctionReference<'action'>('evidenceChat:checkGeminiProviderStatusAction'),{})).rejects.toThrow('Sign in required');
+ });
+});
