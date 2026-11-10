@@ -31,6 +31,9 @@ const internalMutation: MutationBuilder<DataModel, 'internal'> = internalMutatio
 const iqRef = (name: string) => makeFunctionReference<'query'>(`evidenceChat:${name}`);
 const imRef = (name: string) => makeFunctionReference<'mutation'>(`evidenceChat:${name}`);
 
+/** Per-owner ceiling enforced from the shared audit table (not from process memory). */
+export const SHARED_CHAT_TURNS_PER_MINUTE = 10;
+
 function validOwner(owner: string) {
   if (!owner.trim() || owner.length > 1000) throw new Error('Owner required');
 }
@@ -101,6 +104,10 @@ export const getChatRetrievalContextInternal = internalQuery({
       publicProjectedRelationships,
       dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
       dailyChatSpendGbp,
+      // Shared (database-derived) request rate: every server instance sees the same count, unlike the
+      // per-process limiter in the provider adapter. Counts recorded turns, so a burst of in-flight
+      // requests can briefly exceed it.
+      turnsLastMinute: recentChatTurns.filter((t) => t.createdAtMs >= Date.now() - 60_000).length,
     };
   },
 });
@@ -244,7 +251,11 @@ export const askEvidenceLockedQuestion = action({
       publicProjectedRelationships: MacroRelationship[];
       dailyCostCeilingGbp: number;
       dailyChatSpendGbp: number;
+      turnsLastMinute: number;
     };
+    if (retrievalCtx.turnsLastMinute >= SHARED_CHAT_TURNS_PER_MINUTE) {
+      throw new Error('Rate limit exceeded: too many research chat turns in the last minute');
+    }
 
     // Merge base acceptance dataset with any additional projected `public_research` relationships
     const baseDataset = loadInitialAcceptanceDataset();
@@ -459,6 +470,10 @@ export const getChatRetrievalContext = query({
       publicProjectedRelationships,
       dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
       dailyChatSpendGbp,
+      // Shared (database-derived) request rate: every server instance sees the same count, unlike the
+      // per-process limiter in the provider adapter. Counts recorded turns, so a burst of in-flight
+      // requests can briefly exceed it.
+      turnsLastMinute: recentChatTurns.filter((t) => t.createdAtMs >= Date.now() - 60_000).length,
     };
   },
 });

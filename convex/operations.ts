@@ -317,6 +317,8 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  );
  const typedbDatabaseName=process.env.TYPEDB_DATABASE||'aci_macro_intelligence_staging';
  const typedbConfigured=Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_PASSWORD);
+ const typedbAddress=process.env.TYPEDB_HTTP_ADDRESS??'';
+ const typedbTransport=typedbAddress.startsWith('https://')?'HTTPS configured':typedbAddress?'no TLS configured':'address not configured';
 
  const graphProjection:GraphProjectionOperationsSummary={
   databaseName:typedbDatabaseName,
@@ -343,29 +345,29 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    name:'Vercel Production Hosting',
    environmentTarget:'https://capital.aiguides.co.uk',
    status:'connected',
-   lastVerifiedAt:now,
-   detail:'Next.js 16.4.3 production build serving Command Centre (/) and Macro Data Room (/data-room).',
+   lastVerifiedAt:null,
+   detail:'Next.js application hosting. Convex cannot observe the web tier, so this row is declarative and carries no verification time.',
   },
   {
    serviceId:'clerk_production',
    name:'Clerk Authentication & Tenant Isolation',
-   environmentTarget:'clerk.capital.aiguides.co.uk / harmless-akita-9211',
-   status:'connected',
-   lastVerifiedAt:now,
-   detail:'Owner & researcher RBAC enforced across Convex queries, mutations, and server routes; two-user isolation verified.',
+   environmentTarget:'Clerk (issuer configured in CLERK_JWT_ISSUER_DOMAIN)',
+   status:process.env.CLERK_JWT_ISSUER_DOMAIN?'connected':'unavailable',
+   lastVerifiedAt:null,
+   detail:'Convex verifies token issuer, audience and authorised party for every owner-scoped function. This row reports configuration; it is not a live authentication probe.',
   },
   {
    serviceId:'convex_production',
    name:'Convex Cloud Persistence & Scheduler',
-   environmentTarget:'benevolent-magpie-921 (AWS eu-west-1)',
+   environmentTarget:'Convex Cloud deployment',
    status:(settings?.systemEnabled??true)?'connected':'degraded',
-   lastVerifiedAt:secJob?.lastRunAt??mktJob?.lastRunAt??now,
+   lastVerifiedAt:secJob?.lastRunAt??mktJob?.lastRunAt??null,
    detail:'Authoritative evidence store & unattended 15m cloud cron + 07:30 Europe/London briefing active with local dev server off.',
   },
   {
    serviceId:'typedb_cloud',
    name:'TypeDB Cloud 3.14.2 Knowledge Graph',
-   environmentTarget:`teoxx0-0.cluster.typedb.com:80 (${typedbDatabaseName})`,
+   environmentTarget:`TypeDB Cloud (${typedbDatabaseName})`,
    status:
     !typedbConfigured&&graphProjection.projectedCount===0
      ?'unavailable'
@@ -373,7 +375,7 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
       ?'degraded'
       :'connected',
    lastVerifiedAt:graphProjection.updatedAtMs,
-   detail:`TLS enabled · ${graphProjection.projectedCount} relationship(s) projected · ${graphProjection.deadLetterCount} dead-letter · ${graphProjection.maxProjectionLagMs}ms lag · ${graphProjection.productionIsolated?'production DB isolated from staging replays':'staging DB active'}.`,
+   detail:`${typedbTransport} (from the connection address, not a handshake check) · ${graphProjection.projectedCount} relationship(s) projected · ${graphProjection.deadLetterCount} dead-letter · ${graphProjection.maxProjectionLagMs}ms lag · ${graphProjection.productionIsolated?'production DB isolated from staging replays':'staging DB active'}.`,
   },
   {
    serviceId:'financial_collectors',

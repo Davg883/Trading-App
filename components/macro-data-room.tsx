@@ -1011,20 +1011,27 @@ export default function MacroDataRoom({
         </div>
         <div className="data-room-status-cluster">
           <span className="dr-pill live" data-testid="typedb-live-pill">
-            TypeDB Server:{' '}
+            TypeDB server probe:{' '}
             {liveTypeDbStatus.reachable
-              ? `LIVE (${liveTypeDbStatus.version})${
+              ? `REACHABLE (${liveTypeDbStatus.version})${
                   liveTypeDbStatus.databaseName
                     ? ` · ${liveTypeDbStatus.databaseName}`
                     : ''
-                }${liveTypeDbStatus.tlsEnabled ? ' · TLS' : ''}`
-              : 'MIRROR FALLBACK'}
+                }${liveTypeDbStatus.tlsEnabled ? ' · HTTPS configured' : ' · no TLS configured'}`
+              : 'NOT REACHABLE'}
+          </span>
+          <span
+            className="dr-pill"
+            data-testid="graph-data-source-pill"
+            title="The connectivity probe does not mean the graph on this page was read from TypeDB. Graph views on this page render the reviewed acceptance dataset bundled with the application; individual query results state their own backend mode."
+          >
+            Displayed graph: static repository dataset (not a live TypeDB read)
           </span>
           <span className="dr-pill" data-testid="projection-lag-pill">
             Outbox:{' '}
             {simulatedOutboxFailureRelId
               ? 'STALE (1 retrying / dead_letter)'
-              : `${dataset.relationships.length}/${dataset.relationships.length} Projected (0ms lag)`}
+              : `${dataset.relationships.length} relationships in bundled dataset (projection lag not measured here)`}
           </span>
           <Link
             href="/"

@@ -44,6 +44,9 @@ export const ALLOWLISTED_GEMINI_MODELS = [
 const INPUT_COST_GBP_PER_TOKEN = 0.117 / 1_000_000;
 const OUTPUT_COST_GBP_PER_TOKEN = 0.468 / 1_000_000;
 
+// PROCESS-LOCAL limiter. On serverless hosting each instance has its own Map and instances are recycled, so
+// this bounds bursts within one warm instance only. It is NOT a deployment-wide rate limit and must not be
+// described as one. Cost ceilings and the shared per-owner turn limit are enforced from Convex instead.
 const callerChatRateWindow = new Map<string, number[]>();
 let cachedVerifiedModelEndpoint: {
   modelId: string;

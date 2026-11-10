@@ -53,6 +53,9 @@ export function assertNoBrokerOrPrivateAccountData(payload: unknown): void {
   }
 }
 
+// PROCESS-LOCAL limiter. On serverless hosting each instance has its own Map and instances are recycled, so
+// this bounds bursts within one warm instance only. It is NOT a deployment-wide rate limit and must not be
+// described as one. Cost ceilings and the shared per-owner turn limit are enforced from Convex instead.
 // Per-caller sliding-window rate limiter (default: 60 requests / 60 seconds)
 const callerWindowMap = new Map<string, number[]>();
 

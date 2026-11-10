@@ -29,44 +29,173 @@ export type TypeDbConnectionConfig = {
   username: string;
   password: string;
   databaseName: string;
+  /** Set when the settings are missing or insecure; no connection is attempted while present. */
+  blockedReason?: string;
 };
 
+const LOCAL_DEV_TYPEDB_ADDRESS = 'http://127.0.0.1:8000';
+
+function isLoopbackAddress(address: string): boolean {
+  try {
+    const host = new URL(address).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/** True for any hosted runtime: a production/preview Next.js build or the Convex cloud runtime. */
+function isHostedRuntime(env: Record<string, string | undefined>): boolean {
+  return (
+    env.NODE_ENV === 'production' ||
+    env.VERCEL_ENV === 'production' ||
+    env.VERCEL_ENV === 'preview' ||
+    Boolean(env.CONVEX_CLOUD_URL)
+  );
+}
+
+/**
+ * Resolves the TypeDB connection settings.
+ *
+ * Security (MVP hardening WP4): the TypeDB Community Edition defaults (`admin` / `password` on
+ * `127.0.0.1:8000`) are a local-development convenience only. They are used solely when no address is
+ * configured, the runtime is not hosted, and the target is a loopback address. In every other case missing
+ * settings produce a config carrying `blockedReason`; `createTypeDbDriver` then refuses to connect, so a
+ * misconfigured production deployment fails closed instead of silently trying default credentials.
+ */
 export function defaultTypeDbConfig(
   databaseName = STAGING_TYPEDB_DATABASE,
+  env: Record<string, string | undefined> = process.env,
 ): TypeDbConnectionConfig {
+  const address = env.TYPEDB_HTTP_ADDRESS?.trim() || '';
+  const username = env.TYPEDB_USERNAME?.trim() || '';
+  const password = env.TYPEDB_PASSWORD || '';
+  const database = env.TYPEDB_DATABASE || databaseName;
+  const hosted = isHostedRuntime(env);
+
+  if (!address) {
+    if (hosted) {
+      return {
+        httpAddress: '',
+        username: '',
+        password: '',
+        databaseName: database,
+        blockedReason: 'TYPEDB_HTTP_ADDRESS is not configured for this hosted runtime',
+      };
+    }
+    return {
+      httpAddress: LOCAL_DEV_TYPEDB_ADDRESS,
+      username: username || 'admin',
+      password: password || 'password',
+      databaseName: database,
+    };
+  }
+  if (!username || !password) {
+    if (!hosted && isLoopbackAddress(address)) {
+      return {
+        httpAddress: address,
+        username: username || 'admin',
+        password: password || 'password',
+        databaseName: database,
+      };
+    }
+    return {
+      httpAddress: address,
+      username: '',
+      password: '',
+      databaseName: database,
+      blockedReason: 'TYPEDB_USERNAME and TYPEDB_PASSWORD are required for a non-local TypeDB server',
+    };
+  }
+  if (password === 'password' && (hosted || !isLoopbackAddress(address))) {
+    return {
+      httpAddress: address,
+      username,
+      password: '',
+      databaseName: database,
+      blockedReason: 'The TypeDB default password is refused outside local development',
+    };
+  }
+  return { httpAddress: address, username, password, databaseName: database };
+}
+
+export class TypeDbConfigurationError extends Error {
+  constructor(reason: string) {
+    super(`TypeDB connection refused: ${reason}`);
+    this.name = 'TypeDbConfigurationError';
+  }
+}
+
+/** The only place a TypeDB driver is constructed; refuses blocked or incomplete configurations. */
+export function createTypeDbDriver(config: TypeDbConnectionConfig): TypeDBHttpDriver {
+  if (config.blockedReason) throw new TypeDbConfigurationError(config.blockedReason);
+  if (!config.httpAddress || !config.username || !config.password)
+    throw new TypeDbConfigurationError('incomplete connection settings');
+  return new TypeDBHttpDriver({
+    username: config.username,
+    password: config.password,
+    addresses: [config.httpAddress],
+  });
+}
+
+/**
+ * Transport security of the configured connection, derived from the address scheme that the driver will
+ * actually use. It is never inferred from a database name or from an operator-set "TLS enabled" flag.
+ * `verified` is false because this describes configuration; it is not a certificate or handshake check.
+ */
+export function describeTypeDbTransport(config = defaultTypeDbConfig()): {
+  configured: boolean;
+  scheme: 'https' | 'http' | 'unknown';
+  tlsEnabled: boolean;
+  loopback: boolean;
+  basis: 'connection_address_scheme';
+  verified: false;
+} {
+  let scheme: 'https' | 'http' | 'unknown' = 'unknown';
+  try {
+    const protocol = new URL(config.httpAddress).protocol;
+    scheme = protocol === 'https:' ? 'https' : protocol === 'http:' ? 'http' : 'unknown';
+  } catch {
+    scheme = 'unknown';
+  }
   return {
-    httpAddress: process.env.TYPEDB_HTTP_ADDRESS || 'http://127.0.0.1:8000',
-    username: process.env.TYPEDB_USERNAME || 'admin',
-    password: process.env.TYPEDB_PASSWORD || 'password',
-    databaseName: process.env.TYPEDB_DATABASE || databaseName,
+    configured: !config.blockedReason && Boolean(config.httpAddress),
+    scheme,
+    tlsEnabled: scheme === 'https',
+    loopback: Boolean(config.httpAddress) && isLoopbackAddress(config.httpAddress),
+    basis: 'connection_address_scheme',
+    verified: false,
   };
 }
 
-function resolveConvexCloudBridgeUrl(config?: TypeDbConnectionConfig): string | null {
-  if (
-    process.env.TYPEDB_PASSWORD &&
-    process.env.TYPEDB_PASSWORD !== 'password' &&
-    config?.httpAddress &&
-    !config.httpAddress.includes('127.0.0.1')
-  ) {
-    return null;
-  }
-  const url =
-    process.env.NEXT_PUBLIC_CONVEX_URL ||
-    'https://prestigious-dragon-8.eu-west-1.convex.cloud';
-  return url.startsWith('https://') ? url : null;
+/**
+ * Server-to-Convex TypeDB bridge. Used only when this server holds no usable TypeDB credentials.
+ * Security (MVP hardening WP4): the bridge actions used to be anonymous public Convex actions, and the URL
+ * fell back to a hard-coded deployment. The bridge now needs an explicitly configured Convex URL and a
+ * dedicated `TYPEDB_BRIDGE_SECRET` shared only between this server and the Convex deployment.
+ */
+function resolveConvexCloudBridge(
+  config?: TypeDbConnectionConfig,
+): { url: string; bridgeKey: string } | null {
+  if (config && !config.blockedReason && !isLoopbackAddress(config.httpAddress)) return null;
+  const url = process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
+  const bridgeKey = process.env.TYPEDB_BRIDGE_SECRET;
+  if (!url || !url.startsWith('https://') || !bridgeKey || bridgeKey.length < 32) return null;
+  return { url, bridgeKey };
 }
 
 async function callConvexCloudAction<T>(
-  convexUrl: string,
+  bridge: { url: string; bridgeKey: string },
   path: string,
   args: Record<string, unknown>,
 ): Promise<T | null> {
   try {
-    const resp = await fetch(`${convexUrl}/api/action`, {
+    const resp = await fetch(`${bridge.url}/api/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, args, format: 'json' }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({ path, args: { ...args, bridgeKey: bridge.bridgeKey }, format: 'json' }),
     });
     if (!resp.ok) return null;
     const payload = (await resp.json()) as { status?: string; value?: T };
@@ -120,14 +249,10 @@ export async function probeTypeDbServer(
 }> {
   const startedAt = Date.now();
   try {
-    const driver = new TypeDBHttpDriver({
-      username: config.username,
-      password: config.password,
-      addresses: [config.httpAddress],
-    });
+    const driver = createTypeDbDriver(config);
     const res = await driver.version();
     if (isApiErrorResponse(res)) {
-      const convexUrl = resolveConvexCloudBridgeUrl(config);
+      const convexUrl = resolveConvexCloudBridge(config);
       if (convexUrl) {
         const cloudVal = await callConvexCloudAction<{
           reachable: boolean;
@@ -181,7 +306,7 @@ export async function probeTypeDbServer(
       error: null,
     };
   } catch (err) {
-    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    const convexUrl = resolveConvexCloudBridge(config);
     if (convexUrl) {
       const cloudVal = await callConvexCloudAction<{
         reachable: boolean;
@@ -231,17 +356,13 @@ export async function projectDatasetIntoLiveTypeDb(
   if (options?.recreateDatabase) {
     assertCanRecreateTypeDbDatabase(config.databaseName);
   }
-  const driver = new TypeDBHttpDriver({
-    username: config.username,
-    password: config.password,
-    addresses: [config.httpAddress],
-  });
-
+  let driver: TypeDBHttpDriver;
   let versionRes;
   try {
+    driver = createTypeDbDriver(config);
     versionRes = await driver.version();
   } catch (err) {
-    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    const convexUrl = resolveConvexCloudBridge(config);
     if (convexUrl) {
       const cloudSync = await callConvexCloudAction<{
         datasetProjectionReport: LiveTypeDbProjectionReport | null;
@@ -257,7 +378,7 @@ export async function projectDatasetIntoLiveTypeDb(
     throw err;
   }
   if (isApiErrorResponse(versionRes)) {
-    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    const convexUrl = resolveConvexCloudBridge(config);
     if (convexUrl) {
       const cloudSync = await callConvexCloudAction<{
         datasetProjectionReport: LiveTypeDbProjectionReport | null;
@@ -437,11 +558,7 @@ export async function executeWriteStatementsOnLiveServer(
 }> {
   const startedAt = Date.now();
   try {
-    const driver = new TypeDBHttpDriver({
-      username: config.username,
-      password: config.password,
-      addresses: [config.httpAddress],
-    });
+    const driver = createTypeDbDriver(config);
     const tx = await driver.openTransaction(config.databaseName, 'write', {
       transactionTimeoutMillis: 20000,
     });
@@ -512,14 +629,10 @@ export async function executeReadOnlyTypeQlOnLiveServer(
 }> {
   const startedAt = Date.now();
   try {
-    const driver = new TypeDBHttpDriver({
-      username: config.username,
-      password: config.password,
-      addresses: [config.httpAddress],
-    });
+    const driver = createTypeDbDriver(config);
     const ver = await driver.version();
     if (isApiErrorResponse(ver)) {
-      const convexUrl = resolveConvexCloudBridgeUrl(config);
+      const convexUrl = resolveConvexCloudBridge(config);
       if (convexUrl) {
         const cloudRead = await callConvexCloudAction<{
           ok: boolean;
@@ -583,7 +696,7 @@ export async function executeReadOnlyTypeQlOnLiveServer(
       await driver.closeTransaction(tx.ok.transactionId).catch(() => {});
     }
   } catch (err) {
-    const convexUrl = resolveConvexCloudBridgeUrl(config);
+    const convexUrl = resolveConvexCloudBridge(config);
     if (convexUrl) {
       const cloudRead = await callConvexCloudAction<{
         ok: boolean;
@@ -643,11 +756,7 @@ export async function inspectLiveTypeDbGraphCounts(
 }> {
   const startedAt = Date.now();
   try {
-    const driver = new TypeDBHttpDriver({
-      username: config.username,
-      password: config.password,
-      addresses: [config.httpAddress],
-    });
+    const driver = createTypeDbDriver(config);
     const ver = await driver.version();
     if (isApiErrorResponse(ver)) {
       return {
@@ -772,11 +881,7 @@ export async function inspectLiveTypeDbReconciliationDetails(
 }> {
   const startedAt = Date.now();
   try {
-    const driver = new TypeDBHttpDriver({
-      username: config.username,
-      password: config.password,
-      addresses: [config.httpAddress],
-    });
+    const driver = createTypeDbDriver(config);
     const dbsRes = await driver.getDatabases();
     if (isApiErrorResponse(dbsRes)) {
       return {

@@ -23,6 +23,9 @@ import {
   recordAuthenticatedTurn,
 } from '../../../../lib/graph/evidence-chat-gateway';
 
+/** Must match `SHARED_CHAT_TURNS_PER_MINUTE` in convex/evidenceChat.ts. */
+const SHARED_CHAT_TURNS_PER_MINUTE = 10;
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -50,11 +53,9 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
   callerId: string;
   convexToken: string | null;
 } | null> {
-  if (
-    process.env.NODE_ENV === 'test' ||
-    (process.env.NODE_ENV !== 'production' &&
-      ['localhost', '127.0.0.1'].includes(new URL(req.url).hostname))
-  ) {
+  // Test-runner only. The previous localhost exception trusted the request's Host header on any
+  // non-production build, so it has been removed.
+  if (process.env.NODE_ENV === 'test' && !process.env.VERCEL_ENV) {
     const testCaller = req.headers.get('x-aci-test-caller');
     if (testCaller && testCaller.trim().length > 0) {
       return { callerId: testCaller.trim(), convexToken: null };
@@ -141,6 +142,7 @@ interface RetrievalContextData {
   publicProjectedRelationships: MacroRelationship[];
   dailyCostCeilingGbp: number;
   dailyChatSpendGbp: number;
+  turnsLastMinute?: number;
 }
 
 type AcceptanceSession = { token: string; reservation: string };
@@ -247,6 +249,15 @@ export async function POST(req: NextRequest) {
       } catch {
         retrievalCtx = null;
       }
+    }
+
+    // Shared rate limit derived from the owner's recorded turns in Convex. Unlike the in-memory limiter in
+    // the provider adapter, this holds across serverless instances.
+    if ((retrievalCtx?.turnsLastMinute ?? 0) >= SHARED_CHAT_TURNS_PER_MINUTE) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded: too many research chat turns in the last minute', executionAuthority: 'none' },
+        { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+      );
     }
 
     let mergedDataset: MacroGraphDataset | undefined;
