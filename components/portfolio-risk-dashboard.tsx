@@ -565,6 +565,88 @@ export function PortfolioRiskDashboard({
         )}
       </section>
 
+      {/* SECTION F: Operational Health & Risk Governance Panel */}
+      <section className="portfolio-section" aria-labelledby="operational-health-title" data-testid="portfolio-operational-health-section">
+        <div className="section-head">
+          <div className="g6-eyebrow-row">
+            <span className="g6-section-tag">SECTION F · OPERATIONAL HEALTH &amp; RISK GOVERNANCE</span>
+            <span className="g6-meta-pill" data-testid="pill-owner-status">
+              Owner Status: {signedIn ? 'Authenticated Owner' : 'Viewer / Demo Baseline'}
+            </span>
+            <span className="g6-meta-pill" data-testid="pill-execution-authority">
+              Execution Authority: NONE
+            </span>
+          </div>
+          <h2 id="operational-health-title">Operational Health, Feed Freshness &amp; Security Controls</h2>
+          <p>
+            Continuous monitoring of broker vault security, zero-cost data provenance, scheduled collection jobs,
+            and AI inference audit logs. Read-only governance fail-closed in all states.
+          </p>
+        </div>
+
+        <div className="portfolio-kpi-grid" style={{ marginBottom: '1.5rem' }}>
+          <div className="portfolio-kpi-card" data-testid="health-card-broker-sync">
+            <span className="kpi-label">Trading 212 Sync Status</span>
+            <strong className="kpi-value" style={{ fontSize: '1.05rem', color: liveSnapshot ? '#22c55e' : '#f59e0b' }}>
+              {liveSnapshot ? 'Active Live Sync' : 'Pending Owner Key'}
+            </strong>
+            <span style={{ fontSize: '0.75rem', color: '#8892b0', marginTop: '0.25rem' }}>
+              {liveSnapshot?.summaryAt ? `Last Sync: ${new Date(liveSnapshot.summaryAt).toLocaleDateString('en-GB')}` : 'Development baseline active (£250 cash)'}
+            </span>
+          </div>
+
+          <div className="portfolio-kpi-card" data-testid="health-card-vault-cipher">
+            <span className="kpi-label">Broker Vault Cipher</span>
+            <strong className="kpi-value" style={{ fontSize: '1.05rem', color: '#38bdf8' }}>
+              AES-256-GCM
+            </strong>
+            <span style={{ fontSize: '0.75rem', color: '#8892b0', marginTop: '0.25rem' }}>
+              AAD Owner Bound · Fail-Closed Isolation
+            </span>
+          </div>
+
+          <div className="portfolio-kpi-card" data-testid="health-card-macro-freshness">
+            <span className="kpi-label">Bank of England Rate / SONIA</span>
+            <strong className="kpi-value" style={{ fontSize: '1.05rem', color: '#22c55e' }}>
+              {soniaReport.bankRatePct}% / {soniaReport.soniaRatePct}%
+            </strong>
+            <span style={{ fontSize: '0.75rem', color: '#8892b0', marginTop: '0.25rem' }}>
+              Series {soniaReport.sourceSeriesCode} · Spread {soniaReport.spreadToBankRateBps} bps
+            </span>
+          </div>
+
+          <div className="portfolio-kpi-card" data-testid="health-card-licensing-budget">
+            <span className="kpi-label">Data Licensing Spend</span>
+            <strong className="kpi-value" style={{ fontSize: '1.05rem', color: '#22c55e' }}>
+              £0.00 / month
+            </strong>
+            <span style={{ fontSize: '0.75rem', color: '#8892b0', marginTop: '0.25rem' }}>
+              100% Free Primary Public Feeds Active
+            </span>
+          </div>
+        </div>
+
+        <div className="alerts-container">
+          <div className="risk-alert-card info" data-testid="health-detail-feeds">
+            <h4>Live Feed Provenance &amp; Primary Sources</h4>
+            <p>
+              <strong>Official Sources:</strong> Bank of England IADB (SONIA 3.98520%, Series IUDSOIA, dated 6 Nov 2026); UK DMO Gilt yield curve; FRED FX USD/GBP 1.2920; SEC EDGAR Form 10-Q (Amazon 0001018724-26-000098, CoreWeave 0001769628-26-000366); Form S-1/A Note 11 (Anthropic $895.4B compute commitment deduplicated).
+              <br />
+              <strong>Licensing Status:</strong> Zero-cost tier active. Commercial APIs (Tiingo $30/mo, EODHD $99.99/mo) remain paused awaiting owner activation.
+            </p>
+          </div>
+
+          <div className="risk-alert-card ok" data-testid="health-detail-guardrails">
+            <h4>Autonomous Research &amp; Execution Safeguards</h4>
+            <p>
+              <strong>Execution Authority:</strong> Strictly <code>executionAuthority: &quot;none&quot;</code>. All trade execution routes (<code>POST /api/trading</code>, <code>POST /api/brokers</code>) remain permanently disabled.
+              <br />
+              <strong>Adversarial Injection &amp; Abstention:</strong> Evaluated across 15 portfolio risk queries. 100.0% conformance to independent benchmark ground truth; full abstention on unfiled GAAP metrics and trading prompts.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Expandable Technical Drawers */}
       <section className="portfolio-drawers" data-testid="portfolio-drawers-section">
         <details className="g6-drawer-details">

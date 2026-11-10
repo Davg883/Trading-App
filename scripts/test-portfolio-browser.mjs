@@ -62,13 +62,14 @@ async function runBrowserAcceptance() {
       results.failures.push('Desktop has horizontal overflow');
     }
 
-    // Check 6 sections
+    // Check 7 sections
     const sections = [
       'portfolio-overview-section',
       'portfolio-diversification-section',
       'portfolio-stress-section',
       'portfolio-alerts-section',
       'portfolio-ai-chat-section',
+      'portfolio-operational-health-section',
       'portfolio-drawers-section',
     ];
     results.desktop.sectionsFound = {};
@@ -177,6 +178,14 @@ async function runBrowserAcceptance() {
 
     if (!results.desktop.soniaDrawerVerified) {
       results.failures.push('SONIA Technical Drawer missing verified 3.9852% / 4.00% BoE data');
+    }
+
+    // Check Section F operational health elements
+    const brokerSyncCard = await desktopPage.$('[data-testid="health-card-broker-sync"]');
+    const vaultCipherCard = await desktopPage.$('[data-testid="health-card-vault-cipher"]');
+    results.desktop.operationalHealthCardsVerified = !!brokerSyncCard && !!vaultCipherCard;
+    if (!results.desktop.operationalHealthCardsVerified) {
+      results.failures.push('Section F operational health cards missing');
     }
 
     // Capture desktop screenshot
