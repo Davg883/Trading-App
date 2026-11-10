@@ -1,6 +1,7 @@
 import 'server-only';
 import {z} from 'zod';
 import {BROKER_BASE_URLS,BrokerError,brokerCredentialsSchema,brokerEnvironmentSchema,type BrokerCredentials,type BrokerEnvironment} from './contracts';
+import {assertExecutionPermitted} from '../trading/execution-boundary';
 import {brokerOrderSchema,brokerQuantity,instrumentSchema,type BrokerOrder,type Instrument,type OrderDraft} from '../trading/order-model';
 
 /**
@@ -69,6 +70,7 @@ export class Trading212OrderClient{
  }
  /** Exactly one attempt. The caller must already hold an atomic `submitting` claim for this order. */
  async submit(order:OrderDraft):Promise<SubmitResult>{
+  assertExecutionPermitted('broker order submission');
   if(!this.#enabled)throw new BrokerError('invalid_configuration');
   if(order.environment!==this.environment)throw new BrokerError('invalid_configuration');
   this.#pace('submit');
@@ -89,6 +91,7 @@ export class Trading212OrderClient{
  }
  /** Cancellation is not guaranteed if the order is already filling (documented); status must be re-read afterwards. */
  async cancel(id:number){
+  assertExecutionPermitted('broker order cancellation');
   if(!this.#enabled)throw new BrokerError('invalid_configuration');if(!Number.isSafeInteger(id)||id<=0)throw new BrokerError('invalid_configuration');
   this.#pace('cancel');let response:Response;
   try{response=await this.#request('DELETE',`/equity/orders/${id}`);}catch(e){throw new BrokerError((e as Error)?.name==='AbortError'?'timeout':'provider_unavailable');}

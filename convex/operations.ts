@@ -420,10 +420,10 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   {
    serviceId:'live_demo_execution',
    name:'Live & Demo Order Execution Authority',
-   environmentTarget:'LIVE_TRADING_ENABLED=false · DEMO_TRADING_ENABLED=false',
+   environmentTarget:'Research-only build (executionAuthority: none)',
    status:'intentionally_disabled',
-   lastVerifiedAt:now,
-   detail:'Hard-disabled across all cloud crons, research agents, and server routes (executionAuthority: "none").',
+   lastVerifiedAt:null,
+   detail:'Order execution is disabled by a compile-time build boundary; LIVE_TRADING_ENABLED and DEMO_TRADING_ENABLED cannot enable it. This row states the build property; it is not a live probe of the deployed server.',
   },
  ];
 
