@@ -48,16 +48,20 @@ jobs:
           python -m unittest discover -s worker -p "test_remote_research.py"
 
       - name: Trigger persistent scheduled operations endpoint
-        if: ${{ secrets.OPERATIONS_SCHEDULER_SECRET != '' && vars.RESEARCH_APP_ORIGIN != '' }}
         env:
           OPERATIONS_SCHEDULER_SECRET: ${{ secrets.OPERATIONS_SCHEDULER_SECRET }}
           RESEARCH_APP_ORIGIN: ${{ vars.RESEARCH_APP_ORIGIN }}
-          TARGET_JOB: ${{ inputs.job_key || 'all_due' }}
+          TARGET_JOB: ${{ inputs.job_key }}
         run: |
-          if [ "$TARGET_JOB" = "all_due" ]; then
+          if [ -z "$OPERATIONS_SCHEDULER_SECRET" ] || [ -z "$RESEARCH_APP_ORIGIN" ]; then
+            echo "OPERATIONS_SCHEDULER_SECRET or RESEARCH_APP_ORIGIN not configured; skipping remote HTTP trigger."
+            exit 0
+          fi
+          JOB="${TARGET_JOB:-all_due}"
+          if [ "$JOB" = "all_due" ]; then
             BODY='{"environment":"remote"}'
           else
-            BODY="{\"environment\":\"remote\",\"jobs\":[\"$TARGET_JOB\"],\"forceOnDemand\":true}"
+            BODY="{\"environment\":\"remote\",\"jobs\":[\"$JOB\"],\"forceOnDemand\":true}"
           fi
           curl --fail --silent --show-error --max-time 60 \
             -X POST "${RESEARCH_APP_ORIGIN}/api/operations/scheduled" \
