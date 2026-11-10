@@ -22,6 +22,7 @@ import {
  type ProviderCredentialState,
 } from '../lib/remote-ops/health-monitor';
 import {generateMorningBriefing,londonBriefingDate,nextLondonMorningBriefAt} from '../lib/remote-ops/morning-briefing';
+import {assessPipelineStages} from '../lib/remote-ops/pipeline-stages';
 import {
  MARKET_DATA_SYMBOLS,
  authorisedMarketObservationSchema,
@@ -641,8 +642,25 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   missingEvidenceResolution.pendingFutureWindows+=forwardResolution.pendingFutureWindows;
  }
 
+ // Per-stage pipeline evidence (MVP hardening WP7). Only collectors with a stored-record table report freshness.
+ const newestMarketObsAt=marketObsRows.reduce<number|null>((m,r)=>m===null||r.serverReceivedAt>m?r.serverReceivedAt:m,null);
+ const scheduledJobKeys=new Set(DEFAULT_RESEARCH_JOBS.map(d=>d.jobKey));
+ const pipelineStages=privateRead?DEFAULT_RESEARCH_JOBS.map(d=>{
+  const j=jobs.find(x=>x.jobKey===d.jobKey)??null;
+  return assessPipelineStages({
+   jobKey:d.jobKey,
+   nowMs:now,
+   cronDefinedInSource:scheduledJobKeys.has(d.jobKey),
+   job:j?{enabled:j.enabled,intervalMinutes:j.intervalMinutes,lastRunAt:j.lastRunAt,lastSuccessAt:j.lastSuccessAt,lastErrorCode:j.lastErrorCode}:null,
+   newestStoredRecordAt:d.jobKey==='market_data_collect'?newestMarketObsAt:d.jobKey==='daily_intelligence_briefing'?latestBriefing?.generatedAt??null:null,
+   // No collector has a stored reconciliation check yet; reported as not measured rather than assumed.
+   reconciliation:{checked:false,passed:null},
+  });
+ }):undefined;
+
  return {
   health,
+  ...(pipelineStages?{pipelineStages}:{}),
   marketData:{
    totalObservationsStored:parsedMarketObs.length,
    coveredSymbols:MARKET_DATA_SYMBOLS,
