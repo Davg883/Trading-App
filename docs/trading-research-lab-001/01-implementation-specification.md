@@ -107,29 +107,68 @@ type LabDecision = {
   evidenceBundleSha256: string;  // canonical digest (existing computeCanonicalSha256)
   evidenceIds: string[];
   modelTurnId: string | null;    // audit row of the AI classification, if any
-  plan: null | {                 // deterministic, only for TRADE
+  plan: null | {                 // the AI's proposed trade (owner decision D3); deterministic; only for TRADE
     side: 'BUY';
     entryRule: string; limitPrice: number; plannedEntryReference: number;
-    stopPrice: number; targetPrice: number | null; timeExitAtMs: number;
-    quantity: number; plannedRiskGbp: number; plannedNotionalGbp: number;
+    entryConditions: string[];   // the frozen trigger conditions that held at decidedAtMs
+    stopPrice: number;           // invalidation level
+    targetPrice: number | null; timeExitAtMs: number;
+    exitConditions: string[];    // target, invalidation and time rules, as frozen at registration
+    quantity: number; plannedRiskGbp: number; plannedNotionalGbp: number;  // intended position size
     costEstimateGbp: number; fxRateUsed: number; fxRateObservedAtMs: number;
   };
-  riskChecks: { rule: string; passed: boolean; detail: string }[];
+  decisionExpiresAtMs: number | null;  // TRADE only: latest time an approval can be acted on (§8.1)
+  riskChecks: { rule: string; passed: boolean; detail: string }[];  // against the shadow record's state (02 §6)
   journalSequence: number; prevEntrySha256: string; entrySha256: string;
 };
 ```
 
 WAIT and REJECT decisions are recorded with the same evidence and a **shadow plan**: the hypothetical trade. This lets the filter's value be measured without trading.
 
-## 8. Human review and override
+**Recorded before human intervention (owner decision D3).**
+- The decision entry is written to the journal by the decision function itself, in the same transaction that creates it.
+- The review queue reads only journaled entries, so a reviewer cannot see a proposal that has not already been recorded.
+- The decision carries no reviewer-editable field.
 
-- **Queue.** Every TRADE decision enters a review queue.
-- **Two owner-selectable modes (P4):**
-  - *approve-each*: no demo order is placed until a reviewer approves it;
-  - *veto-window*: the demo order is placed after N minutes unless vetoed.
-- **Override.** A reviewer may veto (record `human_override: vetoed`) or approve. They may also convert a WAIT to TRADE, which is recorded as a human-originated trade and evaluated separately from model-originated trades.
-- **Original preserved.** An override never edits the original decision; it is a new journal entry referencing it.
-- **Authority.** Reviewer authority uses the existing explicit reviewer-grant model (`convex/roles.ts`).
+## 8. Human review (owner decision P4: approve-each only)
+
+The *veto-window* mode is **withdrawn** (`08-owner-decision-p4.md`). There is exactly one mode in Phase A: **no demo order exists until a named reviewer explicitly approves that decision.** No timer, default, expiry or configuration value can cause an order.
+
+### 8.1 Queue and expiry
+
+- Every TRADE decision enters the review queue when it is journaled.
+- `decisionExpiresAtMs` is frozen per strategy at registration. Initial hypotheses:
+  - S1: decision + 15 minutes;
+  - S2: 09:25 New York on the entry session;
+  - S3: 11:00 New York on the entry session.
+- An approval received after expiry is **refused**. At expiry, an unreviewed decision receives a `review_expired` event and becomes a **missed opportunity**.
+
+### 8.2 Review events (owner decision D5)
+
+Each event is a new journal entry referencing the decision's `entrySha256`. It records the reviewer's identity, the time, and the latency from `decidedAtMs`.
+
+| Event | Meaning | Effect on the human-approved record |
+|---|---|---|
+| `approved` | Order the plan as proposed | Order intent issued for the original plan |
+| `amended` | Order a changed plan. The amended plan is a complete new plan with its own hash and a mandatory reason. It must pass the risk engine against the human-approved record's state, and cannot increase planned risk or notional above the proposal or any limit in `02`. | Order intent issued for the amended plan |
+| `rejected` | Do not trade; mandatory reason code | No trade |
+| `deferred` | Reviewer postpones the decision with a note. A deferral is not an approval, and the expiry still applies. | None until a later event |
+| `review_expired` | No decision before expiry (system event) | No trade; counted as a missed opportunity |
+| `order_missed` | Approved, but the limit was not reached or the order otherwise did not fill before the entry rule lapsed | No trade; counted as a missed opportunity, separately from `review_expired` |
+| `converted_wait_to_trade` | Reviewer originates a trade from a WAIT decision | Human-originated cohort only; never in the shadow record |
+
+Delay is not a separate event. It is the measured latency of every review event, and its price effect is attributed in `05` §4.
+
+### 8.3 Immutability of the AI signal (owner decision D6)
+
+- Review events can only **add** entries. No function updates or deletes a decision entry (`06` §5).
+- The autonomous shadow record is computed **only** from the original decision entries. It never reads review events.
+- Amending a plan never changes the original plan or its hash.
+
+### 8.4 Authority
+
+- Reviewer authority uses the existing explicit reviewer-grant model (`convex/roles.ts`).
+- The model and the strategy engines cannot create review events.
 
 ## 9. Components to build
 
@@ -156,3 +195,13 @@ WAIT and REJECT decisions are recorded with the same evidence and a **shadow pla
 | L3 | Paper execution service (demo only), human review | Acceptance tests A10–A14 pass; security review of the service |
 | L4 | Observation: 30 sessions, at least 30 qualifying opportunities | Exploratory report; no profitability claim |
 | L5 | Extended observation to the pre-registered sample size (`05` §6) | Confirmatory report |
+
+### 10.1 Owner phases (decision P4)
+
+| Owner phase | L-phases | Scope | Gate |
+|---|---|---|---|
+| **A** (initial release) | L0–L5 | Explicit approval of every demo order. Both performance records are kept from the first decision. | This specification, after P1–P5 and the phase exit criteria |
+| **B** (later) | After L4, using L4/L5 data | A comparison report: autonomous shadow versus human-approved execution (`05` §4). Analysis only; no change to execution. | Report review; no profitability claim beyond `05` §6 |
+| **C** (later, not authorised) | — | Fully automatic **demo-only** execution | A separate owner decision, plus a separate security, reliability and risk acceptance. **Not specified here.** Phase A must not contain a dormant path for it (`07` A21). |
+
+No phase grants live-money authority. The research application keeps `executionAuthority = none` in every phase.

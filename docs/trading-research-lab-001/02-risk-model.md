@@ -60,3 +60,10 @@ Halts are state stored in Convex and checked inside the order-claim mutation, no
 - Demo-account fill behaviour that differs from the live market.
 - Regime changes outside the observation period.
 - The small-sample problem (`05` §6).
+
+## 6. Risk state for the two performance records (owner decision P4)
+
+- **R1 (autonomous shadow).** The risk engine evaluates each proposal against R1's own hypothetical state: positions, exposure, loss limits and halts as if every TRADE had been executed. These are the `riskChecks` stored on the decision. R1 halts are hypothetical: they stop only R1 proposals, not demo orders.
+- **R2 (human-approved demo).** At approval, and again inside the order-claim mutation, the approved or amended plan is checked against R2's actual demo state. A plan that fails is refused, and the refusal is journaled. Real halts (§3) and the kill switch apply to R2.
+- An amendment may reduce risk or notional. It may never exceed the original proposal or any limit in this document.
+- A human decision never changes R1's state.
