@@ -139,4 +139,4 @@ Each change needs a failing-then-passing regression test, following the existing
 - **Convex admin key in the Next.js server** for broker sync (H4).
 - **Unknown liabilities** need operator reconciliation; billing truth is unverified.
 - **Concurrency** is unproven until staging.
-- **Lab 001 specification** is on the same PR branch; it should move to its own branch to keep the security review's scope clean.
+- **Lab 001 specification:** resolved. It was moved to branch `claude/trading-research-lab-001` and removed from this PR without changing any code.
