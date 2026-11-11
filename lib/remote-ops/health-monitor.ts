@@ -535,10 +535,10 @@ export function evaluateCollectionHealth(input:{
  const executionPaths:HostedExecutionPathItem[]=input.executionPaths??[
   {
    id:'convex_cloud_scheduler_and_collectors',
-   label:'Convex Cloud Scheduler & SEC/FX Collectors (benevolent-magpie-921 / prestigious-dragon-8, eu-west-1)',
+   label:'Convex Cloud Scheduler & SEC/FX Collectors',
    deployment:'cloud_hosted',
    status:schedulerWorking?'active':'standby',
-   detail:'Continuously deployed in AWS eu-west-1; runs 15m research cycle, TypeDB outbox projection, and 07:30 Europe/London (GMT/BST) briefing with laptop off.',
+   detail:'Hosted Convex scheduler: 15-minute research cycle and the weekday 07:30 Europe/London briefing schedule.',
   },
   {
    id:'python_remote_research_cli',
