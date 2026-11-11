@@ -92,10 +92,10 @@ describe('H2 — paid inference fails closed',()=>{
  it('a live turn whose gateway record fails is not written through the client-credential mutation',async()=>{
   gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation:'b'.repeat(64),spentGbp:0,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/start')?Response.json({started:true,inFlightDeadlineMs:Date.now()+300_000}):Response.json({},{status:503});
   h.generate.mockResolvedValue(liveReply);
-  const res=await ask();expect(res.status).toBe(200);
-  const j=await res.json() as Turn;
-  expect(j.telemetry.generationMode).toBe('gemini_live');
-  expect(j.auditRecorded).toBe('not_recorded');
+  // Correction 1: the record outcome is unconfirmed after one retry, so the paid answer is withheld (503) and
+  // nothing is written through the client-credential mutation.
+  const res=await ask();expect(res.status).toBe(503);
+  expect(await res.json()).toMatchObject({code:'audit_record_unconfirmed',provider:{invoked:true,generationMode:'gemini_live'}});
   expect(h.convexMutations).toEqual([]);
  });
 });

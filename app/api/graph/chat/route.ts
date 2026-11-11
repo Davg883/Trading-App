@@ -24,6 +24,7 @@ import {
   reserveChatBudget,
   startAcceptanceBudget,
   startChatBudget,
+  type GatewayResult,
 } from '../../../../lib/graph/evidence-chat-gateway';
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
 
@@ -151,6 +152,44 @@ interface RetrievalContextData {
 
 type AcceptanceSession = { token: string; reservation: string; budgetReserved: boolean };
 
+/**
+ * One retry, only when the backend outcome is unknown (timeout, transport, 5xx). Convex deduplicates audit
+ * writes by turn, so a retry can never insert a second record or charge twice.
+ */
+async function recordWithSingleRetry<T>(write: () => Promise<GatewayResult<T>>): Promise<GatewayResult<T>> {
+  const first = await write();
+  if (first.ok || first.kind !== 'unavailable' || first.reason === 'gateway_not_configured') return first;
+  return await write();
+}
+
+/**
+ * Correction 1: the audit record could not be written. The answer is withheld so an unaudited turn can never
+ * be presented as a successful, audited one; provider and audit outcomes are reported separately.
+ * - 502: the audit backend definitively refused the record (permanent; retrying will not help).
+ * - 503: the outcome is unconfirmed (backend unreachable after one retry); the record may exist.
+ */
+function auditFailure(
+  kind: 'rejected' | 'unconfirmed',
+  reason: string,
+  turn: { turnId: string; generationMode: string; providerStatus: string; providerFailureKind?: string },
+) {
+  const providerInvoked =
+    turn.generationMode === 'gemini_live' || (turn.providerStatus === 'provider_error' && turn.providerFailureKind !== 'simulated');
+  return NextResponse.json(
+    {
+      error:
+        kind === 'rejected'
+          ? 'The research answer could not be recorded in the audit trail, so it is not returned.'
+          : 'The audit trail could not confirm this research answer was recorded, so it is not returned.',
+      code: kind === 'rejected' ? 'audit_record_rejected' : 'audit_record_unconfirmed',
+      audit: { status: kind, reason: reason.slice(0, 120) },
+      provider: { invoked: providerInvoked, generationMode: turn.generationMode, providerStatus: turn.providerStatus },
+      turnId: turn.turnId,
+      executionAuthority: 'none',
+    },
+    { status: kind === 'rejected' ? 502 : 503, headers: NO_STORE_HEADERS },
+  );
+}
 
 function budgetUnavailable() {
   return NextResponse.json(
@@ -414,19 +453,32 @@ export async function POST(req: NextRequest) {
     let auditRecorded: 'server_gateway' | 'server_gateway_acceptance' | 'client_jwt_legacy' | 'not_recorded' =
       'not_recorded';
     if (acceptance) {
-      const rec = await recordAcceptanceTurn(acceptance.token, acceptance.reservation, turnFields);
-      if (rec.ok) {
-        auditId = rec.value.auditId;
-        auditRecorded = 'server_gateway_acceptance';
+      // Correction 1: an acceptance turn is only ever returned once its audit record is confirmed.
+      const rec = await recordWithSingleRetry(() =>
+        recordAcceptanceTurn(acceptance.token, acceptance.reservation, turnFields),
+      );
+      if (!rec.ok) {
+        if (rec.kind === 'rejected') {
+          // Permanent: close the nonce. A started provider call stays liable (`unknown`) until reconciled.
+          await failAcceptanceNonce(acceptance.token, acceptance.reservation, 'audit_record_rejected');
+          return auditFailure('rejected', rec.reason, turnFields);
+        }
+        // Unconfirmed: the record may have been written, so the nonce is not failed; it is left for
+        // reconciliation (listNoncesInternal / listUnresolvedReservationsInternal).
+        return auditFailure('unconfirmed', rec.reason, turnFields);
       }
+      auditId = rec.value.auditId;
+      auditRecorded = 'server_gateway_acceptance';
     } else if (caller.convexToken && budgetReservation) {
-      // A paid turn holds a started reservation: it is recorded only through the attested gateway, which
+      // A paid turn holds a started reservation: it must be recorded through the attested gateway, which
       // settles the reservation. There is no client-credential fallback for it.
-      const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields, { budgetReservation });
-      if (rec.ok) {
-        auditId = rec.value.auditId;
-        auditRecorded = 'server_gateway';
-      }
+      const token = caller.convexToken;
+      const rec = await recordWithSingleRetry(() =>
+        recordAuthenticatedTurn(token, turnFields, { budgetReservation }),
+      );
+      if (!rec.ok) return auditFailure(rec.kind === 'rejected' ? 'rejected' : 'unconfirmed', rec.reason, turnFields);
+      auditId = rec.value.auditId;
+      auditRecorded = 'server_gateway';
     } else if (caller.convexToken) {
       if (gatewayConfigured()) {
         const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields, { budgetReservation });
