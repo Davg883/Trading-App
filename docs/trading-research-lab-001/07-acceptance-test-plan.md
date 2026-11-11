@@ -26,6 +26,7 @@ Tests are hermetic: no live market data, no paid models, no broker calls. The ex
 | A20 | P4 D5 Expiry and missed opportunities | Leave a decision unreviewed past expiry; then attempt approval; approve one whose limit never fills | `review_expired` recorded and approval refused; `order_missed` recorded; both appear in R1 and as no trade in R2 |
 | A21 | P4 D1, D2 No automatic execution | Static check that no scheduled function, timer or configuration value issues an order intent; time-advance test with a pending decision and no review | No intent is created; the paper service refuses an intent without a matching approval event |
 | A22 | P4 D4 Two records | Fixture set with approvals, rejections, amendments, delays and misses | R1 and R2 metrics match an independent calculation; the attribution terms sum to R1 − R2 |
+| A23 | Entry-authorisation expiry | Golden cases for each strategy and candidate type, including DST changes and an early close; S1 invalidation before approval; approval one millisecond after expiry; reviewer attempt to extend; a partly filled entry at expiry; a position open at expiry | Expiry equals the rule in `01` §8.1; late approval refused and no intent issued; no extension API exists; the unfilled remainder is cancelled; open positions follow only their exit rules |
 
 **Staging tests (owner-approved, non-production)**, mapped to the requirements above:
 - A12: a demo order round trip;

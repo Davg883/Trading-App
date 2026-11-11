@@ -38,6 +38,7 @@
   - that the journal entry exists, through an authenticated read-only gateway route;
   - that an `approved` or `amended` review event exists for the decision, made by a reviewer holding a grant, before `decisionExpiresAtMs`;
   - that the intent's plan hash equals the approved plan (original or amended);
+  - that the decision's entry-authorisation expiry (`01` §8.1) has not passed and no S1 invalidation is recorded. The expiry is read from the journaled decision, never from the intent;
   - that no halt is active.
 - **Idempotency:** one order per `decisionId`, enforced by a unique index and the existing claim pattern (`claimSubmissionInternal`: a single atomic claim, exactly one submit attempt, no automatic resubmission). An ambiguous broker response moves the order to `unknown` and blocks the symbol until it is reconciled.
 - **Stops and targets** are managed by the service as order rules (stop orders where the broker supports them, otherwise monitored exits). Every exit order is also journaled with its triggering rule.

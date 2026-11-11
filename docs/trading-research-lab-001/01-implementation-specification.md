@@ -137,11 +137,34 @@ The *veto-window* mode is **withdrawn** (`08-owner-decision-p4.md`). There is ex
 ### 8.1 Queue and expiry
 
 - Every TRADE decision enters the review queue when it is journaled.
-- `decisionExpiresAtMs` is frozen per strategy at registration. Initial hypotheses:
-  - S1: decision + 15 minutes;
-  - S2: 09:25 New York on the entry session;
-  - S3: 11:00 New York on the entry session.
-- An approval received after expiry is **refused**. At expiry, an unreviewed decision receives a `review_expired` event and becomes a **missed opportunity**.
+- `decisionExpiresAtMs` is the **entry-authorisation expiry**. It is computed once, when the decision is journaled, and stored on the decision.
+- **Provisional rules** (owner decision, 11 November 2026; `08` §4):
+
+| Strategy | Candidate type | Entry-authorisation expiry |
+|---|---|---|
+| S1 News momentum | Any | 15 minutes after `decidedAtMs`, **or earlier if invalidated**: the price reaches the invalidation (stop) level, or trades above the plan's limit price, before an entry fill |
+| S2 Oversold recovery | Pre-market opening candidate (`decidedAtMs` before 09:30 New York on the entry session) | 10:00 America/New_York on the entry session |
+| S2 Oversold recovery | Regular-session candidate | 15 minutes after `decidedAtMs` |
+| S3 Post-earnings repricing | Pre-market candidate | 11:00 America/New_York on the entry session |
+| S3 Post-earnings repricing | Later regular-session signal | 15 minutes after `decidedAtMs` |
+
+- **Calculation:**
+  - Times use the IANA zone `America/New_York`, so daylight-saving changes are handled, and the exchange calendar sets trading days and early closes.
+  - An expiry never crosses into another session. It is capped at the session's last permitted entry time (`02` §2).
+- **Hard rules:**
+  - **No extension.** No automatic extension, renewal or re-issue of a decision exists. A reviewer cannot extend an expiry; a new signal requires a new decision from the strategy engine.
+  - **No automatic approval.** Expiry never converts to approval.
+  - **No action after expiry.** An approval received after expiry, or after the S1 invalidation, is **refused**. No order intent may be issued after expiry, and the paper service refuses one whose decision has expired.
+- **Missed opportunities.**
+  - At expiry, an unreviewed decision receives a `review_expired` event and becomes a missed opportunity.
+  - An S1 decision invalidated before approval receives `review_expired` with reason `invalidated`.
+- **Separate from exit rules.** Expiry governs only whether a new entry may be authorised and placed.
+  - The demo entry order carries a good-till time no later than the expiry, and the paper service cancels any unfilled remainder at expiry (`order_missed`, or a partial fill).
+  - Once any quantity has filled, that position is governed only by the plan's exit conditions (target, invalidation, time exit). Expiry never closes, shortens or extends a position.
+  - The 60-second order-intent expiry (`06` §4) is a separate transport control.
+- **Freeze and review.**
+  - The rules are hashed into `strategyVersion` at formal registration and cannot change during an observation period.
+  - They are reviewed only with forward-recorded evidence: review latency, the `review_expired` rate, the `order_missed` rate and the delay effect (`05` §4). Any change starts a new strategy version.
 
 ### 8.2 Review events (owner decision D5)
 

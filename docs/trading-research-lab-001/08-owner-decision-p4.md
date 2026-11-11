@@ -38,3 +38,26 @@
 - **Delay is a measured cost.** An approval that arrives later than the AI's decision time moves the demo entry. The shadow record keeps the original timing, so the cost of human latency appears as a separate attribution term (`05` §4).
 - **Unreviewed decisions are not lost.** A TRADE decision that expires without review is recorded as `expired_unreviewed` (a missed opportunity). It stays in the shadow record, and the human-approved record shows no trade.
 - **Phase C is not pre-approved.** Nothing in Phase A may contain a dormant automatic-execution path, a feature flag for one, or a configuration value that enables one (`07` A21).
+
+## 4. Entry-authorisation expiry (owner decision, 11 November 2026)
+
+The P4 decision is accepted. The owner set the following **provisional** expiry rules, specified in `01` §8.1:
+
+| Strategy | Rule |
+|---|---|
+| S1 News momentum | 15 minutes after signal creation, or earlier if invalidated |
+| S2 Oversold recovery | 10:00 America/New_York for pre-market opening candidates; 15 minutes from creation for regular-session candidates |
+| S3 Post-earnings repricing | 11:00 America/New_York for pre-market candidates; 15 minutes from creation for later regular-session signals |
+
+- **No automatic extension, automatic approval or execution after an expired authorisation.**
+- Entry-authorisation expiry stays **separate from position exit rules**.
+- The parameters are frozen at formal experiment registration. They are reviewed using forward-recorded evidence; any change creates a new strategy version.
+
+### Points for confirmation at registration
+
+| Point | Specification default (assumption, not owner instruction) |
+|---|---|
+| What "invalidated" means for S1 | The price reaches the stop level, or trades above the limit price, before an entry fill |
+| Invalidation for S2 and S3 | Not applied, because the owner specified it for S1 only. Entry is still impossible at or below the stop, because the risk engine rejects a plan with no positive distance to stop. |
+| Boundary between "pre-market" and "regular-session" candidates | `decidedAtMs` before or after 09:30 New York on the entry session |
+
