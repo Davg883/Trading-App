@@ -12,7 +12,7 @@ Each item below is a parameter stored with the experiment version, with its sour
 |---|---|---|---|
 | Commission | Fixed per order | £0 | Confirm (Trading 212 states commission-free share dealing; check for current exceptions) |
 | FX conversion (GBP account, USD instrument) | % of notional, each side | 0.15% per side | **Confirm** |
-| Half-spread | Measured from quotes at the decision time when intraday data exists; otherwise a fixed assumption per liquidity bucket | Mega-cap: 2 bp per side; other universe names: 5 bp per side | Replace with measured values once the intraday feed exists |
+| Half-spread | Measured from contemporaneous quotes. The fixed figures here are planning estimates for the breakeven analysis only and are never used to create a simulated fill (`05` §2.3, §9) | Planning estimate: mega-cap 2 bp per side; other universe names 5 bp per side | Replaced by calibration measurements before the forward trial (`05` §9) |
 | Slippage vs. intended price | Market orders: next-bar open vs. decision reference. Limits: unfilled orders recorded as missed, not as filled | 5 bp per side (regular hours); 15 bp at the open; 25 bp for gaps | Calibrated from demo fills and the market data after L4 |
 | Regulatory sell-side fees (SEC Section 31, FINRA TAF) | Per sell | Negligible at this size; included if the broker passes them on | Confirm |
 | Stamp duty | — | None for US shares | — |

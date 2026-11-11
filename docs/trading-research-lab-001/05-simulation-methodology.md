@@ -67,7 +67,7 @@ The same conservative assumptions apply to R1 and to the model-ledger simulation
 | Check | Requirement |
 |---|---|
 | Valid price | The bar is fresh, complete, not flagged erroneous by the source, and inside the day's permitted price limits |
-| Spread | A quoted bid and ask are available for the bar and the spread is within the registered maximum. If quote data is not available, there is no fill |
+| Spread | A **contemporaneous and sufficiently reliable** bid and ask exist for the bar, and the spread is inside the instrument- and strategy-specific eligibility rule (§9). Without such a quote there is no fill; a spread is never assumed or estimated to create one |
 | Session | The bar is in a permitted continuous-trading window: not halted, not an auction, and outside the no-entry windows in `02` §2 |
 | Fill assumption | The order type's rule in §2.1 is met (for example, a limit must be traded through by at least one tick), within the participation cap, and at or above the minimum order size |
 
@@ -173,11 +173,48 @@ These must be confirmed and frozen at formal experiment registration. Each is ha
 | Item | To confirm |
 |---|---|
 | Bar duration | The bar interval used for signals and fills (1 minute is assumed in §2.1) |
-| Market-data entitlement | The licensed sources, including quote (bid and ask) data for the spread check, permitted use, and delay |
+| Market-data entitlement | The licensed sources, including quote (bid and ask) data and the right to use it for this purpose, and delay. Without them the affected strategy is NOT READY (§9) |
 | Corporate-action treatment | The source and the adjustment method for splits, dividends and symbol changes |
 | Auction exclusions | Which opening, closing and volatility auctions are excluded from fills and eligible volume |
-| Fill model | The rules in §2.1 and §2.3, including the 1% participation cap, the maximum spread and the minimum order size |
+| Fill model | The rules in §2.1 and §2.3, including the 1% participation cap, the minimum order size, and the spread eligibility rules and quote-reliability tolerances from calibration (§9) |
 | Slippage assumptions | The slippage parameter per order type (`04`) |
 | Expiry and outcome rules | `01` §8.1, §8.1.1 and §8.1.2, as approved |
 | Contradiction rules and entry range | None registered |
+
+## 9. Pre-registration market-data calibration (owner decision, `08` §9)
+
+Simulated fills need contemporaneous, reliable quotes, and no universal maximum spread is registered. Spread eligibility is therefore set per instrument and strategy from measured evidence, before the forward trial begins.
+
+### 9.1 Calibration dataset
+
+- A **separate observation dataset**, collected during L1 before any strategy decision is recorded.
+- It contains market data only: no signals, decisions, fills or outcomes. It is never pooled with the forward trial and is never used as performance evidence.
+- It covers every universe instrument across the session periods the strategies use (opening period, continuous session, closing period) for the L1 observation window.
+
+### 9.2 What is recorded
+
+For each instrument and session period:
+
+| Measure | Detail |
+|---|---|
+| Observed spread | Bid, ask and quoted spread in price terms |
+| Spread as a percentage of mid-price | Distribution, not only an average |
+| Quotation timestamps | The source's quote time and the receipt time |
+| Feed latency | Receipt time minus source time; distribution, including the tail |
+| Missing data | Gaps, stale quotes, crossed or locked quotes, and periods with no quote |
+| Estimated execution costs | Half-spread, slippage and FX, per instrument and session period |
+
+### 9.3 Output: proposed eligibility rules
+
+- **Instrument- and strategy-specific spread eligibility rules**, derived only from the calibration evidence, with the method written down.
+- **Quote-reliability tolerances**: how close in time a quote must be to a bar to count as contemporaneous, and which quotes are rejected as unreliable.
+- A calibration report containing the measures in §9.2, the proposed rules and the dataset's digest.
+- The owner approves the proposals at registration. They are then frozen into `strategyVersion`; a later change is a new version.
+- The proposals may not use any strategy outcome, and may not be revised after the forward trial has begun.
+
+### 9.4 NOT READY
+
+- If suitable quotes or the licensing rights to use them are unavailable for a strategy, or the calibration shows the quotes are not reliable enough, that strategy is marked **NOT READY**.
+- A NOT READY strategy records no decisions and no fills in either performance record. Readiness is assessed per strategy; an instrument without suitable quotes is excluded from the registered universe.
+- Fills are never fabricated: no fallback to OHLCV volume, assumed spreads or fixed cost estimates.
 

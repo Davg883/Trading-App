@@ -32,7 +32,7 @@ The universe is fixed at experiment registration and versioned. A change creates
 - **Eligibility, checked at each decision:**
   - 20-session median dollar volume above US$500m;
   - price above US$10;
-  - estimated spread at or below 10 bp;
+  - a contemporaneous, reliable bid and ask, with the spread inside the instrument- and strategy-specific eligibility rule set by calibration (`05` §9). There is no universal spread limit;
   - not halted;
   - no corporate action pending within the holding window.
 
@@ -209,7 +209,7 @@ Three outcomes are recorded separately, and the same classification applies to S
   - the expiry keeps running and is not extended.
 - **Reviewer decision.** A reviewer either confirms or rejects the invalidation. The record must contain the evidence identifiers, the timestamp, the decision and the reviewer's identity.
   - **Confirmed:** `setup_invalidated` (permanent).
-  - **Rejected:** the block lifts. The setup was never invalidated, so nothing is reinstated. A rejected invalidation **does not restore an approval**: the earlier approval ended when its order was cancelled, and an expired approval or decision stays expired. Placing an order needs a fresh explicit approval before the unchanged expiry.
+  - **Rejected:** the block lifts. The setup was never invalidated, so nothing is reinstated. Rejecting a thesis invalidation **never restores a previous order approval**. A fresh approval is required, within the original decision expiry.
   - **No decision before expiry:** the decision ends as `entry_blocked` with reason `thesis_review_pending`.
 - **The original AI signal is preserved unchanged.** The later item, the review request and the reviewer's decision are new journal entries that reference it.
 
@@ -284,7 +284,7 @@ Delay is not a separate event. It is the measured latency of every review event,
 | Phase | Scope | Exit criterion |
 |---|---|---|
 | L0 | Prerequisites P1–P5 | All recorded |
-| L1 | Data adapters, point-in-time store, feature engine; no decisions | 10 sessions of complete, timestamped data with latency measured |
+| L1 | Data adapters, point-in-time store, feature engine; no decisions | 10 sessions of complete, timestamped data with latency measured; the calibration report and proposed spread rules (`05` §9) |
 | L2 | Strategies, decisions, journal, model-ledger fills; no broker | Acceptance tests A1–A9 pass; decisions recorded before outcomes |
 | L3 | Paper execution service (demo only), human review | Acceptance tests A10–A14 pass; security review of the service |
 | L4 | Observation: 30 sessions, at least 30 qualifying opportunities | Exploratory report; no profitability claim |

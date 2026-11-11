@@ -101,5 +101,25 @@ The owner approved the following **provisional registration rules**. They replac
 
 - The strategy specification is **complete for formal registration review**. Its scope is closed: no further rules are to be added outside that review.
 - Every rule in this folder is **provisional** until it is frozen at registration.
-- Values still to be supplied at registration are listed in `05` §8. The only rule with no value yet is the maximum spread.
+- Values still to be supplied at registration are listed in `05` §8. Spread eligibility has no universal value: it is set per instrument and strategy by calibration (`05` §9).
 - This status is not authority to implement, deploy or trade. Prerequisites P1, P2, P3 and P5 (`00` §2) remain open, and security PR Davg883/Trading-App#1 remains the release priority.
+
+## 9. Specification freeze (owner decision, 11 November 2026)
+
+The owner accepted the specification at commit `d48d8ab` as ready for formal registration review, with these final interpretations:
+
+| # | Interpretation | Specified in | Test |
+|---|---|---|---|
+| 1 | Rejecting a thesis invalidation never restores a previous order approval. A fresh approval is required within the original decision expiry. | `01` §8.1.1 | A26, A30 |
+| 2 | Simulated fills require contemporaneous and sufficiently reliable bid and ask data. | `05` §2.3 | A29 |
+| 3 | No universal maximum spread percentage is invented or registered. | `01` §2, `05` §2.3 | A31 |
+| 4 | A pre-registration market-data calibration procedure uses a separate observation dataset. | `05` §9.1 | A31 |
+| 5 | It records observed spread, percentage of mid-price, quotation timestamps, feed latency, missing data and estimated execution costs. | `05` §9.2 | — |
+| 6 | Instrument- and strategy-specific spread eligibility rules are proposed from calibration evidence only, before the forward trial begins. | `05` §9.3 | A31 |
+| 7 | If suitable quotes or licensing rights are unavailable, the affected strategy is marked NOT READY; fills are never fabricated. | `05` §9.4, `03` §5 | A31 |
+| 8 | The S1, S2 and S3 rules and all human-control and research-only restrictions are preserved. | Unchanged | — |
+
+**Frozen.** With the commit that adds this section, the specification is frozen. No further changes are to be made until formal registration, where the provisional rules are confirmed, the calibration proposals are approved, and everything is hashed into the experiment and strategy versions.
+
+No implementation, merge, deployment or trading is authorised.
+

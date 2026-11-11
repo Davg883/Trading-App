@@ -1,6 +1,6 @@
 # Trading Research Lab 001 — overview and prerequisites
 
-**Status: SPECIFICATION ONLY. Nothing here is implemented. Ready for formal registration review (`08` §8); scope closed; all rules provisional until registration.**
+**Status: SPECIFICATION ONLY. Nothing here is implemented. Ready for formal registration review and FROZEN until then (`08` §8–9); all rules provisional until registration.**
 **Date:** 11 November 2026 · **Author:** AI-assisted specification (Claude Code session), not independently reviewed.
 
 ## 1. Purpose

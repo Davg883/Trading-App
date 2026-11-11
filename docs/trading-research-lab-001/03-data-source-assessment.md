@@ -56,3 +56,4 @@
 | Licensed news | S1 cannot run. Do not substitute scraped or unlicensed news. |
 | Consensus | S3 runs as "post-earnings price-reaction continuation" only, with the limitation stated. |
 | Intraday prices | No intraday holding period. Strategies restricted to next-open entries and daily exits, with materially worse cost and slippage assumptions. |
+| Bid and ask quotes, or the licensing rights to use them | The affected strategy is marked **NOT READY** (`05` §9.4). No fills are simulated from volume, assumed spreads or fixed estimates. This also applies to the next-open fallback above. |
