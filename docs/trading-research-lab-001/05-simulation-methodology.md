@@ -45,7 +45,7 @@ R1 differs from R2 in exactly one respect: no human approves, amends, rejects or
 | Deterministic risk limits | Every limit and halt in `02`, evaluated against R1's own state (`02` §6) |
 | Order expiry | The same entry-authorisation expiry (`01` §8.1). An R1 order unfilled at expiry is `order_unfilled`; there is no extension |
 | Entry outcomes | The same `setup_invalidated`, `entry_blocked` and `order_unfilled` classification (`01` §8.1.1) |
-| Liquidity and execution | The model-ledger fill rules, slippage, cost and minimum-order assumptions, identical to those used for R2's model-ledger comparison; partial fills where the bar's volume cannot absorb the order under the registered participation assumption |
+| Liquidity and execution | The model-ledger fill rules, slippage, cost and minimum-order assumptions, and the fill-eligibility checks and participation cap in §2.3, identical to those used for R2's model-ledger comparison |
 
 **No hindsight fills.**
 - R1 fills are computed forward, bar by bar, from bars received after `decidedAtMs`, and each fill is journaled when its bar arrives.
@@ -54,7 +54,36 @@ R1 differs from R2 in exactly one respect: no human approves, amends, rejects or
 
 **Thesis reviews in R1.** R1 cannot use a human judgement.
 - A verified correction or retraction, or a registered deterministic contradiction rule, invalidates an unfilled R1 setup directly.
-- An AI-classified expectation-lowering item blocks an unfilled R1 entry (`thesis_review_pending`) until expiry. The reviewer's later decision is not read by R1.
+- An AI-classified expectation-lowering item blocks an unfilled R1 entry (`thesis_review_pending`) for as long as the review is unresolved, and at most until expiry.
+- No human decision, including a reviewer's confirmation or rejection, is read by R1 or can retrospectively alter R1's performance.
+
+### 2.3 Liquidity and fill eligibility (owner decision, `08` §7)
+
+The same conservative assumptions apply to R1 and to the model-ledger simulation of R2.
+
+- **Participation cap (provisional).** A simulated fill may take at most **1% of the eligible volume of a bar**. The remainder carries to later bars until the order expires; what is left at expiry is unfilled.
+- **Volume alone is not liquidity.** Executable liquidity is never inferred solely from OHLCV volume. A bar can provide a fill only if **all** of these checks pass:
+
+| Check | Requirement |
+|---|---|
+| Valid price | The bar is fresh, complete, not flagged erroneous by the source, and inside the day's permitted price limits |
+| Spread | A quoted bid and ask are available for the bar and the spread is within the registered maximum. If quote data is not available, there is no fill |
+| Session | The bar is in a permitted continuous-trading window: not halted, not an auction, and outside the no-entry windows in `02` §2 |
+| Fill assumption | The order type's rule in §2.1 is met (for example, a limit must be traded through by at least one tick), within the participation cap, and at or above the minimum order size |
+
+- **Eligible volume** is the volume of bars that pass the valid-price, spread and session checks. Auction volume is excluded.
+- A bar that fails a check gives no fill. If the failure is a data or market condition, it is recorded as `entry_blocked` with its reason.
+
+### 2.4 Counterfactual signal analysis (non-executable; owner decision, `08` §7)
+
+This is a third, explicitly separate analysis. It measures the opportunity cost of review-triggered abstention.
+
+- **Population:** decisions whose entry was blocked by `thesis_review_pending`, in either record.
+- **Calculation:** the original plan's hypothetical outcome as if the review had not blocked it. It uses the same model ledger, expiry, risk and fill-eligibility rules, is computed forward, and is journaled.
+- **Reporting:** grouped by review result (confirmed, rejected, unresolved at expiry) and labelled "hypothetical: not a trading result" wherever it appears.
+- **Strict separation:**
+  - these hypothetical fills are **never** included in headline trading returns, in R1 or R2, or in any equity curve, risk state, halt, benchmark comparison or statistical test of performance (§6);
+  - the analysis is read-only: it cannot create a decision, a review event or an order intent.
 
 ## 3. Benchmark
 
@@ -75,6 +104,8 @@ R1 differs from R2 in exactly one respect: no human approves, amends, rejects or
 - Review latency (median, p95) and the counts of each review event are reported for every strategy.
 
 ## 5. Metrics (per record, per strategy, per cohort, per ledger; gross and net)
+
+Headline metrics cover R1 and R2 only. The counterfactual analysis (§2.4) is reported in its own section and never combined with them.
 
 | Metric | Definition |
 |---|---|
@@ -134,3 +165,19 @@ The confirmatory phase (L5) pre-registers μ, σ (estimated from L4), α and the
 Additional rules for the case study:
 - **Separation.** The pre-earnings entry and the post-release entry are separate, hash-chained journal records. The pre-earnings record is never edited after the release; if it contained an error, a correction entry references it and both are reported.
 - **Weight.** One event has no statistical weight. It tests the recording pipeline and point-in-time controls, not the strategy.
+
+## 8. Registration checklist (owner decision, `08` §7)
+
+These must be confirmed and frozen at formal experiment registration. Each is hashed into `experimentId` or `strategyVersion`. Until then the values in this specification are provisional.
+
+| Item | To confirm |
+|---|---|
+| Bar duration | The bar interval used for signals and fills (1 minute is assumed in §2.1) |
+| Market-data entitlement | The licensed sources, including quote (bid and ask) data for the spread check, permitted use, and delay |
+| Corporate-action treatment | The source and the adjustment method for splits, dividends and symbol changes |
+| Auction exclusions | Which opening, closing and volatility auctions are excluded from fills and eligible volume |
+| Fill model | The rules in §2.1 and §2.3, including the 1% participation cap, the maximum spread and the minimum order size |
+| Slippage assumptions | The slippage parameter per order type (`04`) |
+| Expiry and outcome rules | `01` §8.1, §8.1.1 and §8.1.2, as approved |
+| Contradiction rules and entry range | None registered |
+

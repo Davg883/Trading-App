@@ -200,16 +200,16 @@ Three outcomes are recorded separately, and the same classification applies to S
 
 | Trigger | Result |
 |---|---|
-| A **verified correction or retraction of the original source** that the decision cites | Directly invalidates the affected research premise. If the decision's trigger depends on that premise, the setup is `setup_invalidated`. Verification means the correction comes from the same licensed source or the issuer and is stored as evidence. |
-| A later news item that the AI classifies as expectation-lowering, where a **predefined deterministic contradiction rule** is satisfied | `setup_invalidated`. No such rule is registered at present; one takes effect only when registered with the strategy version. |
-| A later news item that the AI classifies as expectation-lowering, with no such rule satisfied | The decision enters **`REVIEW_REQUIRED`**. The AI classification alone never invalidates a setup. |
+| A **verified correction or retraction of the original source** that the decision cites | Directly invalidates the affected research premise. If the decision's trigger depends on that premise, the setup is `setup_invalidated`. A correction is accepted only when it is **authenticated to the original licensed publisher or the relevant issuer** and stored as evidence with its published and received timestamps. An unauthenticated claim of a correction never invalidates directly; it is handled as an ordinary later item. |
+| A later news item that the AI classifies as expectation-lowering, where a **predefined deterministic contradiction rule** is satisfied | `setup_invalidated`. **No contradiction rule is registered initially**, so this path is inactive. One takes effect only when separately registered with a strategy version. |
+| A later news item that the AI classifies as expectation-lowering, with no such rule satisfied (initially, every such item) | The decision enters **`REVIEW_REQUIRED`**. The AI classification alone never invalidates a setup. |
 
 - **While `REVIEW_REQUIRED` is pending:**
   - the entry is blocked (`thesis_review_pending`): no order intent is issued, and a working unfilled entry order is cancelled;
   - the expiry keeps running and is not extended.
 - **Reviewer decision.** A reviewer either confirms or rejects the invalidation. The record must contain the evidence identifiers, the timestamp, the decision and the reviewer's identity.
   - **Confirmed:** `setup_invalidated` (permanent).
-  - **Rejected:** the block lifts. The setup was never invalidated, so nothing is reinstated. Placing an order still needs a fresh explicit approval before the unchanged expiry.
+  - **Rejected:** the block lifts. The setup was never invalidated, so nothing is reinstated. A rejected invalidation **does not restore an approval**: the earlier approval ended when its order was cancelled, and an expired approval or decision stays expired. Placing an order needs a fresh explicit approval before the unchanged expiry.
   - **No decision before expiry:** the decision ends as `entry_blocked` with reason `thesis_review_pending`.
 - **The original AI signal is preserved unchanged.** The later item, the review request and the reviewer's decision are new journal entries that reference it.
 
@@ -224,7 +224,8 @@ Three outcomes are recorded separately, and the same classification applies to S
   - an approved decision whose order was working but did not fill is `order_unfilled`;
   - an approved decision whose order could not be placed, or was withdrawn, because of a block that was still in force at expiry is `entry_blocked`;
   - an unreviewed decision is `review_expired`, with any block in force noted.
-- **Both performance records** apply these rules (`05` §2.2).
+- **Blocks may lift, expiry does not move.** A temporary execution block ends when its underlying condition clears. It never extends, pauses or restarts the signal expiry.
+- **Both performance records** apply these rules (`05` §2.2). The opportunity cost of review-triggered abstention is measured only in the separate counterfactual analysis (`05` §2.4).
 
 #### 8.1.2 Pre-market classification (owner decision, `08` §5)
 

@@ -68,3 +68,4 @@ Halts are state stored in Convex and checked inside the order-claim mutation, no
 - An amendment may reduce risk or notional. It may never exceed the original proposal or any limit in this document.
 - A human decision never changes R1's state.
 - **Same limits, no circumvention (owner decision, `08` §6).** R1 is subject to the same deterministic limits, halts, session rules and data-freshness requirements as R2. An R1 entry that a limit would refuse is `entry_blocked`, exactly as in R2. Exhausted limits, stale prices and market halts are execution blocks for every strategy; they are never thesis invalidations.
+- **Counterfactual analysis.** The non-executable counterfactual signal analysis (`05` §2.4) has no risk state and never affects a limit or halt in either record.

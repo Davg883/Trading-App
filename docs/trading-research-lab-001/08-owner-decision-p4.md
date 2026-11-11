@@ -80,15 +80,26 @@ The PR #2 strategy rules are accepted with these refinements. They are **provisi
 | 3 | **Shadow portfolio realism.** The autonomous shadow portfolio obeys the same market-session and halt rules, data-freshness requirements, deterministic risk limits, order-expiry rules, and liquidity and execution assumptions. It receives no hindsight fills and cannot circumvent restrictions imposed on the human-approved demo portfolio. |
 | 4 | **Existing decisions preserved.** No S1 entry range until one is separately registered. Invalidation is permanent; any later opportunity needs a new signal and decision identifier. The S1, S2 and S3 expiry rules are unchanged. |
 
-### Drafting choices to confirm at registration
+## 7. Registration assumptions confirmed (owner decision, 11 November 2026)
 
-These are choices made in drafting, not owner instructions:
+The owner approved the following **provisional registration rules**. They replace the earlier "drafting choices to confirm". This decision authorises specification updates only.
 
-| Detail | Current drafting |
-|---|---|
-| Entry while `REVIEW_REQUIRED` is pending | Blocked; a working unfilled entry order is cancelled. If the reviewer rejects the invalidation, an order needs a fresh approval before the unchanged expiry. |
-| `REVIEW_REQUIRED` in the shadow portfolio | The shadow entry stays blocked until expiry, because the shadow record may not use a human judgement. |
-| Deterministic contradiction rules | None is registered, so every AI-classified expectation-lowering item goes to `REVIEW_REQUIRED`. |
-| "Verified" correction or retraction | It comes from the same licensed source or the issuer and is stored as evidence. |
-| Whether a block lifts | Yes, when its condition clears, but the expiry is never extended. |
-| Shadow liquidity assumption | A participation limit per bar, to be given a value at registration; none is set yet. |
+| # | Approved rule | Specified in | Test |
+|---|---|---|---|
+| 1 | `REVIEW_REQUIRED` blocks new entries and cancels any unfilled entry order. A rejected invalidation does not restore an expired approval. | `01` §8.1.1 | A26, A30 |
+| 2 | The autonomous shadow strategy stays blocked while a thesis review is unresolved. Human decisions must not retrospectively alter its performance. | `05` §2.2 | A26, A27 |
+| 3 | An explicitly separate, non-executable counterfactual signal analysis measures the opportunity cost of review-triggered abstention. Its hypothetical fills are never included in headline trading returns. | `05` §2.4 | A28 |
+| 4 | No deterministic contradiction rules are registered initially. AI-classified expectation-lowering news requires review. | `01` §8.1.1 | A26 |
+| 5 | Source corrections are accepted only when authenticated to the original licensed publisher or the relevant issuer, with evidence and timestamps. | `01` §8.1.1 | A30 |
+| 6 | Temporary execution blocks may lift when their underlying condition clears, but must not extend signal expiry. | `01` §8.1.1 | A24, A30 |
+| 7 | Provisional maximum shadow-fill participation of 1% of eligible volume per bar. The human-approved simulator uses the same conservative liquidity assumptions. | `05` §2.3 | A29 |
+| 8 | Executable liquidity is not inferred solely from OHLCV volume. Valid price, spread, session and fill-assumption checks are required. | `05` §2.3 | A29 |
+| 9 | At registration, confirm bar duration, market-data entitlement, corporate-action treatment, auction exclusions, fill model and slippage assumptions. | `05` §8 | — |
+| 10 | All existing human-approval, risk-limit, research-only and no-live-money restrictions are maintained. | `01` §8, `02`, `06` | A12, A13, A21 |
+
+## 8. Status: ready for formal registration review
+
+- The strategy specification is **complete for formal registration review**. Its scope is closed: no further rules are to be added outside that review.
+- Every rule in this folder is **provisional** until it is frozen at registration.
+- Values still to be supplied at registration are listed in `05` §8. The only rule with no value yet is the maximum spread.
+- This status is not authority to implement, deploy or trade. Prerequisites P1, P2, P3 and P5 (`00` §2) remain open, and security PR Davg883/Trading-App#1 remains the release priority.
