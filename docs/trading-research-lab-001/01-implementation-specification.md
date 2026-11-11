@@ -142,56 +142,89 @@ The *veto-window* mode is **withdrawn** (`08-owner-decision-p4.md`). There is ex
 
 | Strategy | Candidate type | Entry-authorisation expiry |
 |---|---|---|
-| S1 News momentum | Any | 15 minutes after `decidedAtMs`, or earlier if invalidated (§8.1.1) |
-| S2 Oversold recovery | Pre-market opening candidate (§8.1.2) | 10:00 America/New_York on the entry session, or earlier if a safeguard applies (§8.1.1) |
+| S1 News momentum | Any | 15 minutes after `decidedAtMs`, or earlier if invalidated |
+| S2 Oversold recovery | Pre-market opening candidate (§8.1.2) | 10:00 America/New_York on the entry session |
 | S2 Oversold recovery | Regular-session candidate | 15 minutes after `decidedAtMs` |
-| S3 Post-earnings repricing | Pre-market candidate (§8.1.2) | 11:00 America/New_York on the entry session, or earlier if a safeguard applies (§8.1.1) |
+| S3 Post-earnings repricing | Pre-market candidate (§8.1.2) | 11:00 America/New_York on the entry session |
 | S3 Post-earnings repricing | Later regular-session signal | 15 minutes after `decidedAtMs` |
 
+- The expiry times themselves never change. A `setup_invalidated` outcome can end any strategy's setup earlier; an `entry_blocked` condition prevents entry while it lasts (§8.1.1).
 - **Calculation:**
   - Times use the IANA zone `America/New_York`, so daylight-saving changes are handled, and the exchange calendar sets trading days and early closes.
   - An expiry never crosses into another session. It is capped at the session's last permitted entry time (`02` §2).
 - **Hard rules:**
   - **No extension.** No automatic extension, renewal or re-issue of a decision exists. A reviewer cannot extend an expiry; a new signal requires a new decision from the strategy engine.
   - **No automatic approval.** Expiry never converts to approval.
-  - **No action after expiry.** An approval received after expiry, or after an early invalidation (§8.1.1), is **refused**. No order intent may be issued after expiry, and the paper service refuses one whose decision has expired.
+  - **No action after expiry.** An approval received after expiry, after a `setup_invalidated` outcome, or while an entry block is in force (§8.1.1), is **refused**. No order intent may be issued after expiry, and the paper service refuses one whose decision has expired.
 - **Missed opportunities.**
   - At expiry, an unreviewed decision receives a `review_expired` event and becomes a missed opportunity.
-  - A decision invalidated early (§8.1.1) receives a `setup_invalidated` event with its reason code. If it was unreviewed, it is counted as a missed opportunity, separately from `review_expired`.
+  - `setup_invalidated`, `entry_blocked` and `order_unfilled` outcomes (§8.1.1) are each counted and reported separately from `review_expired`.
 - **Separate from exit rules.** Expiry governs only whether a new entry may be authorised and placed.
-  - The demo entry order carries a good-till time no later than the expiry, and the paper service cancels any unfilled remainder at expiry (`order_missed`, or a partial fill).
+  - The demo entry order carries a good-till time no later than the expiry, and the paper service cancels any unfilled remainder at expiry (`order_unfilled`, or a partial fill).
   - Once any quantity has filled, that position is governed only by the plan's exit conditions (target, invalidation, time exit). Expiry never closes, shortens or extends a position.
   - The 60-second order-intent expiry (`06` §4) is a separate transport control.
 - **Freeze and review.**
   - The rules are hashed into `strategyVersion` at formal registration and cannot change during an observation period.
-  - They are reviewed only with forward-recorded evidence: review latency, the `review_expired` rate, the `order_missed` rate and the delay effect (`05` §4). Any change starts a new strategy version.
+  - They are reviewed only with forward-recorded evidence: review latency, the `review_expired` rate, the `setup_invalidated`, `entry_blocked` and `order_unfilled` rates and the delay effect (`05` §4). Any change starts a new strategy version.
 
-#### 8.1.1 Early invalidation of an unfilled setup (owner decision, `08` §5)
+#### 8.1.1 Entry outcomes before a fill: invalidated, blocked, unfilled (owner decisions, `08` §5–6)
 
-Early invalidation applies only **before any entry fill**. It can only prevent an entry. It never approves, extends, re-prices or exits anything.
+These rules apply only **before any entry fill**. They can only prevent an entry. They never approve, extend, re-price or exit anything, and a filled position is governed only by its exit rules.
 
-| Strategy | An unfilled setup is invalidated when | Reason code |
+Three outcomes are recorded separately, and the same classification applies to S1, S2 and S3:
+
+| Outcome | Meaning | Permanent? |
+|---|---|---|
+| `setup_invalidated` | The original research or price setup is no longer valid | Yes. Never reinstated; any later opportunity needs a new signal and a new `decisionId` |
+| `entry_blocked` | An otherwise valid opportunity cannot be executed because of a market-integrity, data-quality or risk restriction | No. The block lifts when the condition clears, but the expiry is never extended |
+| `order_unfilled` | An authorised order did not receive an executable fill before expiry | Final at expiry |
+
+**Causes of `setup_invalidated`**
+
+| Strategy | Cause | Reason code |
 |---|---|---|
 | S1 | The price reaches the **original invalidation level** (the plan's `stopPrice`) | `price_invalidation_level` |
-| S1 | A **defined entry range is breached**. The range must be part of the registered S1 rule and stored on the plan. No range is registered at present, so this condition is inactive until one is. | `entry_range_breached` |
-| S1, S2, S3 | The **verified research thesis is materially invalidated** (definition below) | `thesis_invalidated` |
-| S2, S3 | **Stale or erroneous data**: an input the decision relies on is stale beyond the limit in `02` §3, or is corrected or withdrawn by its source | `data_stale` / `data_erroneous` |
-| S2, S3 | An **exchange halt** or suspension of the symbol | `exchange_halt` |
-| S2, S3 | **Risk limits exhausted**: any limit or halt in `02` would refuse the entry | `risk_limit_exhausted` |
+| S1 | A **registered entry range is breached**. No entry range is registered, and none may be introduced until one is separately registered as part of the S1 rule; until then this cause is inactive | `entry_range_breached` |
+| S1, S2, S3 | **Material thesis invalidation** (rules below) | `thesis_invalidated` |
 
-- **A price beyond the buy limit is not an invalidation.** If the price moves above an S1 buy-limit, the signal stays valid and the order simply stays unfilled. If it is still unfilled at expiry, it is recorded as `order_missed`.
-- **No new price thresholds.** S2 and S3 have no price-based early invalidation. Adding one requires a separately registered strategy rule, which is a new strategy version.
-- **Thesis materially invalidated** means one of these journaled events, each citing evidence identifiers:
-  - the source corrects or retracts the news item or filing the decision cites;
-  - a later item on the same subject is received and passes the same validated classification as expectation-lowering;
-  - a reviewer records the invalidation with the evidence. This can only prevent an entry, like a rejection.
+**Causes of `entry_blocked`** (all strategies; never a thesis invalidation)
+
+| Class | Cause | Reason code |
+|---|---|---|
+| Market integrity | Exchange halt or suspension of the symbol; market closed | `exchange_halt`, `market_closed` |
+| Data quality | A required price or input is stale beyond the limit in `02` §3, or is suspected erroneous and not yet verified | `data_stale`, `data_unverified` |
+| Risk | Any limit or halt in `02` would refuse the entry | `risk_limit_exhausted` |
+| Research | A thesis review is pending (`REVIEW_REQUIRED`, below) | `thesis_review_pending` |
+
+**Material thesis invalidation**
+
+| Trigger | Result |
+|---|---|
+| A **verified correction or retraction of the original source** that the decision cites | Directly invalidates the affected research premise. If the decision's trigger depends on that premise, the setup is `setup_invalidated`. Verification means the correction comes from the same licensed source or the issuer and is stored as evidence. |
+| A later news item that the AI classifies as expectation-lowering, where a **predefined deterministic contradiction rule** is satisfied | `setup_invalidated`. No such rule is registered at present; one takes effect only when registered with the strategy version. |
+| A later news item that the AI classifies as expectation-lowering, with no such rule satisfied | The decision enters **`REVIEW_REQUIRED`**. The AI classification alone never invalidates a setup. |
+
+- **While `REVIEW_REQUIRED` is pending:**
+  - the entry is blocked (`thesis_review_pending`): no order intent is issued, and a working unfilled entry order is cancelled;
+  - the expiry keeps running and is not extended.
+- **Reviewer decision.** A reviewer either confirms or rejects the invalidation. The record must contain the evidence identifiers, the timestamp, the decision and the reviewer's identity.
+  - **Confirmed:** `setup_invalidated` (permanent).
+  - **Rejected:** the block lifts. The setup was never invalidated, so nothing is reinstated. Placing an order still needs a fresh explicit approval before the unchanged expiry.
+  - **No decision before expiry:** the decision ends as `entry_blocked` with reason `thesis_review_pending`.
+- **The original AI signal is preserved unchanged.** The later item, the review request and the reviewer's decision are new journal entries that reference it.
+
+**Other rules**
+
+- **A price beyond the buy limit is not an invalidation.** If the price moves above a buy limit, the signal stays valid and the order stays unfilled. If still unfilled at expiry, the outcome is `order_unfilled`.
+- **No new price thresholds.** S2 and S3 have no price-based invalidation. Adding one requires a separately registered strategy rule, which is a new strategy version.
 - **When the conditions are evaluated:**
   - price, halt and thesis events: continuously, while the setup is unfilled;
-  - data and risk-limit conditions: at approval and again inside the order-claim mutation.
-- **Terminal.** An invalidated setup is never reinstated, even if the condition clears. A later valid signal is a new decision from the strategy engine.
-- **Any open entry order is cancelled** on invalidation. A partly filled position is then governed only by its exit rules.
-- **Both performance records.** The S1 price and entry-range conditions, the thesis condition, data conditions and halts apply to unfilled setups in R1 and R2 alike. The risk-limit condition uses each record's own risk state (`02` §6).
-- **S1 and the common safeguards.** For S1, stale data, halts and risk limits continue to block entry under `02` §3, as before; the owner decision lists them as early invalidations for S2 and S3.
+  - data-quality and risk conditions: at approval and again inside the order-claim mutation. A refused approval or claim is journaled as an `entry_blocked` event with its reason.
+- **Final entry outcome.** Each TRADE decision ends with exactly one of: filled (fully or partly), `setup_invalidated`, `entry_blocked`, `order_unfilled`, `review_expired` or rejected. At expiry:
+  - an approved decision whose order was working but did not fill is `order_unfilled`;
+  - an approved decision whose order could not be placed, or was withdrawn, because of a block that was still in force at expiry is `entry_blocked`;
+  - an unreviewed decision is `review_expired`, with any block in force noted.
+- **Both performance records** apply these rules (`05` §2.2).
 
 #### 8.1.2 Pre-market classification (owner decision, `08` §5)
 
@@ -210,8 +243,11 @@ Each event is a new journal entry referencing the decision's `entrySha256`. It r
 | `rejected` | Do not trade; mandatory reason code | No trade |
 | `deferred` | Reviewer postpones the decision with a note. A deferral is not an approval, and the expiry still applies. | None until a later event |
 | `review_expired` | No decision before expiry (system event) | No trade; counted as a missed opportunity |
-| `setup_invalidated` | Early invalidation before any entry fill (§8.1.1; system event, or a reviewer for the thesis condition) | No trade; any open entry order is cancelled; reported by reason code |
-| `order_missed` | Approved, but the limit was not reached or the order otherwise did not fill before the entry rule lapsed | No trade; counted as a missed opportunity, separately from `review_expired` |
+| `setup_invalidated` | The research or price setup is no longer valid (§8.1.1; system event, or a reviewer confirming a thesis invalidation) | No trade; any open entry order is cancelled; permanent; reported by reason code |
+| `entry_blocked` | A valid opportunity cannot be executed because of a market-integrity, data-quality or risk restriction, or a pending thesis review (system event) | No order while the block is in force; final outcome if still blocked at expiry |
+| `thesis_review_required` | A later AI-classified expectation-lowering item put the decision into `REVIEW_REQUIRED` (system event) | Entry blocked until a reviewer decides |
+| `thesis_invalidation_confirmed` / `thesis_invalidation_rejected` | Reviewer decision on a `REVIEW_REQUIRED` item, with evidence identifiers, timestamp and decision | Confirmed: `setup_invalidated`. Rejected: the block lifts; a fresh approval is still required |
+| `order_unfilled` | An authorised order did not receive an executable fill before expiry | No trade; counted separately from `review_expired` |
 | `converted_wait_to_trade` | Reviewer originates a trade from a WAIT decision | Human-originated cohort only; never in the shadow record |
 
 Delay is not a separate event. It is the measured latency of every review event, and its price effect is attributed in `05` §4.

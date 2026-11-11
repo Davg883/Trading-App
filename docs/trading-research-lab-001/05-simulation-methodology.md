@@ -18,8 +18,8 @@ The two **performance records** are kept separately from the first decision. The
 
 | Record | Contains | Source of trades | Fills |
 |---|---|---|---|
-| **R1: autonomous shadow strategy** | What would have happened with no human intervention | Every TRADE decision exactly as journaled, at its `decidedAtMs`, with its original plan; review events are never read | Model ledger only |
-| **R2: human-approved demo strategy** | What actually happened | Approved and amended orders, entered at approval time; rejected, expired and missed decisions appear as no trade; human-originated trades are a separate cohort | Demo ledger (actual fills), with a model-ledger fill at the approval time for comparison |
+| **R1: autonomous shadow strategy** | What would have happened with no human intervention | Every TRADE decision exactly as journaled, at its `decidedAtMs`, with its original plan; no approval, rejection or amendment is ever read; it obeys every market, data, risk, expiry and execution restriction that R2 obeys (§2.2) | Model ledger only |
+| **R2: human-approved demo strategy** | What actually happened | Approved and amended orders, entered at approval time; rejected, expired, invalidated, blocked and unfilled decisions appear as no trade; human-originated trades are a separate cohort | Demo ledger (actual fills), with a model-ledger fill at the approval time for comparison |
 
 Each record has its own equity curve, risk state and halts (`02` §6). The two **fill ledgers** below are the fill rules used to price them.
 
@@ -34,6 +34,28 @@ For every trade, the record compares the intended price, the model fill and the 
 
 Demo fills are **not** evidence of live fill quality: demo matching may differ from the live market. Neither ledger is a live result.
 
+### 2.2 Shadow portfolio realism (owner decision, `08` §6)
+
+R1 differs from R2 in exactly one respect: no human approves, amends, rejects or delays its entries. In every other respect it obeys the same rules:
+
+| Rule | Applied to R1 |
+|---|---|
+| Market session and exchange halts | No R1 fill outside a permitted session window or while the symbol is halted; the same session-timing rules as `02` §2 |
+| Data freshness | An R1 entry needs fresh data at the fill bar. Stale or unverified data gives `entry_blocked`, as in R2 |
+| Deterministic risk limits | Every limit and halt in `02`, evaluated against R1's own state (`02` §6) |
+| Order expiry | The same entry-authorisation expiry (`01` §8.1). An R1 order unfilled at expiry is `order_unfilled`; there is no extension |
+| Entry outcomes | The same `setup_invalidated`, `entry_blocked` and `order_unfilled` classification (`01` §8.1.1) |
+| Liquidity and execution | The model-ledger fill rules, slippage, cost and minimum-order assumptions, identical to those used for R2's model-ledger comparison; partial fills where the bar's volume cannot absorb the order under the registered participation assumption |
+
+**No hindsight fills.**
+- R1 fills are computed forward, bar by bar, from bars received after `decidedAtMs`, and each fill is journaled when its bar arrives.
+- A fill is never recomputed from later or corrected data. A data correction is a `correction` entry, reported separately.
+- R1 never fills at a price, time or size that R2 would have been prevented from using.
+
+**Thesis reviews in R1.** R1 cannot use a human judgement.
+- A verified correction or retraction, or a registered deterministic contradiction rule, invalidates an unfilled R1 setup directly.
+- An AI-classified expectation-lowering item blocks an unfilled R1 entry (`thesis_review_pending`) until expiry. The reviewer's later decision is not read by R1.
+
 ## 3. Benchmark
 
 - **Per trade:** the QQQ return over the same entry-to-exit window, applied to the same GBP notional. FX uses the same convention as the trade: the trade's FX rates at entry and exit, recorded with timestamps. The result is excess R and excess £.
@@ -46,7 +68,7 @@ Demo fills are **not** evidence of live fill quality: demo matching may differ f
 - Human-originated trades (WAIT converted to TRADE by a reviewer) are a separate cohort in R2 and never enter R1.
 - **Intervention attribution** (the basis for Phase B). The difference R1 − R2, per decision and in total, is split into:
   - **rejection effect:** the R1 outcome of rejected decisions;
-  - **missed-opportunity effect:** the R1 outcome of `review_expired` and `order_missed` decisions, reported separately;
+  - **missed-opportunity effect:** the R1 outcome of `review_expired`, `entry_blocked` and `order_unfilled` decisions in R2, each reported separately;
   - **amendment effect:** amended plan versus original plan, both priced on the model ledger at approval time;
   - **delay effect:** the original plan on the model ledger at approval time versus at `decidedAtMs`;
   - **execution effect:** the demo fill versus the model-ledger fill at approval time.

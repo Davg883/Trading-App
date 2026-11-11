@@ -67,3 +67,4 @@ Halts are state stored in Convex and checked inside the order-claim mutation, no
 - **R2 (human-approved demo).** At approval, and again inside the order-claim mutation, the approved or amended plan is checked against R2's actual demo state. A plan that fails is refused, and the refusal is journaled. Real halts (§3) and the kill switch apply to R2.
 - An amendment may reduce risk or notional. It may never exceed the original proposal or any limit in this document.
 - A human decision never changes R1's state.
+- **Same limits, no circumvention (owner decision, `08` §6).** R1 is subject to the same deterministic limits, halts, session rules and data-freshness requirements as R2. An R1 entry that a limit would refuse is `entry_blocked`, exactly as in R2. Exhausted limits, stale prices and market halts are execution blocks for every strategy; they are never thesis invalidations.

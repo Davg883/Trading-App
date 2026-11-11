@@ -36,7 +36,7 @@
 
 - **Simpler and safer than a veto window.** No timer can cause an order, so a missed review, an outage or an unread notification cannot place an order. The paper service has no time-based trigger to secure.
 - **Delay is a measured cost.** An approval that arrives later than the AI's decision time moves the demo entry. The shadow record keeps the original timing, so the cost of human latency appears as a separate attribution term (`05` §4).
-- **Unreviewed decisions are not lost.** A TRADE decision that expires without review is recorded as `expired_unreviewed` (a missed opportunity). It stays in the shadow record, and the human-approved record shows no trade.
+- **Unreviewed decisions are not lost.** A TRADE decision that expires without review is recorded as `review_expired` (a missed opportunity). It stays in the shadow record, and the human-approved record shows no trade.
 - **Phase C is not pre-approved.** Nothing in Phase A may contain a dormant automatic-execution path, a feature flag for one, or a configuration value that enables one (`07` A21).
 
 ## 4. Entry-authorisation expiry (owner decision, 11 November 2026)
@@ -67,13 +67,28 @@ This section replaces the earlier "points for confirmation"; the owner has decid
 | Pre-market expiries | S2 10:00 and S3 11:00 New York are kept. |
 | Unchanged | The human-approval requirement, the risk limits and the research-only execution boundary. |
 
-### Specification details still to be fixed at registration
+Section 6 refines the S1, S2 and S3 rows above: stale data, halts and exhausted risk limits are execution blocks, not invalidations.
 
-These are drafting choices in `01` §8.1.1, not owner instructions:
+## 6. Final registration clarifications (owner decision, 11 November 2026)
+
+The PR #2 strategy rules are accepted with these refinements. They are **provisional rules, to be frozen at formal experiment registration**. Specified in `01` §8.1.1 and §8.2, `05` §2.2 and `02` §6; tested by `07` A24, A26 and A27.
+
+| # | Owner decision |
+|---|---|
+| 1 | **Material thesis invalidation.** A verified correction or retraction of the original source may directly invalidate the affected research premise. A later AI-classified expectation-lowering item triggers `REVIEW_REQUIRED` unless a predefined deterministic contradiction rule is satisfied. A reviewer may confirm or reject the invalidation and must record the evidence, timestamp and decision. The original AI signal is preserved unchanged. |
+| 2 | **Three separate outcomes.** `setup_invalidated`: the research or price setup is no longer valid. `entry_blocked`: a valid opportunity cannot be executed because of market-integrity, data-quality or risk restrictions. `order_unfilled`: an authorised order had no executable fill before expiry. For S1, stale prices, halts and exhausted risk limits are execution blocks, not thesis invalidations; the same classification applies to S2 and S3. |
+| 3 | **Shadow portfolio realism.** The autonomous shadow portfolio obeys the same market-session and halt rules, data-freshness requirements, deterministic risk limits, order-expiry rules, and liquidity and execution assumptions. It receives no hindsight fills and cannot circumvent restrictions imposed on the human-approved demo portfolio. |
+| 4 | **Existing decisions preserved.** No S1 entry range until one is separately registered. Invalidation is permanent; any later opportunity needs a new signal and decision identifier. The S1, S2 and S3 expiry rules are unchanged. |
+
+### Drafting choices to confirm at registration
+
+These are choices made in drafting, not owner instructions:
 
 | Detail | Current drafting |
 |---|---|
-| S1 "defined entry range" | No range exists in the S1 rule today, so the condition is inactive. A range takes effect only when it is registered as part of the S1 rule. |
-| Definition of "materially invalidated" | A source correction or retraction, a later validated expectation-lowering item on the same subject, or a reviewer-recorded invalidation with evidence |
-| Whether invalidation is final | Final: a setup is never reinstated when a condition (for example stale data) clears |
-| Common safeguards and S1 | Stale data, halts and risk limits keep blocking S1 entries under `02` §3 but are not recorded as S1 early invalidations |
+| Entry while `REVIEW_REQUIRED` is pending | Blocked; a working unfilled entry order is cancelled. If the reviewer rejects the invalidation, an order needs a fresh approval before the unchanged expiry. |
+| `REVIEW_REQUIRED` in the shadow portfolio | The shadow entry stays blocked until expiry, because the shadow record may not use a human judgement. |
+| Deterministic contradiction rules | None is registered, so every AI-classified expectation-lowering item goes to `REVIEW_REQUIRED`. |
+| "Verified" correction or retraction | It comes from the same licensed source or the issuer and is stored as evidence. |
+| Whether a block lifts | Yes, when its condition clears, but the expiry is never extended. |
+| Shadow liquidity assumption | A participation limit per bar, to be given a value at registration; none is set yet. |
