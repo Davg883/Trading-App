@@ -1,4 +1,5 @@
-import {afterEach,describe,expect,it,vi} from 'vitest';
+import {afterEach,beforeAll,describe,expect,it,vi} from 'vitest';
+import {evidenceTurnFields} from './helpers/turn-fixture';
 import {createHash} from 'node:crypto';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
@@ -32,8 +33,11 @@ function setup(){
  const t=convexTest(schema,modules);
  return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS})};
 }
+let EV_A:Awaited<ReturnType<typeof evidenceTurnFields>>;
+beforeAll(async()=>{EV_A=await evidenceTurnFields(Q,A);});
 function turn(o:Record<string,unknown>={}){
- return {turnId:'chat-1',bundleId:'bundle-1',bundleSha256:'a'.repeat(64),question:Q,queryType:'ownership_chain',intentCategory:'graph',historicalCutoffMs:NOW,temporalBasis:'receipt',graphDatabaseName:'db',graphSchemaVersion:'v1',lastProjectedSequence:0,supportStatus:'unsupported',validationValid:true,validationAction:'accepted',modelId:'gemini-2.5-flash',generationMode:'abstention_only',providerStatus:'budget_exceeded',inputTokens:0,outputTokens:0,cachedTokens:0,estimatedCostGbp:0,actualCostGbp:0,latencyMs:5,bundleJson:'{}',answerJson:'{}',validationJson:'{}',createdAtMs:NOW,...o};
+ // Evidence fields come from a real, consistent deterministic turn (strict inner evidence validation, Correction 4).
+ return {turnId:'chat-1',modelId:'gemini-2.5-flash',generationMode:'abstention_only',providerStatus:'budget_exceeded',inputTokens:0,outputTokens:0,cachedTokens:0,estimatedCostGbp:0,actualCostGbp:0,latencyMs:5,createdAtMs:NOW,...EV_A,...o};
 }
 const rows=(t:T)=>t.run(ctx=>ctx.db.query('evidenceChatAudit').collect());
 const postTurn=(caller:{fetch:T['fetch']},body:unknown)=>caller.fetch('/api/evidence-chat/turn',{method:'POST',headers:H,body:JSON.stringify(body)});

@@ -1,4 +1,5 @@
-import {afterEach,describe,expect,it,vi} from 'vitest';
+import {afterEach,beforeAll,describe,expect,it,vi} from 'vitest';
+import {evidenceTurnFields} from './helpers/turn-fixture';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
@@ -19,8 +20,11 @@ function setup(){
  const t=convexTest(schema,modules);
  return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS})};
 }
+let EV_A:Awaited<ReturnType<typeof evidenceTurnFields>>;
+beforeAll(async()=>{EV_A=await evidenceTurnFields('Which hyperscalers fund the Irish data-centre build-out?',A);});
 function turn(o:Record<string,unknown>={}){
- return {turnId:'chat-1',bundleId:'bundle-1',bundleSha256:'a'.repeat(64),question:'q?',queryType:'x',intentCategory:'y',historicalCutoffMs:NOW,temporalBasis:'receipt',graphDatabaseName:'db',graphSchemaVersion:'v1',lastProjectedSequence:0,supportStatus:'fully_supported',validationValid:true,validationAction:'accepted',modelId:'fabricated-model-x',generationMode:'gemini_live',providerStatus:'succeeded',inputTokens:100,outputTokens:50,cachedTokens:0,estimatedCostGbp:0.01,actualCostGbp:0.01,latencyMs:5,bundleJson:'{}',answerJson:'{}',validationJson:'{}',createdAtMs:NOW,...o};
+ // Evidence fields come from a real, consistent deterministic turn (strict inner evidence validation, Correction 4).
+ return {turnId:'chat-1',modelId:'fabricated-model-x',generationMode:'gemini_live',providerStatus:'succeeded',inputTokens:100,outputTokens:50,cachedTokens:0,estimatedCostGbp:0.01,actualCostGbp:0.01,latencyMs:5,createdAtMs:NOW,...EV_A,...o};
 }
 const rec=makeFunctionReference<'mutation'>('evidenceChat:recordEvidenceChatTurn');
 const tel=makeFunctionReference<'query'>('evidenceChat:getChatOperationsTelemetry');

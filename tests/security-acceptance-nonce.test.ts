@@ -1,4 +1,5 @@
-import {afterEach,describe,expect,it,vi} from 'vitest';
+import {afterEach,beforeAll,describe,expect,it,vi} from 'vitest';
+import {evidenceTurnFields} from './helpers/turn-fixture';
 import {createHash} from 'node:crypto';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
@@ -56,8 +57,13 @@ function gateway(t:T,path:string,body:unknown,headers:Record<string,string>={'x-
 }
 const consume=(t:T,token:string,question=QUESTION,headers?:Record<string,string>)=>gateway(t,'/api/evidence-chat/acceptance/consume',{token,question},headers);
 const record=(t:T,token:string,reservation:string,turn:Record<string,unknown>)=>gateway(t,'/api/evidence-chat/acceptance/record',{token,reservation,turn});
+let EV_A:Awaited<ReturnType<typeof evidenceTurnFields>>;
+let EV_B:Awaited<ReturnType<typeof evidenceTurnFields>>;
+beforeAll(async()=>{EV_A=await evidenceTurnFields(QUESTION,A);EV_B=await evidenceTurnFields(QUESTION,B);});
+const turnB=(o:Record<string,unknown>={})=>({...turn(o),...EV_B,...o});
 function turn(overrides:Record<string,unknown>={}){
- return {turnId:'chat-abc-1',bundleId:'bundle-1',bundleSha256:'a'.repeat(64),question:QUESTION,queryType:'ownership_chain',intentCategory:'graph',historicalCutoffMs:NOW,temporalBasis:'receipt',graphDatabaseName:'aci_macro_intelligence_prod',graphSchemaVersion:'v1',lastProjectedSequence:3,supportStatus:'fully_supported',validationValid:true,validationAction:'accepted',modelId:'gemini-2.5-flash',generationMode:'gemini_live',providerStatus:'succeeded',inputTokens:3000,outputTokens:500,cachedTokens:0,estimatedCostGbp:0.002,actualCostGbp:null,latencyMs:2400,bundleJson:'{"k":1}',answerJson:'{"k":1}',validationJson:'{"k":1}',createdAtMs:NOW,...overrides};
+ // Evidence fields come from a real, consistent deterministic turn (strict inner evidence validation, Correction 4).
+ return {turnId:'chat-abc-1',modelId:'gemini-2.5-flash',generationMode:'gemini_live',providerStatus:'succeeded',inputTokens:3000,outputTokens:500,cachedTokens:0,estimatedCostGbp:0.002,actualCostGbp:null,latencyMs:2400,createdAtMs:NOW,...EV_A,...overrides};
 }
 const chatRows=(t:T)=>t.run(ctx=>ctx.db.query('evidenceChatAudit').collect());
 const nonceRows=(t:T)=>t.run(ctx=>ctx.db.query('acceptanceNonces').collect());
@@ -130,7 +136,7 @@ describe('WP2 — gateway authentication',()=>{
   expect((await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({turn:turn()})})).status).toBe(401);
   expect(await chatRows(t)).toHaveLength(0);
   // Non-live turn: since the H2 correction a live turn additionally needs a budget reservation (tests/security-chat-budget-reservation.test.ts).
-  const nonLive={generationMode:'abstention_only',providerStatus:'budget_exceeded',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:null};
+  const nonLive={generationMode:'abstention_only',providerStatus:'budget_exceeded',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:null};
   const ok=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn(nonLive)})});
   expect(ok.status).toBe(200);
   expect(await chatRows(t)).toMatchObject([{owner:A,recordedVia:'server_gateway'}]);
@@ -259,9 +265,9 @@ describe('WP2 — audit recording',()=>{
  });
  it('records a provider failure after consumption as a failure, never as live inference',async()=>{
   const t=setup(),s=await consumed(t);
-  const res=await record(t,s.token,s.reservation,turn({generationMode:'abstention_only',providerStatus:'provider_error',providerFailureKind:'error_response',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0,modelId:'gemini-2.5-flash'}));
+  const res=await record(t,s.token,s.reservation,turn({generationMode:'abstention_only',providerStatus:'provider_error',providerFailureKind:'error_response',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0,modelId:'gemini-2.5-flash'}));
   expect(res.status).toBe(200);
-  expect(await chatRows(t)).toMatchObject([{generationMode:'abstention_only',providerStatus:'provider_error',estimatedCostGbp:0,supportStatus:'unsupported'}]);
+  expect(await chatRows(t)).toMatchObject([{generationMode:'abstention_only',providerStatus:'provider_error',estimatedCostGbp:0}]);
  });
  it('marks a nonce failed when no turn could be produced; it can never be recorded or reused afterwards',async()=>{
   const t=setup(),s=await consumed(t);
@@ -278,14 +284,14 @@ describe('WP2 — signed-in compatibility path',()=>{
  const recRef=makeFunctionReference<'mutation'>('evidenceChat:recordEvidenceChatTurn');
  it('denies anonymous writes, scopes writes to the verified caller and validates telemetry',async()=>{
   const t=setup(),asB=t.withIdentity({subject:'user_b',tokenIdentifier:B,issuer:ISSUER});
-  await expect(t.mutation(recRef,turn())).rejects.toThrow('Sign in required');
-  await expect(asB.mutation(recRef,{...turn(),owner:A} as never)).rejects.toThrow();
+  await expect(t.mutation(recRef,turnB())).rejects.toThrow('Sign in required');
+  await expect(asB.mutation(recRef,{...turnB(),owner:A} as never)).rejects.toThrow();
   // Since the H1 correction the caller's own credential cannot record live inference or provider cost at all.
-  await expect(asB.mutation(recRef,turn({estimatedCostGbp:9999}))).rejects.toThrow('provider cost can only be recorded by the trusted server gateway');
-  await expect(asB.mutation(recRef,turn())).rejects.toThrow('live provider inference can only be recorded by the trusted server gateway');
+  await expect(asB.mutation(recRef,turnB({estimatedCostGbp:9999}))).rejects.toThrow('provider cost can only be recorded by the trusted server gateway');
+  await expect(asB.mutation(recRef,turnB())).rejects.toThrow('live provider inference can only be recorded by the trusted server gateway');
   const nonLive={generationMode:'deterministic_evidence_synthesis',providerStatus:'not_invoked',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0};
-  await expect(asB.mutation(recRef,turn({...nonLive,latencyMs:-1}))).rejects.toThrow('latencyMs out of range');
-  await asB.mutation(recRef,turn(nonLive));
+  await expect(asB.mutation(recRef,turnB({...nonLive,latencyMs:-1}))).rejects.toThrow('latencyMs out of range');
+  await asB.mutation(recRef,turnB(nonLive));
   expect(await chatRows(t)).toMatchObject([{owner:B,recordedVia:'client_jwt_legacy'}]);
  });
 });

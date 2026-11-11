@@ -6,6 +6,8 @@
  * successful live provider call while reporting a provider failure, or that carries implausible cost or token
  * figures, is rejected rather than stored.
  */
+import { evidenceConsistencyViolations } from './chat-turn-evidence-validation';
+
 export const CHAT_GENERATION_MODES = [
   'gemini_live',
   'deterministic_evidence_synthesis',
@@ -119,8 +121,15 @@ function parsesAsObject(json: string): boolean {
   }
 }
 
-/** Returns the list of violated rules; an empty list means the record may be stored. */
-export function chatTurnAuditViolations(input: ChatTurnAuditInput, serverNowMs: number): string[] {
+/**
+ * Returns the list of violated rules; an empty list means the record may be stored. When the format checks pass,
+ * the strict inner evidence checks (Correction 4) also run; `context.owner` enables the requester binding.
+ */
+export function chatTurnAuditViolations(
+  input: ChatTurnAuditInput,
+  serverNowMs: number,
+  context: { owner?: string } = {},
+): string[] {
   const reasons: string[] = [];
   if (!shortText(input.turnId, 200)) reasons.push('turnId must be 1–200 characters');
   if (!shortText(input.bundleId, 200)) reasons.push('bundleId must be 1–200 characters');
@@ -177,6 +186,7 @@ export function chatTurnAuditViolations(input: ChatTurnAuditInput, serverNowMs: 
   if (!parsesAsObject(input.answerJson)) reasons.push('answerJson must be a JSON object within the size limit');
   if (!parsesAsObject(input.validationJson))
     reasons.push('validationJson must be a JSON object within the size limit');
+  if (reasons.length === 0) reasons.push(...evidenceConsistencyViolations(input, context.owner));
   return reasons;
 }
 

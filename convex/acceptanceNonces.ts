@@ -12,6 +12,7 @@ import {
 import type { DataModel } from './server';
 import type { GenericId } from 'convex/values';
 import { sha256HexSync } from '../lib/crypto/sha256';
+import { EVIDENCE_INTEGRITY_VERSION } from '../lib/graph/chat-turn-evidence-validation';
 import {
   abandonReservation,
   canSettle,
@@ -386,12 +387,13 @@ export async function insertValidatedChatTurn(
   recordedVia: ChatRecordedVia,
   now: number,
 ) {
-  const violations = chatTurnAuditViolations(turn, now);
+  const violations = chatTurnAuditViolations(turn, now, { owner });
   if (violations.length > 0) return { ok: false as const, violations };
   const auditId = await ctx.db.insert('evidenceChatAudit', {
     owner,
     ...turn,
     recordedVia,
+    evidenceIntegrity: EVIDENCE_INTEGRITY_VERSION,
     executionAuthority: 'none',
   });
   await ctx.db.insert('audit', {

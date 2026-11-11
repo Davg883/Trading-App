@@ -186,6 +186,8 @@ export const listChatHistory = query({
       answer: JSON.parse(r.answerJson),
       validation: JSON.parse(r.validationJson),
       createdAtMs: r.createdAtMs,
+      // Rows written before Correction 4 are returned as stored, unmodified, and labelled as not validated.
+      evidenceIntegrity: r.evidenceIntegrity ?? ('legacy_unvalidated' as const),
       executionAuthority: 'none' as const,
     }));
   },
@@ -214,6 +216,7 @@ export const getEvidenceBundleById = query({
       answer: JSON.parse(row.answerJson),
       validation: JSON.parse(row.validationJson),
       createdAtMs: row.createdAtMs,
+      evidenceIntegrity: row.evidenceIntegrity ?? ('legacy_unvalidated' as const),
       executionAuthority: 'none' as const,
     };
   },
