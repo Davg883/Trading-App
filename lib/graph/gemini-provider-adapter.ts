@@ -54,6 +54,23 @@ let cachedVerifiedModelEndpoint: {
 } | null = null;
 const MODEL_ENDPOINT_CACHE_TTL_MS = 15 * 60 * 1000;
 
+/**
+ * Classifies a failed provider call for budget accounting. A timeout or transport failure may still have been
+ * processed (and billed) by the provider, so its cost is unknown; an explicit error response was not.
+ */
+export function classifyProviderFailure(err: unknown): 'error_response' | 'timeout_or_transport' | 'unknown' {
+  const e = err as { name?: unknown; message?: unknown; status?: unknown; code?: unknown } | null;
+  const name = typeof e?.name === 'string' ? e.name : '';
+  const message = typeof e?.message === 'string' ? e.message : String(err ?? '');
+  if (name === 'AbortError' || name === 'TimeoutError' || /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|fetch failed|network/i.test(message)) {
+    return 'timeout_or_transport';
+  }
+  if (typeof e?.status === 'number' || /\bHTTP [45]\d\d\b|\b(INVALID_ARGUMENT|PERMISSION_DENIED|RESOURCE_EXHAUSTED|NOT_FOUND|FAILED_PRECONDITION|UNAUTHENTICATED)\b|"code":\s*[45]\d\d/.test(message)) {
+    return 'error_response';
+  }
+  return 'unknown';
+}
+
 export function checkGeminiChatRateLimit(
   callerId: string,
   nowMs = Date.now(),
@@ -942,6 +959,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
         modelVerifiedViaEndpoint: false,
         generationMode: 'abstention_only',
         providerStatus: 'provider_error',
+        providerFailureKind: 'simulated',
         latencyMs: Math.max(1, Date.now() - startMs),
         inputTokens: 0,
         outputTokens: 0,
@@ -1635,6 +1653,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
       modelVerifiedViaEndpoint: endpointVerified,
       generationMode: 'abstention_only',
       providerStatus: 'provider_error',
+      providerFailureKind: classifyProviderFailure(lastError),
       latencyMs: Math.max(1, Date.now() - startMs),
       inputTokens: 0,
       outputTokens: 0,

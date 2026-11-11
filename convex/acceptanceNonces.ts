@@ -10,8 +10,17 @@ import {
   type QueryBuilder,
 } from 'convex/server';
 import type { DataModel } from './server';
+import type { GenericId } from 'convex/values';
 import { sha256HexSync } from '../lib/crypto/sha256';
-import { loadActiveReservation, reserveChatBudget, settleReservation } from './chatBudget';
+import {
+  abandonReservation,
+  canSettle,
+  classifyOutcome,
+  loadReservation,
+  reserveChatBudget,
+  settleReservationForTurn,
+  startReservation,
+} from './chatBudget';
 import { macroRelationshipSchema, type MacroRelationship } from '../lib/graph/contracts';
 import {
   chatTurnAuditViolations,
@@ -342,6 +351,9 @@ export const turnAuditArgs = {
   answerJson: v.string(),
   validationJson: v.string(),
   createdAtMs: v.number(),
+  providerFailureKind: v.optional(
+    v.union(v.literal('error_response'), v.literal('timeout_or_transport'), v.literal('simulated'), v.literal('unknown')),
+  ),
 };
 
 type TurnAudit = Parameters<typeof chatTurnAuditViolations>[0];
@@ -392,6 +404,62 @@ export async function insertValidatedChatTurn(
   return { ok: true as const, auditId };
 }
 
+type Reservation = DataModel['chatBudgetReservations']['document'];
+
+/**
+ * Records a turn and settles its budget reservation in one transaction (Correction 2).
+ * - A retry of the same turn (same owner and turnId) returns the original audit id and charges nothing again.
+ * - Any turn that involved a real provider call must carry a started reservation of the same owner.
+ * - An invalid settlement is refused before anything is written.
+ */
+export async function recordTurnWithReservation(
+  ctx: GenericMutationCtx<DataModel>,
+  owner: string,
+  turn: TurnAudit,
+  recordedVia: ChatRecordedVia,
+  reservation: Reservation | null,
+  now: number,
+): Promise<{ ok: true; auditId: GenericId<'evidenceChatAudit'>; duplicate: boolean } | { ok: false; violations: string[] }> {
+  const existing = await ctx.db
+    .query('evidenceChatAudit')
+    .withIndex('by_turn', (q) => q.eq('owner', owner).eq('turnId', turn.turnId))
+    .first();
+  if (existing) {
+    if (existing.bundleSha256 !== turn.bundleSha256 || existing.generationMode !== turn.generationMode)
+      return { ok: false, violations: ['turnId already recorded with different content'] };
+    return { ok: true, auditId: existing._id, duplicate: true };
+  }
+  const outcome = classifyOutcome(turn);
+  const needsReservation = outcome.providerCall && turn.providerFailureKind !== 'simulated';
+  if (needsReservation && !reservation)
+    return { ok: false, violations: ['a provider call requires a started budget reservation'] };
+  if (reservation) {
+    const refused = canSettle(reservation, turn, now);
+    if (refused) return { ok: false, violations: [refused] };
+  }
+  const inserted = await insertValidatedChatTurn(ctx, owner, turn, recordedVia, now);
+  if (!inserted.ok) return inserted;
+  if (reservation) await settleReservationForTurn(ctx, reservation, turn, inserted.auditId, turn.turnId, now);
+  return { ok: true, auditId: inserted.auditId, duplicate: false };
+}
+
+/**
+ * Starts the budget reservation taken when an acceptance nonce was consumed. Must succeed before the paid
+ * provider call is made for that nonce.
+ */
+export const startAcceptanceBudgetInternal = internalMutation({
+  args: { nonceId: v.string(), secretSha256: v.string(), reservationSha256: v.string() },
+  handler: async (ctx, args) => {
+    const { row, rejection } = await loadVerifiedNonce(ctx, args.nonceId, args.secretSha256);
+    if (!row) return { ok: false as const, reason: rejection };
+    if (row.status !== 'consumed') return { ok: false as const, reason: 'not_consumed' };
+    if (row.reservationSha256 === null || !constantTimeEqual(row.reservationSha256, args.reservationSha256))
+      return { ok: false as const, reason: 'invalid_reservation' };
+    if (!row.budgetReservationSha256) return { ok: false as const, reason: 'no_budget_reservation' };
+    return await startReservation(ctx, row.owner, row.budgetReservationSha256, Date.now());
+  },
+});
+
 /**
  * Atomic one-time audit record for a consumed nonce. A repeated call with the same reservation and turn
  * identifier (duplicate callback or client retry) returns the original audit id and writes nothing.
@@ -428,15 +496,11 @@ export const recordNonceTurnInternal = internalMutation({
     // own question. No caller-supplied hash is accepted.
     if (!constantTimeEqual(row.questionSha256, sha256HexSync(turn.question.trim()))) return reject('question_mismatch');
 
-    const budgetRes = row.budgetReservationSha256
-      ? await loadActiveReservation(ctx, row.owner, row.budgetReservationSha256, now)
-      : { row: null, reason: 'invalid_budget_reservation' as const };
-    if (turn.generationMode === 'gemini_live' && !budgetRes.row) {
-      return reject('invalid_audit_record', ['a live provider turn requires an active budget reservation']);
-    }
-    const inserted = await insertValidatedChatTurn(ctx, row.owner, turn, 'server_gateway_acceptance', now);
+    const reservation = row.budgetReservationSha256
+      ? await loadReservation(ctx, row.owner, row.budgetReservationSha256)
+      : null;
+    const inserted = await recordTurnWithReservation(ctx, row.owner, turn, 'server_gateway_acceptance', reservation, now);
     if (!inserted.ok) return reject('invalid_audit_record', inserted.violations);
-    if (budgetRes.row) await settleReservation(ctx, budgetRes.row._id, inserted.auditId, now);
     await ctx.db.patch(row._id, {
       status: 'recorded',
       recordedAtMs: now,
@@ -467,11 +531,20 @@ export const failNonceInternal = internalMutation({
     const failureCode = /^[a-z0-9_]{1,60}$/.test(args.failureCode) ? args.failureCode : 'unspecified';
     const now = Date.now();
     await ctx.db.patch(row._id, { status: 'failed', failureCode, failedAtMs: now });
+    // A started provider call stays liable as `unknown` until reconciled; an unstarted reservation lapses.
+    let budgetOutcome = 'no reservation';
+    if (row.budgetReservationSha256) {
+      const reservation = await loadReservation(ctx, row.owner, row.budgetReservationSha256);
+      if (reservation) {
+        await abandonReservation(ctx, reservation, `nonce failed: ${failureCode}`, now);
+        budgetOutcome = reservation.status === 'in_flight' ? 'reservation held as unknown' : 'reservation released unused';
+      }
+    }
     await ctx.db.insert('audit', {
       owner: row.owner,
       action: 'graph.evidence_chat.acceptance_nonce.failed',
       recordId: row.nonceId,
-      detail: `failure=${failureCode}; no chat turn was recorded for this nonce`,
+      detail: `failure=${failureCode}; no chat turn was recorded for this nonce; ${budgetOutcome}`,
       at: now,
     });
     return { ok: true as const };

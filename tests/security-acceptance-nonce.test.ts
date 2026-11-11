@@ -68,7 +68,7 @@ describe('WP2 — the insecure public acceptance pathway no longer exists',()=>{
   const chat=chatModule as Record<string,unknown>;
   for(const gone of ['consumeAcceptanceNonceAndGetContext','recordAcceptanceChatTurn','mintServerAcceptanceTokenInternal'])expect(chat[gone]).toBeUndefined();
   const registered=Object.entries(nonceModule).filter(([,f])=>typeof f==='function'&&('isInternal' in f||'isPublic' in f));
-  expect(registered.map(([n])=>n).sort()).toEqual(['consumeNonceInternal','failNonceInternal','listNoncesInternal','mintAcceptanceNonce','recordNonceTurnInternal','storeIssuedNonceInternal']);
+  expect(registered.map(([n])=>n).sort()).toEqual(['consumeNonceInternal','failNonceInternal','listNoncesInternal','mintAcceptanceNonce','recordNonceTurnInternal','startAcceptanceBudgetInternal','storeIssuedNonceInternal']);
   for(const [,f] of registered){expect((f as unknown as {isInternal?:boolean}).isInternal).toBe(true);expect((f as unknown as {isPublic?:boolean}).isPublic).toBeFalsy();}
   expect((chatModule.recordEvidenceChatTurnInternal as unknown as {isInternal?:boolean}).isInternal).toBe(true);
  });
@@ -130,7 +130,7 @@ describe('WP2 — gateway authentication',()=>{
   expect((await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({turn:turn()})})).status).toBe(401);
   expect(await chatRows(t)).toHaveLength(0);
   // Non-live turn: since the H2 correction a live turn additionally needs a budget reservation (tests/security-chat-budget-reservation.test.ts).
-  const nonLive={generationMode:'abstention_only',providerStatus:'provider_error',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:null};
+  const nonLive={generationMode:'abstention_only',providerStatus:'budget_exceeded',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:null};
   const ok=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn(nonLive)})});
   expect(ok.status).toBe(200);
   expect(await chatRows(t)).toMatchObject([{owner:A,recordedVia:'server_gateway'}]);
@@ -190,7 +190,8 @@ describe('WP2 — consumption',()=>{
 });
 
 describe('WP2 — audit recording',()=>{
- async function consumed(t:T){const m=await mint(t);const body=await (await consume(t,m.token)).json() as {reservation:string};return {token:m.token,reservation:body.reservation};}
+ // Mirrors the route: consume, then start the budget reservation before any paid provider call (Correction 2).
+ async function consumed(t:T){const m=await mint(t);const body=await (await consume(t,m.token)).json() as {reservation:string};expect((await gateway(t,'/api/evidence-chat/acceptance/start',{token:m.token,reservation:body.reservation})).status).toBe(200);return {token:m.token,reservation:body.reservation};}
 
  it('records exactly one turn for the nonce owner; duplicate callbacks return the original audit id',async()=>{
   const t=setup(),s=await consumed(t);
@@ -258,7 +259,7 @@ describe('WP2 — audit recording',()=>{
  });
  it('records a provider failure after consumption as a failure, never as live inference',async()=>{
   const t=setup(),s=await consumed(t);
-  const res=await record(t,s.token,s.reservation,turn({generationMode:'abstention_only',providerStatus:'provider_error',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0,modelId:'gemini-2.5-flash'}));
+  const res=await record(t,s.token,s.reservation,turn({generationMode:'abstention_only',providerStatus:'provider_error',providerFailureKind:'error_response',supportStatus:'unsupported',inputTokens:0,outputTokens:0,estimatedCostGbp:0,actualCostGbp:0,modelId:'gemini-2.5-flash'}));
   expect(res.status).toBe(200);
   expect(await chatRows(t)).toMatchObject([{generationMode:'abstention_only',providerStatus:'provider_error',estimatedCostGbp:0,supportStatus:'unsupported'}]);
  });

@@ -93,6 +93,7 @@ export type ChatTurnAuditInput = {
   answerJson: string;
   validationJson: string;
   createdAtMs: number;
+  providerFailureKind?: 'error_response' | 'timeout_or_transport' | 'simulated' | 'unknown';
 };
 
 export class ChatTurnAuditValidationError extends Error {
@@ -170,6 +171,8 @@ export function chatTurnAuditViolations(input: ChatTurnAuditInput, serverNowMs: 
   )
     reasons.push('a turn without live provider inference cannot carry provider cost');
 
+  if (input.providerFailureKind !== undefined && input.providerStatus !== 'provider_error')
+    reasons.push('providerFailureKind is only valid with providerStatus provider_error');
   if (!parsesAsObject(input.bundleJson)) reasons.push('bundleJson must be a JSON object within the size limit');
   if (!parsesAsObject(input.answerJson)) reasons.push('answerJson must be a JSON object within the size limit');
   if (!parsesAsObject(input.validationJson))

@@ -325,6 +325,41 @@ http.route({
 });
 
 /**
+ * reserved -> in_flight for a signed-in user's reservation (Correction 2). The caller must not call the paid
+ * provider unless this returns 200. Cross-owner and expired reservations are refused.
+ */
+http.route({
+ path:'/api/evidence-chat/budget/start',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const budgetReservation=parsed.body.budgetReservation;
+  if(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))return Response.json({error:{code:'invalid_request',message:'budgetReservation is required.'}},{status:400,headers});
+  const result=await ctx.runMutation(budgetM('startChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(budgetReservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
+  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/** Starts the budget reservation taken at nonce consumption (Correction 2). Required before a paid call. */
+http.route({
+ path:'/api/evidence-chat/acceptance/start',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const token=str(parsed.body.token,200),reservation=str(parsed.body.reservation,64);
+  const tokenParts=token?parseAcceptanceToken(token):null;
+  if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation))return Response.json({error:{code:'invalid_request',message:'token and reservation are required.'}},{status:400,headers});
+  const result=await ctx.runMutation(nonceM('startAcceptanceBudgetInternal'),{nonceId:tokenParts.nonceId,secretSha256:await sha256Hex(tokenParts.secret),reservationSha256:await sha256Hex(reservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
+  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/**
  * Attested audit record for an ordinary signed-in chat turn. Requires BOTH the gateway credential (the request
  * comes from the application server, not a browser) and the end user's Convex-verified JWT in `Authorization`
  * (who the turn belongs to). Either one alone is refused.
@@ -350,8 +385,8 @@ http.route({
     owner,
     recordedVia:'server_gateway',
     ...(typeof budgetReservation==='string'?{budgetReservationSha256:await sha256Hex(budgetReservation)}:{}),
-   }) as {auditId:string};
-   return Response.json({auditId:result.auditId,executionAuthority:'none'},{status:200,headers});
+   }) as {auditId:string;duplicate:boolean};
+   return Response.json({auditId:result.auditId,duplicate:result.duplicate,executionAuthority:'none'},{status:200,headers});
   }catch{
    return Response.json({error:{code:'invalid_request',message:'Turn record failed validation.'}},{status:400,headers});
   }

@@ -33,7 +33,7 @@ function setup(){
  return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS})};
 }
 function turn(o:Record<string,unknown>={}){
- return {turnId:'chat-1',bundleId:'bundle-1',bundleSha256:'a'.repeat(64),question:Q,queryType:'ownership_chain',intentCategory:'graph',historicalCutoffMs:NOW,temporalBasis:'receipt',graphDatabaseName:'db',graphSchemaVersion:'v1',lastProjectedSequence:0,supportStatus:'unsupported',validationValid:true,validationAction:'accepted',modelId:'gemini-2.5-flash',generationMode:'abstention_only',providerStatus:'provider_error',inputTokens:0,outputTokens:0,cachedTokens:0,estimatedCostGbp:0,actualCostGbp:0,latencyMs:5,bundleJson:'{}',answerJson:'{}',validationJson:'{}',createdAtMs:NOW,...o};
+ return {turnId:'chat-1',bundleId:'bundle-1',bundleSha256:'a'.repeat(64),question:Q,queryType:'ownership_chain',intentCategory:'graph',historicalCutoffMs:NOW,temporalBasis:'receipt',graphDatabaseName:'db',graphSchemaVersion:'v1',lastProjectedSequence:0,supportStatus:'unsupported',validationValid:true,validationAction:'accepted',modelId:'gemini-2.5-flash',generationMode:'abstention_only',providerStatus:'budget_exceeded',inputTokens:0,outputTokens:0,cachedTokens:0,estimatedCostGbp:0,actualCostGbp:0,latencyMs:5,bundleJson:'{}',answerJson:'{}',validationJson:'{}',createdAtMs:NOW,...o};
 }
 const rows=(t:T)=>t.run(ctx=>ctx.db.query('evidenceChatAudit').collect());
 const postTurn=(caller:{fetch:T['fetch']},body:unknown)=>caller.fetch('/api/evidence-chat/turn',{method:'POST',headers:H,body:JSON.stringify(body)});

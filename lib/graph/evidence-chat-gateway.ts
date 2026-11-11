@@ -149,6 +149,24 @@ export function recordAuthenticatedTurn(
   );
 }
 
+/** reserved -> in_flight for the signed-in user's reservation. Do not call the paid provider unless `ok`. */
+export function startChatBudget(userToken: string, budgetReservation: string, options: Options = {}) {
+  return post<{ started: true; inFlightDeadlineMs: number }>(
+    '/api/evidence-chat/budget/start',
+    { budgetReservation },
+    { ...options, userToken },
+  );
+}
+
+/** Starts the budget reservation taken when the acceptance nonce was consumed. */
+export function startAcceptanceBudget(token: string, reservation: string, options: Options = {}) {
+  return post<{ started: true; inFlightDeadlineMs: number }>(
+    '/api/evidence-chat/acceptance/start',
+    { token, reservation },
+    options,
+  );
+}
+
 /**
  * Atomic paid-inference budget reservation for the signed-in user. Callers must treat any result other than
  * `ok` as "do not call the paid provider": `rejected` with reason `budget_exceeded` or `rate_limited`, or

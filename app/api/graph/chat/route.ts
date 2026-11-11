@@ -22,6 +22,8 @@ import {
   recordAcceptanceTurn,
   recordAuthenticatedTurn,
   reserveChatBudget,
+  startAcceptanceBudget,
+  startChatBudget,
 } from '../../../../lib/graph/evidence-chat-gateway';
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
 
@@ -147,7 +149,8 @@ interface RetrievalContextData {
   turnsLastMinute?: number;
 }
 
-type AcceptanceSession = { token: string; reservation: string };
+type AcceptanceSession = { token: string; reservation: string; budgetReserved: boolean };
+
 
 function budgetUnavailable() {
   return NextResponse.json(
@@ -225,7 +228,11 @@ export async function POST(req: NextRequest) {
       return unauthenticated();
     }
     caller = { callerId: consumed.value.owner, convexToken: null };
-    acceptance = { token: acceptanceToken, reservation: consumed.value.reservation };
+    acceptance = {
+      token: acceptanceToken,
+      reservation: consumed.value.reservation,
+      budgetReserved: consumed.value.budget?.reserved === true,
+    };
     acceptanceCtx = {
       owner: consumed.value.owner,
       ...(consumed.value.context as Omit<RetrievalContextData, 'owner'>),
@@ -327,6 +334,10 @@ export async function POST(req: NextRequest) {
       if (!caller.convexToken) return budgetUnavailable();
       const reserved = await reserveChatBudget(caller.convexToken);
       if (reserved.ok) {
+        // Correction 2: reserved -> in_flight before the provider call. If the start cannot be confirmed, no
+        // provider call is made and the unstarted reservation lapses without holding budget.
+        const started = await startChatBudget(caller.convexToken, reserved.value.reservation);
+        if (!started.ok) return budgetUnavailable();
         budgetReservation = reserved.value.reservation;
         budgetOverride = { dailySpentGbpSoFar: reserved.value.spentGbp, dailyCostCeilingGbp: reserved.value.ceilingGbp };
       } else if (reserved.kind === 'rejected' && reserved.reason === 'rate_limited') {
@@ -338,6 +349,13 @@ export async function POST(req: NextRequest) {
         const ceiling = retrievalCtx?.dailyCostCeilingGbp ?? EVIDENCE_RETRIEVAL_LIMITS.defaultDailyBudgetCeilingGbp;
         budgetOverride = { dailySpentGbpSoFar: ceiling, dailyCostCeilingGbp: ceiling };
       } else {
+        return budgetUnavailable();
+      }
+    }
+    if (paidCallPossible && acceptance && acceptance.budgetReserved) {
+      const started = await startAcceptanceBudget(acceptance.token, acceptance.reservation);
+      if (!started.ok) {
+        await failAcceptanceNonce(acceptance.token, acceptance.reservation, 'budget_start_failed');
         return budgetUnavailable();
       }
     }
@@ -381,6 +399,9 @@ export async function POST(req: NextRequest) {
       estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
       actualCostGbp: turnResult.telemetry.actualCostGbp,
       latencyMs: turnResult.telemetry.latencyMs,
+      ...(turnResult.telemetry.providerFailureKind
+        ? { providerFailureKind: turnResult.telemetry.providerFailureKind }
+        : {}),
       bundleJson: JSON.stringify(bundle),
       answerJson: JSON.stringify(turnResult.answer),
       validationJson: JSON.stringify(turnResult.validation),
@@ -397,6 +418,14 @@ export async function POST(req: NextRequest) {
       if (rec.ok) {
         auditId = rec.value.auditId;
         auditRecorded = 'server_gateway_acceptance';
+      }
+    } else if (caller.convexToken && budgetReservation) {
+      // A paid turn holds a started reservation: it is recorded only through the attested gateway, which
+      // settles the reservation. There is no client-credential fallback for it.
+      const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields, { budgetReservation });
+      if (rec.ok) {
+        auditId = rec.value.auditId;
+        auditRecorded = 'server_gateway';
       }
     } else if (caller.convexToken) {
       if (gatewayConfigured()) {

@@ -21,7 +21,7 @@ describe('H2 — Convex action reserves before calling the provider',()=>{
   const r=await user.action(ask,{question:'Which hyperscalers fund the Irish data-centre build-out?'}) as {telemetry:{generationMode:string}};
   expect(r.telemetry.generationMode).toBe('gemini_live');
   expect(h.generate).toHaveBeenCalledTimes(1);
-  expect(await t.run(ctx=>ctx.db.query('chatBudgetReservations').collect())).toMatchObject([{source:'convex_action',status:'settled'}]);
+  expect(await t.run(ctx=>ctx.db.query('chatBudgetReservations').collect())).toMatchObject([{source:'convex_action',status:'settled',chargeBasis:'estimated'}]);
   expect(await t.run(ctx=>ctx.db.query('evidenceChatAudit').collect())).toMatchObject([{generationMode:'gemini_live',recordedVia:'convex_action'}]);
  });
  it('with the ceiling exhausted, makes no provider call and records an explicit budget abstention',async()=>{
@@ -36,7 +36,8 @@ describe('H2 — Convex action reserves before calling the provider',()=>{
   const {t,user}=setup();h.generate.mockRejectedValue(new Error('HTTP 400 INVALID_ARGUMENT'));
   const r=await user.action(ask,{question:'Which hyperscalers fund the Irish data-centre build-out?'}) as {telemetry:{generationMode:string;providerStatus:string}};
   expect(r.telemetry).toMatchObject({generationMode:'abstention_only',providerStatus:'provider_error'});
-  expect(await t.run(ctx=>ctx.db.query('chatBudgetReservations').collect())).toMatchObject([{status:'settled'}]);
-  expect(await t.run(ctx=>ctx.db.query('evidenceChatAudit').collect())).toMatchObject([{providerStatus:'provider_error',estimatedCostGbp:0}]);
+  // An explicit error response is a confirmed provider failure: no charge, no remaining liability.
+  expect(await t.run(ctx=>ctx.db.query('chatBudgetReservations').collect())).toMatchObject([{status:'provider_failed',chargeGbp:0,chargeBasis:'estimated'}]);
+  expect(await t.run(ctx=>ctx.db.query('evidenceChatAudit').collect())).toMatchObject([{providerStatus:'provider_error',providerFailureKind:'error_response',estimatedCostGbp:0}]);
  });
 });

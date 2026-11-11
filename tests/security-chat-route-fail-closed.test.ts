@@ -78,7 +78,7 @@ describe('H2 — paid inference fails closed',()=>{
  });
  it('provider failure after a reservation is recorded as provider_error with the reservation, never as live inference',async()=>{
   const reservation='a'.repeat(64);
-  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation,spentGbp:0,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/turn')?Response.json({auditId:'a2'}):Response.json({},{status:404});
+  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation,spentGbp:0,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/start')?Response.json({started:true,inFlightDeadlineMs:Date.now()+300_000}):p.endsWith('/turn')?Response.json({auditId:'a2'}):Response.json({},{status:404});
   h.generate.mockRejectedValue(new Error('HTTP 400 INVALID_ARGUMENT'));
   const res=await ask();expect(res.status).toBe(200);
   const j=await res.json() as Turn;
@@ -90,7 +90,7 @@ describe('H2 — paid inference fails closed',()=>{
   expect(j.auditRecorded).toBe('server_gateway');
  });
  it('a live turn whose gateway record fails is not written through the client-credential mutation',async()=>{
-  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation:'b'.repeat(64),spentGbp:0,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):Response.json({},{status:503});
+  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation:'b'.repeat(64),spentGbp:0,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/start')?Response.json({started:true,inFlightDeadlineMs:Date.now()+300_000}):Response.json({},{status:503});
   h.generate.mockResolvedValue(liveReply);
   const res=await ask();expect(res.status).toBe(200);
   const j=await res.json() as Turn;
@@ -102,7 +102,7 @@ describe('H2 — paid inference fails closed',()=>{
 
 describe('H2 — legitimate paid chat with a reservation',()=>{
  it('reserves, calls the provider once, and records the live turn through the gateway with the reservation',async()=>{
-  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation:'c'.repeat(64),spentGbp:0.1,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/turn')?Response.json({auditId:'a4'}):Response.json({},{status:404});
+  gatewayReply=p=>p.endsWith('/reserve')?Response.json({reservation:'c'.repeat(64),spentGbp:0.1,ceilingGbp:2,expiresAtMs:Date.now()+300_000}):p.endsWith('/start')?Response.json({started:true,inFlightDeadlineMs:Date.now()+300_000}):p.endsWith('/turn')?Response.json({auditId:'a4'}):Response.json({},{status:404});
   h.generate.mockResolvedValue(liveReply);
   const res=await ask();expect(res.status).toBe(200);
   const j=await res.json() as Turn&{auditId:string};
@@ -110,7 +110,7 @@ describe('H2 — legitimate paid chat with a reservation',()=>{
   expect(j.telemetry).toMatchObject({generationMode:'gemini_live',providerStatus:'succeeded'});
   expect(j).toMatchObject({auditId:'a4',auditRecorded:'server_gateway'});
   const order=calls.map(c=>c.path.split('/').pop());
-  expect(order).toEqual(['reserve','turn']);
+  expect(order).toEqual(['reserve','start','turn']);
   const turnCall=calls.find(c=>c.path.endsWith('/turn'))!;
   expect(turnCall.body.budgetReservation).toBe('c'.repeat(64));
   expect(turnCall.headers['Authorization']).toBe('Bearer jwt-token');

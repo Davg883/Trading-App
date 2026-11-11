@@ -23,8 +23,8 @@ import {
   resolveGeminiApiKey,
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
-import { insertValidatedChatTurn, turnAuditArgs } from './acceptanceNonces';
-import { loadActiveReservation, settleReservation } from './chatBudget';
+import { insertValidatedChatTurn, recordTurnWithReservation, turnAuditArgs } from './acceptanceNonces';
+import { loadReservation } from './chatBudget';
 import { sha256HexSync } from '../lib/crypto/sha256';
 import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
 
@@ -133,18 +133,13 @@ export const recordEvidenceChatTurnInternal = internalMutation({
     validOwner(args.owner);
     const { owner, recordedVia, budgetReservationSha256, ...turn } = args;
     const now = Date.now();
-    const budgetRes = budgetReservationSha256
-      ? await loadActiveReservation(ctx, owner, budgetReservationSha256, now)
-      : null;
-    if (turn.generationMode === 'gemini_live' && !budgetRes?.row) {
-      throw new Error(
-        `Invalid evidence chat audit record: a live provider turn requires an active budget reservation (${budgetRes?.reason ?? 'none supplied'})`,
-      );
+    const reservation = budgetReservationSha256 ? await loadReservation(ctx, owner, budgetReservationSha256) : null;
+    if (budgetReservationSha256 && !reservation) {
+      throw new Error('Invalid evidence chat audit record: invalid_budget_reservation');
     }
-    const inserted = await insertValidatedChatTurn(ctx, owner, turn, recordedVia, now);
+    const inserted = await recordTurnWithReservation(ctx, owner, turn, recordedVia, reservation, now);
     if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
-    if (budgetRes?.row) await settleReservation(ctx, budgetRes.row._id, inserted.auditId, now);
-    return { auditId: inserted.auditId };
+    return { auditId: inserted.auditId, duplicate: inserted.duplicate };
   },
 });
 
@@ -320,7 +315,16 @@ export const askEvidenceLockedQuestion = action({
       }
       dailyCeiling = reservation.ceilingGbp;
       dailySpent = reservation.ok ? reservation.spentGbp : Math.max(reservation.spentGbp, reservation.ceilingGbp);
-      if (reservation.ok) budgetReservationSha256 = reservationSha256;
+      if (reservation.ok) {
+        // reserved -> in_flight immediately before the provider call (Correction 2). If the start is refused the
+        // provider is not called: the adapter is told the ceiling is reached and abstains.
+        const started = (await ctx.runMutation(makeFunctionReference<'mutation'>('chatBudget:startChatBudgetInternal'), {
+          owner,
+          reservationSha256,
+        })) as { ok: boolean };
+        if (started.ok) budgetReservationSha256 = reservationSha256;
+        else dailySpent = Math.max(dailySpent, dailyCeiling);
+      }
     }
 
     const turnResult = await generateAndValidateEvidenceLockedAnswer({
@@ -359,6 +363,9 @@ export const askEvidenceLockedQuestion = action({
       estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
       actualCostGbp: turnResult.telemetry.actualCostGbp,
       latencyMs: turnResult.telemetry.latencyMs,
+      ...(turnResult.telemetry.providerFailureKind
+        ? { providerFailureKind: turnResult.telemetry.providerFailureKind }
+        : {}),
       bundleJson: JSON.stringify(bundle),
       answerJson: JSON.stringify(turnResult.answer),
       validationJson: JSON.stringify(turnResult.validation),
