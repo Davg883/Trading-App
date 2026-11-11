@@ -176,6 +176,20 @@ export async function POST(req: NextRequest) {
   const acceptanceToken = req.headers.get('x-aci-acceptance-nonce')?.trim() || null;
   let caller = await resolveAuthenticatedCaller(req);
   if (!caller && !acceptanceToken) return unauthenticated();
+  // Correction 3: a request authenticates EITHER with a signed-in session OR with an acceptance nonce, never
+  // both. No legitimate workflow sends both, and silently preferring one would let a request run under a
+  // different identity than the caller intended. The ambiguous request is refused before either credential is
+  // used, so the nonce is not consumed and no inference or audit write happens.
+  if (caller && acceptanceToken) {
+    return NextResponse.json(
+      {
+        error: 'Send either a signed-in session or an acceptance nonce, not both.',
+        code: 'ambiguous_credentials',
+        executionAuthority: 'none',
+      },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
 
   let parsed: z.infer<typeof chatRequestSchema>;
   try {
@@ -195,7 +209,7 @@ export async function POST(req: NextRequest) {
 
   let acceptanceCtx: RetrievalContextData | null = null;
   let acceptance: AcceptanceSession | null = null;
-  if (!caller && acceptanceToken) {
+  if (acceptanceToken) {
     // One attempt, never retried: the nonce is bound to this exact question and is spent by this call.
     const consumed = await consumeAcceptanceNonce(acceptanceToken, parsed.question);
     if (!consumed.ok) {
