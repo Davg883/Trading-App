@@ -1,4 +1,9 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
+// Legacy execution-path tests. This build is research-only (see lib/trading/execution-boundary.ts and
+// tests/security-research-only-boundary.test.ts). The boundary is replaced here, through the test runner's module
+// mock only, to keep the retained order workflow gates covered for a future separately deployed execution service.
+// No environment variable, request or runtime input can do the same in the application.
+vi.mock('../lib/trading/execution-boundary',async orig=>({...(await orig<typeof import('../lib/trading/execution-boundary')>()),DEPLOYMENT_EXECUTION_AUTHORITY:'human_authorised_orders',executionPermitted:()=>true,assertExecutionPermitted:()=>{}}));
 import {readFileSync} from 'node:fs';
 import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';

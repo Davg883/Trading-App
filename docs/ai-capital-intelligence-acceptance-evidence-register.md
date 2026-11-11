@@ -1,5 +1,8 @@
 # AI Capital Intelligence — Phase G.5 Production Acceptance Evidence Register
 
+> **Correction and supersession notice (MVP hardening review, 10 November 2026).** Several PASS entries in this register rest on evidence that the MVP hardening review found to be unreliable (self-graded evaluations, hand-entered telemetry, fixture data labelled as live, and a TLS status inferred from a database name). The register is retained unchanged for history. Use `docs/mvp-hardening-fable-52/09-implementation-and-test-results.md` for current, reproducible evidence. The original text below is retained unchanged as a historical record.
+
+
 - **Audit Date**: `2026-11-09`
 - **Production URL**: `https://capital.aiguides.co.uk`
 - **Deployed Git Commit**: `9430942` (building on `94fe4c3` / `6ccd12d`, branch `main`)

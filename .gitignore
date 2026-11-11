@@ -26,3 +26,6 @@ __pycache__/
 playwright-report/
 test-results/
 *.log
+
+# Raw live-evaluation artefacts (review before committing)
+evaluation-artefacts/

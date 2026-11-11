@@ -2,6 +2,7 @@ import {v,type GenericId} from 'convex/values';
 import {internalQueryGeneric,type QueryBuilder,type GenericMutationCtx,type GenericQueryCtx} from 'convex/server';
 import {query,mutation,internalMutation,type DataModel} from './server';
 import {researcher,reviewer,hasRole} from './authz';
+import {assertExecutionPermitted} from '../lib/trading/execution-boundary';
 import {TRADING_VERSION,TERMINAL_STATES,assertTransition,orderDraftSchema,riskLimitsSchema,DEFAULT_RISK_LIMITS,brokerOrderSchema,stateFromBroker,type OrderState,type RiskLimits} from '../lib/trading/order-model';
 
 /**
@@ -42,6 +43,7 @@ export const overview=query({args:{},handler:async ctx=>{
 export const orderEvents=query({args:{orderId:v.id('tradeOrders')},handler:async(ctx,args)=>{const user=await researcher(ctx);await owned(ctx,args.orderId,user.tokenIdentifier);return (await ctx.db.query('tradeOrderEvents').withIndex('by_order',q=>q.eq('orderId',args.orderId)).collect()).map(e=>({from:e.from,to:e.to,actor:e.actor,detail:e.detail,at:e.at}));}});
 
 export const recordOptIn=mutation({args:{statement:v.string()},handler:async(ctx,args)=>{
+ assertExecutionPermitted('trading-key opt-in');
  const user=await researcher(ctx),who=user.tokenIdentifier,now=Date.now();if(args.statement!==OPT_IN_STATEMENT)throw new Error('The exact opt-in statement must be acknowledged');
  const s=await settings(ctx,who);if(s)await ctx.db.patch(s._id,{optedInAt:now,updatedAt:now});else await ctx.db.insert('tradingSettings',{owner:who,limitsJson:JSON.stringify(DEFAULT_RISK_LIMITS),liveKillSwitchEngaged:true,optedInAt:now,updatedAt:now});
  await ctx.db.insert('audit',{owner:who,action:'trading.opt_in',recordId:who,detail:OPT_IN_STATEMENT,at:now});
@@ -55,6 +57,7 @@ export const updateLimits=mutation({args:{limitsJson:v.string()},handler:async(c
 }});
 /** Emergency switch. Engaging is always allowed; releasing needs reviewer authority and a reason. Live submission additionally needs the server flag. */
 export const setLiveKillSwitch=mutation({args:{engaged:v.boolean(),reason:v.string()},handler:async(ctx,args)=>{
+ if(!args.engaged)assertExecutionPermitted('release of the Live emergency switch');
  const user=args.engaged?await researcher(ctx):await reviewer(ctx),who=user.tokenIdentifier,now=Date.now();
  if(!args.reason.trim()||args.reason.length>1000)throw new Error('Reason required');
  const s=await settings(ctx,who);if(s)await ctx.db.patch(s._id,{liveKillSwitchEngaged:args.engaged,updatedAt:now});else await ctx.db.insert('tradingSettings',{owner:who,limitsJson:JSON.stringify(DEFAULT_RISK_LIMITS),liveKillSwitchEngaged:args.engaged,updatedAt:now});
@@ -90,12 +93,14 @@ export const recordRiskInternal=internalMutation({args:{owner:v.string(),orderId
  await ctx.db.insert('tradeOrderEvents',{owner:row.owner,orderId:row._id,from:row.state,to:row.state,actor:'risk-engine',detail:args.passed?'Risk check passed':'Risk check failed',at:Date.now()});
 }});
 export const issueConfirmationInternal=internalMutation({args:{owner:v.string(),orderId:v.id('tradeOrders'),tokenHash:v.string(),payloadHash:v.string()},handler:async(ctx,args)=>{
+ assertExecutionPermitted('order confirmation issue');
  owner(args.owner);const row=await owned(ctx,args.orderId,args.owner);if(row.state!=='approved')throw new Error('Only an approved order can be confirmed');
  if(!/^[0-9a-f]{64}$/.test(args.tokenHash)||!/^[0-9a-f]{64}$/.test(args.payloadHash))throw new Error('Invalid confirmation digest');
  const now=Date.now();await ctx.db.patch(row._id,{confirmationTokenHash:args.tokenHash,confirmationPayloadHash:args.payloadHash,confirmationExpiresAt:now+CONFIRMATION_MS,confirmationUsedAt:undefined,updatedAt:now});
  return {expiresAt:now+CONFIRMATION_MS};
 }});
 export const confirmInternal=internalMutation({args:{owner:v.string(),orderId:v.id('tradeOrders'),tokenHash:v.string(),payloadHash:v.string()},handler:async(ctx,args)=>{
+ assertExecutionPermitted('order confirmation');
  owner(args.owner);const row=await owned(ctx,args.orderId,args.owner),now=Date.now();
  if(row.state!=='approved')throw new Error('Order is not awaiting confirmation');
  if(!row.confirmationTokenHash||row.confirmationUsedAt!==undefined)throw new Error('Confirmation already used or not issued');
@@ -106,6 +111,8 @@ export const confirmInternal=internalMutation({args:{owner:v.string(),orderId:v.
 }});
 /** Atomic one-time claim. Re-checks every gate at the moment of submission; a second claim for the same order always fails. */
 export const claimSubmissionInternal=internalMutation({args:{owner:v.string(),orderId:v.id('tradeOrders'),submissionId:v.string(),payloadHash:v.string(),executionFlagEnabled:v.boolean(),knownBrokerIdsBefore:v.array(v.number())},handler:async(ctx,args)=>{
+ // The caller-supplied `executionFlagEnabled` argument can never override the build boundary.
+ assertExecutionPermitted('order submission claim');
  owner(args.owner);const row=await owned(ctx,args.orderId,args.owner),now=Date.now(),s=await settings(ctx,args.owner);
  if(row.state!=='confirmed')throw new Error(`Order is ${row.state}; it can be submitted only once, from confirmed`);
  if(!args.executionFlagEnabled)throw new Error(`${row.environment} order submission is disabled on this server`);
@@ -143,6 +150,7 @@ export const recordReconcileMissInternal=internalMutation({args:{owner:v.string(
 }});
 export const orderInternal=internalQuery({args:{owner:v.string(),orderId:v.id('tradeOrders')},handler:async(ctx,args)=>{owner(args.owner);const row=await owned(ctx,args.orderId,args.owner),s=await settings(ctx,args.owner);return {...view(row),knownBrokerIdsBefore:row.knownBrokerIdsBefore??[],submittingAt:row.submittingAt??null,riskPassed:row.riskPassed??false,riskEvaluatedAt:row.riskEvaluatedAt??null,limits:limitsOf(s),liveKillSwitchEngaged:s?.liveKillSwitchEngaged??true,optedInAt:s?.optedInAt??null};}});
 export const saveTradingKeyInternal=internalMutation({args:{owner:v.string(),environment:env,maskedKey:v.string(),encryptedPayload:v.string()},handler:async(ctx,args)=>{
+ assertExecutionPermitted('trading-key storage');
  owner(args.owner);const s=await settings(ctx,args.owner);if(!s?.optedInAt)throw new Error('Record the trading-key opt-in before saving a trading-capable key');
  if(!/^[*•]{4,12}[A-Za-z0-9_-]{0,4}$/.test(args.maskedKey)||args.encryptedPayload.length>20_000)throw new Error('Invalid key envelope');
  const existing=await ctx.db.query('tradingCredentials').withIndex('by_owner_env',q=>q.eq('owner',args.owner).eq('environment',args.environment)).unique(),now=Date.now();

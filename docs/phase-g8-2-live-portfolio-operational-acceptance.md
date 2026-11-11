@@ -1,5 +1,8 @@
 # AI Capital Intelligence — Phase G.8.2: Live Portfolio Operational Acceptance Report
 
+> **Correction and supersession notice (MVP hardening review, 10 November 2026).** The 15-question evaluation results reported here were produced by a runner that graded the expected answer against itself when no provider was available, and are not evidence of model accuracy. See `docs/mvp-hardening-fable-52/05-ai-evaluation-integrity.md`. The original text below is retained unchanged as a historical record.
+
+
 **Document Reference:** `docs/phase-g8-2-live-portfolio-operational-acceptance.md`  
 **Execution Authority:** Strictly `none` (`LIVE_TRADING_ENABLED=false`, `DEMO_TRADING_ENABLED=false`)  
 **Production Host:** `https://capital.aiguides.co.uk`  

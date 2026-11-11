@@ -345,6 +345,7 @@ export type GeminiInferenceTelemetry = {
   generationMode: 'gemini_live' | 'deterministic_evidence_synthesis' | 'abstention_only';
   providerStatus:
     | 'succeeded'
+    | 'not_invoked'
     | 'disabled_by_default'
     | 'api_key_not_configured'
     | 'budget_exceeded'
@@ -352,6 +353,11 @@ export type GeminiInferenceTelemetry = {
     | 'provider_error'
     | 'security_blocked';
   requestId?: string | null;
+  /**
+   * For `provider_error` only: whether the provider answered with an error (not billed for output),
+   * the call timed out or failed in transport (billing unknown), or the failure was simulated (no call).
+   */
+  providerFailureKind?: 'error_response' | 'timeout_or_transport' | 'simulated' | 'unknown';
   thinkingTokens?: number;
   totalTokens?: number;
   latencyMs: number;

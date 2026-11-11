@@ -1,5 +1,8 @@
 # AI Capital Intelligence — Phase G.8.2: Final Live Connection Gate & Privacy Audit
 
+> **Correction and supersession notice (MVP hardening review, 10 November 2026).** The 5-question evaluation results reported here (100 % conformance, token counts, request IDs, bundle hashes) were produced by a runner that substituted the expected answer when no provider was configured or the provider failed, fabricated telemetry defaults and used placeholder hashes. They are not evidence of model accuracy. See `docs/mvp-hardening-fable-52/05-ai-evaluation-integrity.md`. The owner live-account summary described as Trading 212 data was a static fixture; see `08-financial-and-interface-integrity.md`. The original text below is retained unchanged as a historical record.
+
+
 **Document Reference:** `docs/phase-g8-2-final-live-connection-gate.md`  
 **Execution Authority:** Strictly `none` (`LIVE_TRADING_ENABLED=false`, `DEMO_TRADING_ENABLED=false`)  
 **Production Host:** `https://capital.aiguides.co.uk`  

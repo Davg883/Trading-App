@@ -10,7 +10,11 @@
  * - Execution Authority: "none"
  */
 
-import { GoogleGenAI } from '@google/genai';
+import {
+  runLegacyQuestionSuite,
+  type LegacySuiteSummary,
+  type LegacyTurnResult,
+} from '../evaluation/legacy-question-runner';
 import { resolveGeminiApiKey } from '../graph/gemini-provider-adapter';
 
 export interface FiveQuestionEvalItem {
@@ -92,153 +96,24 @@ export const FIVE_PORTFOLIO_RESEARCH_QUESTIONS: readonly FiveQuestionEvalItem[] 
   },
 ];
 
-export interface FiveQuestionEvalTurnResult {
-  questionId: string;
-  category: string;
-  question: string;
-  generationMode: 'gemini_live' | 'deterministic_evidence_synthesis';
-  modelId: string;
-  requestId: string | null;
-  bundleSha256: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  latencyMs: number;
-  costGbp: number;
-  supportStatus: 'fully_supported';
-  allSubstringsPresent: boolean;
-  citationValidityPassed: boolean;
-  independentAnswerReview: 'conforms_to_independent_ground_truth' | 'discrepancy_detected';
-  generatedAnswer: string;
-  citedSources: string[];
-}
+/** Result types now come from the corrected shared runner. See lib/evaluation/legacy-question-runner.ts. */
+export type FiveQuestionEvalTurnResult = LegacyTurnResult;
+export type FiveQuestionEvalSummary = LegacySuiteSummary;
 
-export interface FiveQuestionEvalSummary {
-  suiteVersion: 'g8.2-final-gate-5-v1.0.0';
-  evaluatedAtIso: string;
-  totalQuestions: number;
-  generationMode: 'gemini_live' | 'deterministic_evidence_synthesis';
-  activeModelId: string;
-  conformingAnswersCount: number;
-  conformanceRatePct: number;
-  citationValidityRatePct: number;
-  averageLatencyMs: number;
-  totalTokens: number;
-  totalCostGbp: number;
-  results: FiveQuestionEvalTurnResult[];
-}
-
+/**
+ * Corrected (MVP hardening WP6). The previous implementation substituted `independentBenchmarkAnswer` for the
+ * model's answer when unconfigured or on provider failure, fabricated token counts, request ids and bundle
+ * hashes, and therefore always reported 100 % conformance. Those reported results are superseded.
+ */
 export async function runFiveQuestionPortfolioEvaluation(options?: {
   env?: Record<string, string | undefined>;
 }): Promise<FiveQuestionEvalSummary> {
   const env = options?.env ?? process.env;
-  const { apiKey } = resolveGeminiApiKey(env);
-  const isLive = Boolean(apiKey && env.EVIDENCE_CHAT_GEMINI_ENABLED !== 'false');
-
-  const results: FiveQuestionEvalTurnResult[] = [];
-  const modelId = env.GEMINI_MODEL_ID?.trim() || 'gemini-3.5-flash';
-
-  for (const q of FIVE_PORTFOLIO_RESEARCH_QUESTIONS) {
-    const startMs = Date.now();
-    let answerText = '';
-    let requestId: string | null = null;
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let costGbp = 0;
-
-    if (isLive && apiKey) {
-      try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: { timeout: 15_000 },
-        });
-        const prompt = `You are AI Capital Intelligence. Answer the following portfolio risk question using ONLY verified facts and citations.
-Question: ${q.question}
-Required Citations: ${q.expectedMustCiteDocOrSourceIds.join(', ')}`;
-
-        const response = await ai.models.generateContent({
-          model: modelId,
-          contents: prompt,
-        });
-
-        answerText = response.text || '';
-        inputTokens = response.usageMetadata?.promptTokenCount ?? 620;
-        outputTokens = response.usageMetadata?.candidatesTokenCount ?? 165;
-        requestId = (response as any).responseId ?? `req-${Date.now()}`;
-        costGbp = Number(
-          ((inputTokens * 0.117 + outputTokens * 0.468) / 1_000_000).toFixed(6),
-        );
-      } catch {
-        // Fallback to deterministic benchmark answer on upstream provider failure
-        answerText = q.independentBenchmarkAnswer;
-        inputTokens = 520;
-        outputTokens = 140;
-        costGbp = 0;
-      }
-    } else {
-      // Deterministic evidence synthesis
-      answerText = q.independentBenchmarkAnswer;
-      inputTokens = 520;
-      outputTokens = 140;
-      costGbp = 0;
-    }
-
-    const latencyMs = Date.now() - startMs;
-    const allSubstringsPresent = q.expectedKeySubstrings.every((sub) =>
-      answerText.toLowerCase().includes(sub.toLowerCase()),
-    );
-
-    const citationValidityPassed = q.expectedMustCiteDocOrSourceIds.length > 0;
-    const independentAnswerReview =
-      allSubstringsPresent && citationValidityPassed
-        ? 'conforms_to_independent_ground_truth'
-        : 'discrepancy_detected';
-
-    results.push({
-      questionId: q.questionId,
-      category: q.category,
-      question: q.question,
-      generationMode: isLive ? 'gemini_live' : 'deterministic_evidence_synthesis',
-      modelId: isLive ? modelId : 'deterministic_guardrail_validator',
-      requestId,
-      bundleSha256: `bundle-sha256-${q.questionId.toLowerCase()}`,
-      inputTokens,
-      outputTokens,
-      totalTokens: inputTokens + outputTokens,
-      latencyMs: Math.max(1, latencyMs),
-      costGbp,
-      supportStatus: 'fully_supported',
-      allSubstringsPresent,
-      citationValidityPassed,
-      independentAnswerReview,
-      generatedAnswer: answerText,
-      citedSources: q.expectedMustCiteDocOrSourceIds,
-    });
-  }
-
-  const conformingCount = results.filter(
-    (r) => r.independentAnswerReview === 'conforms_to_independent_ground_truth',
-  ).length;
-  const avgLatency = Math.round(
-    results.reduce((sum, r) => sum + r.latencyMs, 0) / results.length,
-  );
-  const totalTokens = results.reduce((sum, r) => sum + r.totalTokens, 0);
-  const totalCost = Number(
-    results.reduce((sum, r) => sum + r.costGbp, 0).toFixed(6),
-  );
-
-  return {
-    suiteVersion: 'g8.2-final-gate-5-v1.0.0',
-    evaluatedAtIso: new Date().toISOString(),
-    totalQuestions: results.length,
-    generationMode: isLive ? 'gemini_live' : 'deterministic_evidence_synthesis',
-    activeModelId: isLive ? modelId : 'deterministic_guardrail_validator',
-    conformingAnswersCount: conformingCount,
-    conformanceRatePct: Number(((conformingCount / results.length) * 100).toFixed(2)),
-    citationValidityRatePct: 100.0,
-    averageLatencyMs: avgLatency,
-    totalTokens,
-    totalCostGbp: totalCost,
-    results,
-  };
+  return runLegacyQuestionSuite({
+    suiteVersion: 'g8.2-final-gate-5-v2.0.0-corrected',
+    questions: FIVE_PORTFOLIO_RESEARCH_QUESTIONS,
+    env,
+    apiKey: resolveGeminiApiKey(env).apiKey ?? null,
+    promptPrefix: 'You are AI Capital Intelligence. Answer the following portfolio risk question using ONLY verified facts and citations.',
+  });
 }

@@ -23,7 +23,10 @@
     "test:browser:policy": "node scripts/policy-risk-browser-check.mjs",
     "test:browser:trading": "node scripts/trading-browser-check.mjs",
     "test:browser:command-centre": "node scripts/command-centre-browser-check.mjs",
-    "test:browser:command-centre:signed-in": "node scripts/command-centre-signed-in-check.mjs"
+    "test:browser:command-centre:signed-in": "node scripts/command-centre-signed-in-check.mjs",
+    "lint:baseline": "node scripts/eslint-baseline-check.mjs",
+    "test:integration:typedb": "ACI_LIVE_TYPEDB_TESTS=1 vitest run tests/typedb-graph.test.ts tests/evidence-locked-chat.test.ts",
+    "eval:live": "vitest run tests/live/live-evaluation.test.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.22",
@@ -49,6 +52,7 @@
     "vitest": "5.0.5"
   },
   "optionalDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "1.2.15"
+    "@rolldown/binding-win32-x64-msvc": "1.2.15",
+    "@rolldown/binding-linux-x64-gnu": "1.2.15"
   }
 }

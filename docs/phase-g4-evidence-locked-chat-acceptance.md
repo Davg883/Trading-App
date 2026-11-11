@@ -1,5 +1,8 @@
 # AI Capital Intelligence — Phase G.4: Evidence-Locked AI Chat & Final Live Gemini Release Gate Acceptance Report
 
+> **Correction and supersession notice (MVP hardening review, 10 November 2026).** Two security defects affected the acceptance pathway described here: public, unauthenticated acceptance-nonce mutations that wrote unvalidated audit records against the research owner, and anonymous chat-telemetry queries that fell back to that owner's (or any user's) records. Deterministic fallback turns were also labelled `providerStatus: succeeded` with estimated token counts. See `docs/mvp-hardening-fable-52/02-security-findings-and-access-matrix.md` and `03-acceptance-nonce-security-design.md`. The original text below is retained unchanged as a historical record.
+
+
 - **Acceptance Date:** 9 November 2026 (`2026-11-09T11:36:57Z`)
 - **Production URL:** `https://capital.aiguides.co.uk` (`/data-room` tab **6. Evidence-Locked AI Chat** & dedicated route `/research-chat`)
 - **Verified Production Commits:** `8805817` (and final release commit succeeding `d7c97df` / `3cb1193`)

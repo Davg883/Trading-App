@@ -20,8 +20,13 @@ import { retrieveClosedEvidenceBundle } from '../lib/graph/evidence-retrieval-ga
 import {
   checkGeminiProviderAvailability,
   generateAndValidateEvidenceLockedAnswer,
+  resolveGeminiApiKey,
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
+import { insertValidatedChatTurn, recordTurnWithReservation, turnAuditArgs } from './acceptanceNonces';
+import { loadReservation } from './chatBudget';
+import { sha256HexSync } from '../lib/crypto/sha256';
+import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalQuery: QueryBuilder<DataModel, 'internal'> = internalQueryGeneric;
@@ -29,6 +34,9 @@ const internalMutation: MutationBuilder<DataModel, 'internal'> = internalMutatio
 
 const iqRef = (name: string) => makeFunctionReference<'query'>(`evidenceChat:${name}`);
 const imRef = (name: string) => makeFunctionReference<'mutation'>(`evidenceChat:${name}`);
+
+/** Per-owner ceiling enforced from the shared audit table (not from process memory). */
+export const SHARED_CHAT_TURNS_PER_MINUTE = 10;
 
 function validOwner(owner: string) {
   if (!owner.trim() || owner.length > 1000) throw new Error('Owner required');
@@ -100,59 +108,38 @@ export const getChatRetrievalContextInternal = internalQuery({
       publicProjectedRelationships,
       dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
       dailyChatSpendGbp,
+      // Shared (database-derived) request rate: every server instance sees the same count, unlike the
+      // per-process limiter in the provider adapter. Counts recorded turns, so a burst of in-flight
+      // requests can briefly exceed it.
+      turnsLastMinute: recentChatTurns.filter((t) => t.createdAtMs >= Date.now() - 60_000).length,
     };
   },
 });
 
+/**
+ * Internal audit write for turns produced by trusted server code: the Convex action below
+ * (`convex_action`) or the authenticated gateway HTTP action in `http.ts` (`server_gateway`).
+ * The record is range- and consistency-checked at the write boundary.
+ */
 export const recordEvidenceChatTurnInternal = internalMutation({
   args: {
     owner: v.string(),
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
+    recordedVia: v.union(v.literal('convex_action'), v.literal('server_gateway')),
+    /** SHA-256 of the budget reservation taken before the provider call; required for live turns. */
+    budgetReservationSha256: v.optional(v.string()),
+    ...turnAuditArgs,
   },
   handler: async (ctx, args) => {
     validOwner(args.owner);
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      ...args,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner: args.owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
+    const { owner, recordedVia, budgetReservationSha256, ...turn } = args;
+    const now = Date.now();
+    const reservation = budgetReservationSha256 ? await loadReservation(ctx, owner, budgetReservationSha256) : null;
+    if (budgetReservationSha256 && !reservation) {
+      throw new Error('Invalid evidence chat audit record: invalid_budget_reservation');
+    }
+    const inserted = await recordTurnWithReservation(ctx, owner, turn, recordedVia, reservation, now);
+    if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
+    return { auditId: inserted.auditId, duplicate: inserted.duplicate };
   },
 });
 
@@ -199,6 +186,8 @@ export const listChatHistory = query({
       answer: JSON.parse(r.answerJson),
       validation: JSON.parse(r.validationJson),
       createdAtMs: r.createdAtMs,
+      // Rows written before Correction 4 are returned as stored, unmodified, and labelled as not validated.
+      evidenceIntegrity: r.evidenceIntegrity ?? ('legacy_unvalidated' as const),
       executionAuthority: 'none' as const,
     }));
   },
@@ -227,6 +216,7 @@ export const getEvidenceBundleById = query({
       answer: JSON.parse(row.answerJson),
       validation: JSON.parse(row.validationJson),
       createdAtMs: row.createdAtMs,
+      evidenceIntegrity: row.evidenceIntegrity ?? ('legacy_unvalidated' as const),
       executionAuthority: 'none' as const,
     };
   },
@@ -275,7 +265,11 @@ export const askEvidenceLockedQuestion = action({
       publicProjectedRelationships: MacroRelationship[];
       dailyCostCeilingGbp: number;
       dailyChatSpendGbp: number;
+      turnsLastMinute: number;
     };
+    if (retrievalCtx.turnsLastMinute >= SHARED_CHAT_TURNS_PER_MINUTE) {
+      throw new Error('Rate limit exceeded: too many research chat turns in the last minute');
+    }
 
     // Merge base acceptance dataset with any additional projected `public_research` relationships
     const baseDataset = loadInitialAcceptanceDataset();
@@ -303,17 +297,52 @@ export const askEvidenceLockedQuestion = action({
       preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
     });
 
+    // Pre-merge risk H2: reserve paid-inference budget atomically before any possible provider call. If it
+    // cannot be reserved, the adapter is told the ceiling is reached, so it abstains without calling the provider.
+    const mode = args.mode ?? 'auto';
+    const paidCallPossible = mode !== 'deterministic_evidence_synthesis' && Boolean(resolveGeminiApiKey(process.env).apiKey);
+    let budgetReservationSha256: string | undefined;
+    let dailySpent = retrievalCtx.dailyChatSpendGbp;
+    let dailyCeiling = retrievalCtx.dailyCostCeilingGbp;
+    if (paidCallPossible) {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      const reservationSha256 = sha256HexSync(`convex-action-budget:${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`);
+      const reservation = (await ctx.runMutation(makeFunctionReference<'mutation'>('chatBudget:reserveChatBudgetInternal'), {
+        owner,
+        reservationSha256,
+        source: 'convex_action',
+      })) as { ok: boolean; reason?: string; spentGbp: number; ceilingGbp: number };
+      if (!reservation.ok && reservation.reason === 'rate_limited') {
+        throw new Error('Rate limit exceeded: too many research chat turns in the last minute');
+      }
+      dailyCeiling = reservation.ceilingGbp;
+      dailySpent = reservation.ok ? reservation.spentGbp : Math.max(reservation.spentGbp, reservation.ceilingGbp);
+      if (reservation.ok) {
+        // reserved -> in_flight immediately before the provider call (Correction 2). If the start is refused the
+        // provider is not called: the adapter is told the ceiling is reached and abstains.
+        const started = (await ctx.runMutation(makeFunctionReference<'mutation'>('chatBudget:startChatBudgetInternal'), {
+          owner,
+          reservationSha256,
+        })) as { ok: boolean };
+        if (started.ok) budgetReservationSha256 = reservationSha256;
+        else dailySpent = Math.max(dailySpent, dailyCeiling);
+      }
+    }
+
     const turnResult = await generateAndValidateEvidenceLockedAnswer({
       bundle,
       callerId: owner,
-      mode: args.mode ?? 'auto',
-      dailySpentGbpSoFar: retrievalCtx.dailyChatSpendGbp,
-      dailyCostCeilingGbp: retrievalCtx.dailyCostCeilingGbp,
+      mode,
+      dailySpentGbpSoFar: dailySpent,
+      dailyCostCeilingGbp: dailyCeiling,
       simulateProviderFailure: args.simulateProviderFailure ?? false,
     });
 
     await ctx.runMutation(imRef('recordEvidenceChatTurnInternal'), {
       owner,
+      ...(budgetReservationSha256 ? { budgetReservationSha256 } : {}),
+      recordedVia: 'convex_action',
       turnId: turnResult.turnId,
       bundleId: bundle.bundleId,
       bundleSha256: bundle.bundleSha256,
@@ -337,6 +366,9 @@ export const askEvidenceLockedQuestion = action({
       estimatedCostGbp: turnResult.telemetry.estimatedCostGbp,
       actualCostGbp: turnResult.telemetry.actualCostGbp,
       latencyMs: turnResult.telemetry.latencyMs,
+      ...(turnResult.telemetry.providerFailureKind
+        ? { providerFailureKind: turnResult.telemetry.providerFailureKind }
+        : {}),
       bundleJson: JSON.stringify(bundle),
       answerJson: JSON.stringify(turnResult.answer),
       validationJson: JSON.stringify(turnResult.validation),
@@ -348,24 +380,23 @@ export const askEvidenceLockedQuestion = action({
 });
 
 /**
- * Public read-only query to inspect Gemini provider availability and Evidence Chat telemetry summary.
+ * Owner-scoped Evidence Chat telemetry summary.
+ *
+ * Security (MVP hardening): this query previously accepted anonymous callers, substituted `RESEARCH_OWNER_ID`
+ * for the missing identity and, when that owner had no rows, scanned the whole `evidenceChatAudit` table.
+ * It now requires a verified human identity and reads only that identity's rows through the owner index.
  */
 export const getChatOperationsTelemetry = query({
   args: {},
   handler: async (ctx) => {
-    const rawIdentity = await ctx.auth.getUserIdentity();
-    const owner = rawIdentity?.tokenIdentifier ?? process.env.RESEARCH_OWNER_ID;
-    if (!owner) return null;
+    const user = await researcher(ctx);
+    const owner = user.tokenIdentifier;
 
-    const ownerTurns = await ctx.db
+    const recentTurns = await ctx.db
       .query('evidenceChatAudit')
       .withIndex('by_owner', (q) => q.eq('owner', owner))
       .order('desc')
       .take(50);
-    const recentTurns =
-      ownerTurns.length > 0 || rawIdentity !== null
-        ? ownerTurns
-        : await ctx.db.query('evidenceChatAudit').order('desc').take(50);
 
     const dayStartMs = Date.now() - 86_400_000;
     let totalInputTokens = 0;
@@ -384,10 +415,9 @@ export const getChatOperationsTelemetry = query({
       if (!t.validationValid) validationRejectedCount += 1;
     }
 
-    const latestGeminiLiveTurn =
-      recentTurns.find(
-        (t) => t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded',
-      ) ?? null;
+    // Only server-attested rows evidence live provider inference (pre-merge risk H1).
+    const attestedLiveTurns = recentTurns.filter(isAttestedLiveTurn);
+    const latestGeminiLiveTurn = attestedLiveTurns[0] ?? null;
 
     const geminiConfigured = Boolean(
       process.env.GEMINI_API_KEY ||
@@ -407,6 +437,7 @@ export const getChatOperationsTelemetry = query({
         'gemini-2.5-flash',
       geminiConfigured,
       geminiEnabled,
+      attestedLiveTurns: attestedLiveTurns.length,
       totalTurnsRecorded: recentTurns.length,
       totalInputTokens,
       totalOutputTokens,
@@ -490,255 +521,60 @@ export const getChatRetrievalContext = query({
       publicProjectedRelationships,
       dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
       dailyChatSpendGbp,
+      // Shared (database-derived) request rate: every server instance sees the same count, unlike the
+      // per-process limiter in the provider adapter. Counts recorded turns, so a burst of in-flight
+      // requests can briefly exceed it.
+      turnsLastMinute: recentChatTurns.filter((t) => t.createdAtMs >= Date.now() - 60_000).length,
     };
   },
 });
 
 /**
  * Owner-authenticated mutation to record a completed Evidence-Locked Chat turn executed on the Next.js server.
+ *
+ * Compatibility path. The owner is always the verified caller, so a caller can only ever write to their own
+ * audit trail, and the record is validated at the write boundary. Because the caller's own JWT is the only
+ * credential, such rows are marked `client_jwt_legacy` and are not server-attested telemetry; the gateway
+ * route (`POST /api/evidence-chat/turn`, `server_gateway`) is the attested path.
  */
 export const recordEvidenceChatTurn = mutation({
-  args: {
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
-  },
+  args: turnAuditArgs,
   handler: async (ctx, args) => {
     const user = await researcher(ctx);
-    const owner = user.tokenIdentifier;
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      owner,
-      ...args,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
-  },
-});
-
-/**
- * Internal mutation (callable only via deployment admin / `npx convex run`) to mint a single-use,
- * 120-second acceptance nonce for verifying server-side Gemini inference on Vercel Production.
- */
-export const mintServerAcceptanceTokenInternal = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const randomPart = Array.from({ length: 4 }, () =>
-      Math.floor(Math.random() * 0xffffffff)
-        .toString(16)
-        .padStart(8, '0'),
-    ).join('');
-    const nonce = `aci-accept-${now}-${randomPart}`;
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.acceptance_nonce',
-      recordId: nonce,
-      detail: 'issued',
-      at: now,
-    });
-    return { nonce, owner, expiresAtMs: now + 120_000 };
-  },
-});
-
-export const consumeAcceptanceNonceAndGetContext = mutation({
-  args: { nonce: v.string() },
-  handler: async (ctx, args) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const recentAudits = await ctx.db
-      .query('audit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(40);
-    const match = recentAudits.find(
-      (a) =>
-        a.action === 'graph.evidence_chat.acceptance_nonce' &&
-        a.recordId === args.nonce &&
-        a.detail === 'issued' &&
-        now - a.at <= 120_000,
+    // Pre-merge risk H1: the caller's own credential cannot evidence live provider inference or provider cost.
+    const clientViolations = clientRecordedTurnViolations(args);
+    if (clientViolations.length > 0) {
+      throw new Error(`Invalid evidence chat audit record: ${clientViolations.join('; ')}`);
+    }
+    const inserted = await insertValidatedChatTurn(
+      ctx,
+      user.tokenIdentifier,
+      args,
+      'client_jwt_legacy',
+      Date.now(),
     );
-    if (!match) {
-      return { valid: false as const };
-    }
-    await ctx.db.patch(match._id, { detail: 'consumed' });
-
-    const checkpoint = await ctx.db
-      .query('graphProjectionCheckpoints')
-      .withIndex('by_owner_key', (q) =>
-        q.eq('owner', owner).eq('checkpointKey', `ckpt:${owner}:main`),
-      )
-      .first();
-
-    const projectedRows = await ctx.db
-      .query('graphProjectionOutbox')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .take(200);
-
-    const publicProjectedRelationships: MacroRelationship[] = [];
-    for (const row of projectedRows) {
-      if (row.visibility !== 'public_research' || row.status !== 'projected') continue;
-      try {
-        const parsed = macroRelationshipSchema.parse(JSON.parse(row.payloadJson));
-        publicProjectedRelationships.push(parsed);
-      } catch {
-        // Ignore malformed legacy rows
-      }
-    }
-
-    const settings = await ctx.db
-      .query('operationsSettings')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .first();
-
-    const dayStartMs = now - 86_400_000;
-    const recentChatTurns = await ctx.db
-      .query('evidenceChatAudit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(100);
-
-    let dailyChatSpendGbp = 0;
-    for (const t of recentChatTurns) {
-      if (t.createdAtMs >= dayStartMs) {
-        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
-      }
-    }
-
-    return {
-      valid: true as const,
-      owner,
-      checkpoint: checkpoint
-        ? {
-            lastProjectedSequence: checkpoint.lastProjectedSequence,
-            lastProjectionKey: checkpoint.lastProjectionKey,
-            projectedCount: checkpoint.projectedCount,
-            reconciled:
-              checkpoint.pendingCount === 0 &&
-              checkpoint.retryingCount === 0 &&
-              checkpoint.deadLetterCount === 0,
-          }
-        : null,
-      publicProjectedRelationships,
-      dailyCostCeilingGbp: settings?.dailyCostCeilingGbp ?? 2.0,
-      dailyChatSpendGbp,
-    };
+    if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
+    return { auditId: inserted.auditId };
   },
 });
 
-export const recordAcceptanceChatTurn = mutation({
-  args: {
-    nonce: v.string(),
-    turnId: v.string(),
-    bundleId: v.string(),
-    bundleSha256: v.string(),
-    question: v.string(),
-    queryType: v.string(),
-    intentCategory: v.string(),
-    historicalCutoffMs: v.number(),
-    temporalBasis: v.union(v.literal('publication'), v.literal('receipt')),
-    graphDatabaseName: v.string(),
-    graphSchemaVersion: v.string(),
-    lastProjectedSequence: v.number(),
-    supportStatus: v.union(
-      v.literal('fully_supported'),
-      v.literal('partially_supported'),
-      v.literal('unsupported'),
-    ),
-    validationValid: v.boolean(),
-    validationAction: v.string(),
-    modelId: v.string(),
-    generationMode: v.string(),
-    providerStatus: v.string(),
-    inputTokens: v.number(),
-    outputTokens: v.number(),
-    cachedTokens: v.number(),
-    estimatedCostGbp: v.number(),
-    actualCostGbp: v.union(v.number(), v.null()),
-    latencyMs: v.number(),
-    bundleJson: v.string(),
-    answerJson: v.string(),
-    validationJson: v.string(),
-    createdAtMs: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const owner = process.env.RESEARCH_OWNER_ID ?? 'system_acceptance';
-    const now = Date.now();
-    const recentAudits = await ctx.db
-      .query('audit')
-      .withIndex('by_owner', (q) => q.eq('owner', owner))
-      .order('desc')
-      .take(40);
-    const match = recentAudits.find(
-      (a) =>
-        a.action === 'graph.evidence_chat.acceptance_nonce' &&
-        a.recordId === args.nonce &&
-        a.detail === 'consumed' &&
-        now - a.at <= 120_000,
-    );
-    if (!match) {
-      throw new Error('Invalid or expired acceptance nonce');
-    }
-    await ctx.db.patch(match._id, { detail: 'recorded' });
-
-    const { nonce: _unusedNonce, ...turnFields } = args;
-    const id = await ctx.db.insert('evidenceChatAudit', {
-      owner,
-      ...turnFields,
-      executionAuthority: 'none',
-    });
-    await ctx.db.insert('audit', {
-      owner,
-      action: 'graph.evidence_chat.turn',
-      recordId: args.bundleId,
-      detail: `q="${args.question.slice(0, 120)}" support=${args.supportStatus} valid=${args.validationValid} mode=${args.generationMode} costGbp=${args.estimatedCostGbp.toFixed(6)}`,
-      at: args.createdAtMs,
-    });
-    return { auditId: id };
-  },
-});
+// The former public mutations `consumeAcceptanceNonceAndGetContext` and `recordAcceptanceChatTurn`, and the
+// `Math.random` based `mintServerAcceptanceTokenInternal`, were removed in MVP hardening work package 2.
+// Acceptance nonces now live in `acceptanceNonces.ts` and are reachable only through the gateway in `http.ts`.
 
 /**
  * Action to check the live Gemini models endpoint availability from Convex server runtime.
  */
 export const checkGeminiProviderStatusAction = action({
   args: {},
-  handler: async () => {
+  handler: async (ctx) => {
+    // MVP hardening: previously anonymous, letting any caller make this deployment call the provider with its key.
+    const rawIdentity = await ctx.auth.getUserIdentity();
+    if (!rawIdentity) throw new Error('Sign in required');
+    const identity = verifyIdentityClaims(rawIdentity);
+    if (identity.actorType !== undefined && identity.actorType !== 'human') {
+      throw new Error('Automated actors cannot probe the model provider');
+    }
     return await checkGeminiProviderAvailability({
       verifyEndpoint: true,
       timeoutMs: 8_000,

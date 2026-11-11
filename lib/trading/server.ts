@@ -8,6 +8,7 @@ import {assertSameOrigin} from '../research-import-server';
 import {BrokerError,brokerCredentialsSchema,type BrokerEnvironment,type BrokerSyncSnapshot} from '../brokers/contracts';
 import {decryptCredentials,encryptCredentials,encryptedBrokerCredentialsSchema,maskApiKey,vaultConfigured} from '../brokers/vault';
 import {Trading212OrderClient} from '../brokers/trading212-orders';
+import {RESEARCH_ONLY_ERROR_CODE,RESEARCH_ONLY_MESSAGE,executionPermitted} from './execution-boundary';
 import {confirmationPayload,evaluateOrderRisk,orderDraftSchema,reconcileCandidates,brokerQuantity,type AccountState,type Instrument,type PriceReference,type RiskLimits} from './order-model';
 
 /**
@@ -22,7 +23,8 @@ const json=(body:unknown,status=200)=>Response.json(body,{status,headers});
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 type Who={owner:string;user:ConvexHttpClient;admin:ConvexHttpClient};
 
-export function executionFlag(environment:BrokerEnvironment,env:Record<string,string|undefined>=process.env){return environment==='live'?env.LIVE_TRADING_ENABLED==='true':env.DEMO_TRADING_ENABLED==='true';}
+/** Environment flags are necessary but never sufficient: the build must also grant execution authority, which this build does not. */
+export function executionFlag(environment:BrokerEnvironment,env:Record<string,string|undefined>=process.env){if(!executionPermitted())return false;return environment==='live'?env.LIVE_TRADING_ENABLED==='true':env.DEMO_TRADING_ENABLED==='true';}
 
 function client(){const url=process.env.NEXT_PUBLIC_CONVEX_URL;if(!url)throw new TradingError('not_configured',503,'Convex is not configured');return new ConvexHttpClient(url,{logger:false,fetch:(i,init)=>fetch(i,{...init,cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15_000)})});}
 async function context():Promise<Who>{
@@ -92,6 +94,8 @@ const body=z.discriminatedUnion('action',[
 ]);
 
 export async function handleTrading(request:Request){
+ // Research-only build: the whole endpoint is refused before authentication, parsing, vault, Convex or broker access.
+ if(!executionPermitted())return json({error:RESEARCH_ONLY_ERROR_CODE,message:RESEARCH_ONLY_MESSAGE,executionAuthority:'none'},403);
  try{
   assertSameOrigin(request);
   const raw=await request.text();if(raw.length>20_000)throw new TradingError('invalid_request',413,'Request too large');

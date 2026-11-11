@@ -5,7 +5,7 @@ import {
   executeAllowlistedGraphQuery,
   loadInitialAcceptanceDataset,
 } from '../../../../lib/graph/query-gateway';
-import { probeTypeDbServer } from '../../../../lib/graph/typedb-driver-adapter';
+import { describeTypeDbTransport, probeTypeDbServer } from '../../../../lib/graph/typedb-driver-adapter';
 import { runGraphVsConvexBenchmark } from '../../../../lib/graph/benchmark-evaluator';
 
 export const runtime = 'nodejs';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 async function resolveAuthenticatedCaller(req: NextRequest): Promise<string | null> {
-  if (process.env.NODE_ENV === 'test') {
+  if (process.env.NODE_ENV === 'test' && !process.env.VERCEL_ENV) {
     const testCaller = req.headers.get('x-aci-test-caller');
     if (testCaller && testCaller.trim().length > 0) {
       return testCaller.trim();
@@ -60,10 +60,7 @@ export async function GET(req: NextRequest) {
         version: probe.version,
         latencyMs: probe.latencyMs,
         httpEndpointConfigured: true,
-        tlsEnabled: Boolean(
-          process.env.TYPEDB_TLS_ENABLED === 'true' ||
-            (process.env.TYPEDB_HTTP_ADDRESS ?? '').startsWith('https://'),
-        ),
+        tlsEnabled: describeTypeDbTransport().tlsEnabled,
       },
       counts: {
         organisations: dataset.organisations.length,
@@ -115,8 +112,12 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const message = err instanceof Error ? err.message : 'Graph query execution failed';
-    const status = message.includes('Rate limit exceeded') ? 429 : 400;
+    // Only messages the gateway raises deliberately are returned; driver, network and configuration errors
+    // (which can carry hostnames or query text) are replaced with a generic message.
+    const raw = err instanceof Error ? err.message : '';
+    const safe = /^(Rate limit exceeded|Security violation|Query type|Unsupported|Invalid)/.test(raw);
+    const message = safe ? raw.slice(0, 300) : 'Graph query execution failed';
+    const status = raw.includes('Rate limit exceeded') ? 429 : safe ? 400 : 502;
     return NextResponse.json(
       {
         error: message,

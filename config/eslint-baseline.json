@@ -1,0 +1,28 @@
+{
+  "description": "Pre-existing ESLint errors tolerated by scripts/eslint-baseline-check.mjs. This allowance may only shrink. Clean-up plan: docs/mvp-hardening-fable-52/06-ci-cd-release-gating.md.",
+  "recordedOn": "2026-11-10",
+  "totalErrors": 29,
+  "errors": {
+    "app/page.tsx": {
+      "react-hooks/purity": 1
+    },
+    "app/workspace/page.tsx": {
+      "react-hooks/purity": 1
+    },
+    "components/macro-data-room.tsx": {
+      "react-hooks/purity": 1
+    },
+    "components/portfolio-risk-dashboard.tsx": {
+      "react/no-unescaped-entities": 2
+    },
+    "components/recovery-monitor.tsx": {
+      "react-hooks/purity": 1
+    },
+    "lib/research-ratings/sec-xbrl-expansion.ts": {
+      "@typescript-eslint/no-explicit-any": 19
+    },
+    "tests/phase-g8-2-final-live-connection-gate.test.ts": {
+      "@typescript-eslint/no-explicit-any": 4
+    }
+  }
+}

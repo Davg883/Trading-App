@@ -1,5 +1,8 @@
 # AI Capital Intelligence — Research Thesis Monitor: Cathie Wood AI Capex Moderation (Phase G.7.1 Quality Gate `v2.1.0`)
 
+> **Correction and supersession notice (MVP hardening review, 10 November 2026).** The 'verified live Gemini inference' record (request ID `Tj3yaoqeGa6xuMYPoMuKoAk`) is a hand-entered constant. The same request ID appears elsewhere in the code with different token counts and cost, so the figures cannot all be provider observations. It is unverified. See `docs/mvp-hardening-fable-52/05-ai-evaluation-integrity.md`. The original text below is retained unchanged as a historical record.
+
+
 - **Thesis Identifier**: `thesis-ark-ai-capex-moderation-2026-11-07`
 - **Engine Module**: [`lib/research-ratings/thesis-monitor.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/thesis-monitor.ts) (`aci-thesis-monitor-v2.1.0`)
 - **SEC XBRL Expansion Module**: [`lib/research-ratings/sec-xbrl-expansion.ts`](file:///c:/GPT%205%20CODEX/Trading%20app/lib/research-ratings/sec-xbrl-expansion.ts) (`aci-sec-xbrl-g7-1-v1.0.0`)

@@ -56,6 +56,10 @@ jobs:
             exit 0
           fi
           JOB="${TARGET_JOB:-all_due}"
+          if ! printf '%s' "$JOB" | grep -Eq '^[a-z0-9_]{1,64}$'; then
+            echo "::error::job_key must be a lower-case job identifier"
+            exit 1
+          fi
           if [ "$JOB" = "all_due" ]; then
             BODY='{"environment":"remote"}'
           else

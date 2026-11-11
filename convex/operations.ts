@@ -22,6 +22,8 @@ import {
  type ProviderCredentialState,
 } from '../lib/remote-ops/health-monitor';
 import {generateMorningBriefing,londonBriefingDate,nextLondonMorningBriefAt} from '../lib/remote-ops/morning-briefing';
+import {assessPipelineStages} from '../lib/remote-ops/pipeline-stages';
+import {isAttestedLiveTurn} from '../lib/graph/chat-turn-audit-validation';
 import {
  MARKET_DATA_SYMBOLS,
  authorisedMarketObservationSchema,
@@ -176,14 +178,25 @@ async function computeRateWindow(ctx:Ctx,owner:string,now:number){
  };
 }
 
-async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
+/**
+ * Audience of an operations overview.
+ * - `owner`: the authenticated owner's own records, always filtered by the verified `tokenIdentifier`.
+ * - `public`: the anonymous status projection. It never reads broker connections, chat audit rows, spend,
+ *   job-run history, staged research, briefings, review records or forward-research registrations.
+ * No audience ever falls back to another owner's rows or to an unscoped table scan: an empty owner dataset stays empty.
+ */
+type OverviewAudience='owner'|'public';
+const ZERO_SPEND={dailyEstimated:0,dailyActual:0,monthlyEstimated:0,monthlyActual:0};
+
+async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:OverviewAudience='owner'){
+ const privateRead=audience==='owner';
  const settings=await ctx.db.query('operationsSettings').withIndex('by_owner',q=>q.eq('owner',owner)).first();
  const jobs=await ctx.db.query('researchJobs').withIndex('by_owner',q=>q.eq('owner',owner)).collect();
- const recentRuns=await ctx.db.query('researchJobRuns').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25);
- const staged=await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50);
+ const recentRuns=privateRead?await ctx.db.query('researchJobRuns').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25):[];
+ const staged=privateRead?await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50):[];
  const pendingCount=staged.filter(s=>s.validationStatus==='pending_verification').length;
- const latestBriefing=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').first();
- const spend=await computeSpend(ctx,owner,now);
+ const latestBriefing=privateRead?await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').first():null;
+ const spend=privateRead?await computeSpend(ctx,owner,now):ZERO_SPEND;
 
  const effectiveJobs=jobs.length>0?jobs:DEFAULT_RESEARCH_JOBS.map(d=>({
   jobKey:d.jobKey,
@@ -213,32 +226,32 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  const mktJob=effectiveJobs.find(j=>j.jobKey==='market_data_collect')??null;
  const agentJob=effectiveJobs.find(j=>j.jobKey==='news_discovery_agent')??null;
  const marketObsRows=await ctx.db.query('marketObservations').withIndex('by_owner',q=>q.eq('owner',owner)).take(500);
- const forwardRows=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25);
+ const forwardRows=privateRead?await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25):[];
  const graphCheckpoint=await ctx.db
   .query('graphProjectionCheckpoints')
   .withIndex('by_owner_key',q=>q.eq('owner',owner).eq('checkpointKey',`ckpt:${owner}:main`))
   .first();
- const graphReviews=await ctx.db
-  .query('graphRelationshipReviews')
-  .withIndex('by_owner',q=>q.eq('owner',owner))
-  .take(100);
- const ownerBrokerConn=await ctx.db
-  .query('brokerConnections')
-  .withIndex('by_owner',q=>q.eq('owner',owner))
-  .first();
- const brokerConn=
-  ownerBrokerConn||owner!==process.env.RESEARCH_OWNER_ID
-   ?ownerBrokerConn
-   :await ctx.db.query('brokerConnections').order('desc').first();
- const ownerChatAuditRows=await ctx.db
-  .query('evidenceChatAudit')
-  .withIndex('by_owner',q=>q.eq('owner',owner))
-  .order('desc')
-  .take(200);
- const chatAuditRows=
-  ownerChatAuditRows.length>0||owner!==process.env.RESEARCH_OWNER_ID
-   ?ownerChatAuditRows
-   :await ctx.db.query('evidenceChatAudit').order('desc').take(200);
+ const graphReviews=privateRead
+  ?await ctx.db
+   .query('graphRelationshipReviews')
+   .withIndex('by_owner',q=>q.eq('owner',owner))
+   .take(100)
+  :[];
+ // Security (MVP hardening): broker metadata and chat telemetry are read ONLY through the owner index for the
+ // authenticated owner. The previous unscoped `.order('desc')` fallbacks returned other users' rows.
+ const brokerConn=privateRead
+  ?await ctx.db
+   .query('brokerConnections')
+   .withIndex('by_owner',q=>q.eq('owner',owner))
+   .first()
+  :null;
+ const chatAuditRows=privateRead
+  ?await ctx.db
+   .query('evidenceChatAudit')
+   .withIndex('by_owner',q=>q.eq('owner',owner))
+   .order('desc')
+   .take(200)
+  :[];
 
  const dStart=dayStartUtc(now);
  const chatTurnsToday=chatAuditRows.filter(r=>r.createdAtMs>=dStart);
@@ -252,10 +265,9 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  const chatDailySpend=Number(chatTurnsToday.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
  const chatTotalSpend=Number(chatAuditRows.reduce((s,r)=>s+r.estimatedCostGbp,0).toFixed(6));
 
- const latestGeminiLiveTurn=chatAuditRows.find(
-  r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded',
- )??null;
- const geminiLiveCount=chatAuditRows.filter(r=>r.generationMode==='gemini_live'&&r.providerStatus==='succeeded').length;
+ // Only server-attested rows evidence live provider inference (pre-merge risk H1).
+ const latestGeminiLiveTurn=chatAuditRows.find(isAttestedLiveTurn)??null;
+ const geminiLiveCount=chatAuditRows.filter(isAttestedLiveTurn).length;
 
  const evidenceChat:EvidenceChatOperationsSummary={
   totalTurns:chatAuditRows.length,
@@ -306,6 +318,8 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
  );
  const typedbDatabaseName=process.env.TYPEDB_DATABASE||'aci_macro_intelligence_staging';
  const typedbConfigured=Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_PASSWORD);
+ const typedbAddress=process.env.TYPEDB_HTTP_ADDRESS??'';
+ const typedbTransport=typedbAddress.startsWith('https://')?'HTTPS configured':typedbAddress?'no TLS configured':'address not configured';
 
  const graphProjection:GraphProjectionOperationsSummary={
   databaseName:typedbDatabaseName,
@@ -332,29 +346,29 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
    name:'Vercel Production Hosting',
    environmentTarget:'https://capital.aiguides.co.uk',
    status:'connected',
-   lastVerifiedAt:now,
-   detail:'Next.js 16.4.3 production build serving Command Centre (/) and Macro Data Room (/data-room).',
+   lastVerifiedAt:null,
+   detail:'Next.js application hosting. Convex cannot observe the web tier, so this row is declarative and carries no verification time.',
   },
   {
    serviceId:'clerk_production',
    name:'Clerk Authentication & Tenant Isolation',
-   environmentTarget:'clerk.capital.aiguides.co.uk / harmless-akita-9211',
-   status:'connected',
-   lastVerifiedAt:now,
-   detail:'Owner & researcher RBAC enforced across Convex queries, mutations, and server routes; two-user isolation verified.',
+   environmentTarget:'Clerk (issuer configured in CLERK_JWT_ISSUER_DOMAIN)',
+   status:process.env.CLERK_JWT_ISSUER_DOMAIN?'connected':'unavailable',
+   lastVerifiedAt:null,
+   detail:'Convex verifies token issuer, audience and authorised party for every owner-scoped function. This row reports configuration; it is not a live authentication probe.',
   },
   {
    serviceId:'convex_production',
    name:'Convex Cloud Persistence & Scheduler',
-   environmentTarget:'benevolent-magpie-921 (AWS eu-west-1)',
+   environmentTarget:'Convex Cloud deployment',
    status:(settings?.systemEnabled??true)?'connected':'degraded',
-   lastVerifiedAt:secJob?.lastRunAt??mktJob?.lastRunAt??now,
+   lastVerifiedAt:secJob?.lastRunAt??mktJob?.lastRunAt??null,
    detail:'Authoritative evidence store & unattended 15m cloud cron + 07:30 Europe/London briefing active with local dev server off.',
   },
   {
    serviceId:'typedb_cloud',
    name:'TypeDB Cloud 3.14.2 Knowledge Graph',
-   environmentTarget:`teoxx0-0.cluster.typedb.com:80 (${typedbDatabaseName})`,
+   environmentTarget:`TypeDB Cloud (${typedbDatabaseName})`,
    status:
     !typedbConfigured&&graphProjection.projectedCount===0
      ?'unavailable'
@@ -362,7 +376,7 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
       ?'degraded'
       :'connected',
    lastVerifiedAt:graphProjection.updatedAtMs,
-   detail:`TLS enabled · ${graphProjection.projectedCount} relationship(s) projected · ${graphProjection.deadLetterCount} dead-letter · ${graphProjection.maxProjectionLagMs}ms lag · ${graphProjection.productionIsolated?'production DB isolated from staging replays':'staging DB active'}.`,
+   detail:`${typedbTransport} (from the connection address, not a handshake check) · ${graphProjection.projectedCount} relationship(s) projected · ${graphProjection.deadLetterCount} dead-letter · ${graphProjection.maxProjectionLagMs}ms lag · ${graphProjection.productionIsolated?'production DB isolated from staging replays':'staging DB active'}.`,
   },
   {
    serviceId:'financial_collectors',
@@ -409,10 +423,10 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   {
    serviceId:'live_demo_execution',
    name:'Live & Demo Order Execution Authority',
-   environmentTarget:'LIVE_TRADING_ENABLED=false · DEMO_TRADING_ENABLED=false',
+   environmentTarget:'Research-only build (executionAuthority: none)',
    status:'intentionally_disabled',
-   lastVerifiedAt:now,
-   detail:'Hard-disabled across all cloud crons, research agents, and server routes (executionAuthority: "none").',
+   lastVerifiedAt:null,
+   detail:'Order execution is disabled by a compile-time build boundary; LIVE_TRADING_ENABLED and DEMO_TRADING_ENABLED cannot enable it. This row states the build property; it is not a live probe of the deployed server.',
   },
  ];
 
@@ -513,8 +527,8 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   now,
   systemEnabled:settings?.systemEnabled??true,
   activeEnvironment:settings?.activeEnvironment??'remote',
-  dailyCostCeilingGbp:settings?.dailyCostCeilingGbp??DEFAULT_DAILY_CEILING_GBP,
-  monthlyCostCeilingGbp:settings?.monthlyCostCeilingGbp??DEFAULT_MONTHLY_CEILING_GBP,
+  dailyCostCeilingGbp:privateRead?settings?.dailyCostCeilingGbp??DEFAULT_DAILY_CEILING_GBP:DEFAULT_DAILY_CEILING_GBP,
+  monthlyCostCeilingGbp:privateRead?settings?.monthlyCostCeilingGbp??DEFAULT_MONTHLY_CEILING_GBP:DEFAULT_MONTHLY_CEILING_GBP,
   dailyEstimatedCostGbp:spend.dailyEstimated,
   dailyActualCostGbp:spend.dailyActual,
   monthlyEstimatedCostGbp:spend.monthlyEstimated,
@@ -522,12 +536,11 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   pendingVerificationCount:pendingCount,
   latestBriefingDate:latestBriefing?.briefingDate??null,
   latestBriefingGeneratedAt:latestBriefing?.generatedAt??null,
-  jobs:effectiveJobs,
+  jobs:privateRead?effectiveJobs:effectiveJobs.map(j=>({...j,estimatedCostGbpTotal:0,actualCostGbpTotal:null,cursor:null})),
   providers,
   environmentAudit,
   graphProjection,
-  recentRuns:formattedRecentRuns,
-  evidenceChat,
+  ...(privateRead?{recentRuns:formattedRecentRuns,evidenceChat}:{}),
  });
 
  const parsedMarketObs:AuthorisedMarketObservation[]=marketObsRows.map(r=>({
@@ -629,8 +642,25 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   missingEvidenceResolution.pendingFutureWindows+=forwardResolution.pendingFutureWindows;
  }
 
+ // Per-stage pipeline evidence (MVP hardening WP7). Only collectors with a stored-record table report freshness.
+ const newestMarketObsAt=marketObsRows.reduce<number|null>((m,r)=>m===null||r.serverReceivedAt>m?r.serverReceivedAt:m,null);
+ const scheduledJobKeys=new Set(DEFAULT_RESEARCH_JOBS.map(d=>d.jobKey));
+ const pipelineStages=privateRead?DEFAULT_RESEARCH_JOBS.map(d=>{
+  const j=jobs.find(x=>x.jobKey===d.jobKey)??null;
+  return assessPipelineStages({
+   jobKey:d.jobKey,
+   nowMs:now,
+   cronDefinedInSource:scheduledJobKeys.has(d.jobKey),
+   job:j?{enabled:j.enabled,intervalMinutes:j.intervalMinutes,lastRunAt:j.lastRunAt,lastSuccessAt:j.lastSuccessAt,lastErrorCode:j.lastErrorCode}:null,
+   newestStoredRecordAt:d.jobKey==='market_data_collect'?newestMarketObsAt:d.jobKey==='daily_intelligence_briefing'?latestBriefing?.generatedAt??null:null,
+   // No collector has a stored reconciliation check yet; reported as not measured rather than assumed.
+   reconciliation:{checked:false,passed:null},
+  });
+ }):undefined;
+
  return {
   health,
+  ...(pipelineStages?{pipelineStages}:{}),
   marketData:{
    totalObservationsStored:parsedMarketObs.length,
    coveredSymbols:MARKET_DATA_SYMBOLS,
@@ -681,13 +711,89 @@ export const overview=query({args:{},handler:async ctx=>{
  return await buildOperationsOverview(ctx,owner,now);
 }});
 
-/** Public zero-argument read-only overview for hydrating research operations status without a deploy key (contains zero broker/account PII). */
+/**
+ * Explicit allowlist for the anonymous status projection. Every field returned to an unauthenticated caller is
+ * named here; anything added to the owner overview later is private by default until it is listed.
+ */
+function toPublicOperationsStatus(full:Awaited<ReturnType<typeof buildOperationsOverview>>){
+ const h=full.health;
+ return {
+  audience:'public' as const,
+  health:{
+   evaluatedAt:h.evaluatedAt,
+   systemEnabled:h.systemEnabled,
+   activeEnvironment:h.activeEnvironment,
+   deterministicCollectionHealthy:h.deterministicCollectionHealthy,
+   aiResearchHealthy:h.aiResearchHealthy,
+   modelFailureIsolated:h.modelFailureIsolated,
+   pendingVerificationCount:0,
+   dailyCostGbp:{estimated:0,actual:0,ceiling:0,exceeded:false},
+   monthlyCostGbp:{estimated:0,actual:0,ceiling:0,exceeded:false},
+   operationalLayers:h.operationalLayers,
+   executionPaths:h.executionPaths,
+   jobs:h.jobs.map(j=>({
+    jobKey:j.jobKey,
+    name:j.name,
+    purpose:j.purpose,
+    category:j.category,
+    usesAiModel:j.usesAiModel,
+    enabled:j.enabled,
+    environment:j.environment,
+    pausedReason:j.pausedReason,
+    lastSuccessAt:j.lastSuccessAt,
+    lastFailureAt:j.lastFailureAt,
+    lastRunAt:j.lastRunAt,
+    nextRunAt:j.nextRunAt,
+    freshness:j.freshness,
+    ageMs:j.ageMs,
+    sourcesAdded:j.sourcesAdded,
+    evidenceAdded:j.evidenceAdded,
+    pendingVerification:0,
+    estimatedCostGbp:0,
+    actualCostGbp:null,
+    providerRequestsLastRun:0,
+    processingDurationMsLastRun:null,
+    conditionalSkipLastRun:j.conditionalSkipLastRun,
+    lastOutcome:null,
+    lastErrorCode:j.lastErrorCode,
+   })),
+   providers:h.providers.map(p=>({
+    providerId:p.providerId,
+    label:p.label,
+    category:p.category,
+    status:p.status,
+    errorCode:p.errorCode,
+    lastSuccessAt:p.lastSuccessAt,
+    nextAllowedAt:p.nextAllowedAt,
+    detail:p.detail,
+   })),
+   alerts:h.alerts.filter(a=>a.providerOrJob!=='ai_budget'&&a.providerOrJob!=='evidence_chat'),
+   environmentAudit:(h.environmentAudit??[]).filter(svc=>svc.serviceId!=='trading212_readonly'),
+   graphProjection:h.graphProjection?{...h.graphProjection,humanReviewCount:0}:undefined,
+  },
+  marketData:full.marketData,
+  missingEvidenceResolution:full.missingEvidenceResolution,
+  latestBriefing:null,
+  executionAuthority:'none' as const,
+ };
+}
+
+/**
+ * Anonymous, zero-argument research-pipeline status for the public Command Centre shell.
+ *
+ * Security contract (MVP hardening):
+ * - The caller's identity is neither required nor used; an anonymous caller never acts as, or inherits the
+ *   records of, any user. Signed-in owners read their own data through `operations:overview`.
+ * - `RESEARCH_OWNER_ID` is used here only as the storage key of the scheduled public-reference pipeline
+ *   (delayed public market closes, collector freshness, graph projection counters).
+ * - Broker metadata, chat telemetry, spend, run history, staged research, briefings and review records are
+ *   never read on this path, and the response is passed through `toPublicOperationsStatus`.
+ */
 export const publicOperationsOverview=query({args:{},handler:async ctx=>{
- const identity=await ctx.auth.getUserIdentity();
- const owner=identity?.tokenIdentifier??process.env.RESEARCH_OWNER_ID;
- if(!owner)return null;
- validOwner(owner);
- return await buildOperationsOverview(ctx,owner,Date.now());
+ const pipelineOwner=process.env.RESEARCH_OWNER_ID;
+ if(!pipelineOwner)return null;
+ validOwner(pipelineOwner);
+ return toPublicOperationsStatus(await buildOperationsOverview(ctx,pipelineOwner,Date.now(),'public'));
 }});
 
 /** Internal server-side overview for hydrating public research operations status (contains zero broker/account PII). */

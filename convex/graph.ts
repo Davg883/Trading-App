@@ -10,7 +10,7 @@ import {
   type QueryBuilder,
 } from 'convex/server';
 import { internalMutation, mutation, query, type DataModel } from './server';
-import { reviewer, signedIn } from './authz';
+import { researcher, reviewer, signedIn, verifyIdentityClaims } from './authz';
 import {
   ALLOWLISTED_QUERY_TYPES,
   MACRO_GRAPH_SCHEMA_VERSION,
@@ -34,6 +34,7 @@ import {
 import {
   assertCanRecreateTypeDbDatabase,
   defaultTypeDbConfig,
+  describeTypeDbTransport,
   executeReadOnlyTypeQlOnLiveServer,
   executeWriteStatementsOnLiveServer,
   inspectLiveTypeDbGraphCounts,
@@ -53,6 +54,34 @@ const graphMRef = (name: string) => makeFunctionReference<'mutation'>(`graph:${n
 const graphQRef = (name: string) => makeFunctionReference<'query'>(`graph:${name}`);
 
 type Ctx = GenericMutationCtx<DataModel> | GenericQueryCtx<DataModel>;
+
+/** Constant-time check of the server-to-server TypeDB bridge credential. Closed when the secret is unset. */
+function assertBridgeKey(presented: string | undefined): void {
+  const secret = process.env.TYPEDB_BRIDGE_SECRET;
+  if (!secret || secret.length < 32) throw new Error('TypeDB bridge is not configured');
+  const reserved = [
+    process.env.OPERATIONS_SCHEDULER_SECRET,
+    process.env.RESEARCH_STAGING_TOKEN,
+    process.env.EVIDENCE_CHAT_GATEWAY_SECRET,
+  ];
+  if (reserved.includes(secret)) throw new Error('TypeDB bridge is not configured');
+  const candidate = presented ?? '';
+  let diff = candidate.length ^ secret.length;
+  for (let i = 0; i < secret.length; i++) diff |= (candidate.charCodeAt(i) || 0) ^ secret.charCodeAt(i);
+  if (diff !== 0) throw new Error('TypeDB bridge credential required');
+}
+
+/**
+ * Maintenance actions act for an explicitly named owner or the configured pipeline owner.
+ * Hard-coded user identifiers are never used as a fallback.
+ */
+function requireExplicitOwner(owner: string | undefined): string {
+  const resolved = owner ?? process.env.RESEARCH_OWNER_ID;
+  if (!resolved || !resolved.trim()) {
+    throw new Error('An explicit owner or RESEARCH_OWNER_ID is required');
+  }
+  return resolved;
+}
 
 async function recomputeCheckpoint(
   ctx: GenericMutationCtx<DataModel>,
@@ -430,7 +459,7 @@ export const recordProjectionOutcome = mutation({
     errorMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await signedIn(ctx);
+    const user = await researcher(ctx);
     const owner = user.tokenIdentifier;
     const nowMs = Date.now();
 
@@ -565,7 +594,7 @@ export const recordGraphQueryAudit = mutation({
     latencyMs: v.number(),
   },
   handler: async (ctx, args) => {
-    const user = await signedIn(ctx);
+    const user = await researcher(ctx);
     const nowMs = Date.now();
     return await ctx.db.insert('graphQueryAudit', {
       owner: user.tokenIdentifier,
@@ -816,10 +845,7 @@ export const syncAndVerifyTypeDbCloud = internalAction({
   },
   handler: async (ctx, args) => {
     const startedAtMs = Date.now();
-    const owner =
-      args.owner ??
-      process.env.RESEARCH_OWNER_ID ??
-      'https://clerk.capital.aiguides.co.uk|owner_bootstrap';
+    const owner = requireExplicitOwner(args.owner);
     const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
     if (args.recreateDatabase) {
       assertCanRecreateTypeDbDatabase(config.databaseName);
@@ -982,7 +1008,7 @@ export const syncAndVerifyTypeDbCloud = internalAction({
         'maxProjectionLagMs = max(0, max_{item in (pending U retrying)}(nowMs - item.createdAtMs)); 0 ms when pendingCount = 0 and retryingCount = 0',
       httpAddress: config.httpAddress,
       databaseName: config.databaseName,
-      tlsEnabled: process.env.TYPEDB_TLS_ENABLED === 'true',
+      tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
       probe,
       outboxBootstrap,
       datasetProjectionReport,
@@ -996,15 +1022,26 @@ export const syncAndVerifyTypeDbCloud = internalAction({
 });
 
 /**
- * Public reviewer action to trigger an immediate outbox projection sync into hosted TypeDB Cloud
- * and return live graph counts and checkpoint telemetry.
+ * Reviewer-only action to trigger an immediate outbox projection sync into hosted TypeDB Cloud.
+ * Security (MVP hardening WP4): this previously accepted any signed-in identity, including model actors and
+ * tokens that fail issuer/audience checks, although it writes to the graph database.
  */
 export const projectPendingOutboxNow = action({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
+    const rawIdentity = await ctx.auth.getUserIdentity();
+    if (!rawIdentity) {
       throw new Error('Authentication required');
+    }
+    const identity = verifyIdentityClaims(rawIdentity);
+    if (identity.actorType !== undefined && identity.actorType !== 'human') {
+      throw new Error('Model or automated actors cannot trigger graph projection');
+    }
+    const roles = (await ctx.runQuery(makeFunctionReference<'query'>('roles:myRoles'), {})) as {
+      roles: string[];
+    };
+    if (!roles.roles.includes('reviewer')) {
+      throw new Error('Reviewer role required: an administrator must assign reviewer authority explicitly');
     }
     const owner = identity.tokenIdentifier;
     const syncActionRef = makeFunctionReference<'action'>(
@@ -1019,12 +1056,19 @@ export const projectPendingOutboxNow = action({
 });
 
 /**
- * Non-secret cloud health probe action callable by Next.js `/data-room` and `/api/graph/query`
- * when local server environment variables do not contain `TYPEDB_PASSWORD`.
+ * Server-to-server TypeDB bridge actions.
+ *
+ * Security (MVP hardening WP4): these three actions were anonymous public endpoints. `executeReadOnlyCloudTypeQl`
+ * in particular ran caller-supplied TypeQL with the deployment's TypeDB credentials, so anyone on the internet
+ * could read the whole graph database, including `private_tenant` relationships. Convex actions cannot be
+ * called as `internal` from the Next.js server without a deployment-wide admin key, so they stay public but
+ * every call must present `TYPEDB_BRIDGE_SECRET`, a dedicated secret held only by the application server.
+ * With the secret unset the bridge is closed.
  */
 export const probeHostedTypeDbCloud = action({
-  args: {},
-  handler: async () => {
+  args: { bridgeKey: v.optional(v.string()) },
+  handler: async (_ctx, args) => {
+    assertBridgeKey(args.bridgeKey);
     const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
     const probe = await probeTypeDbServer(config);
     return {
@@ -1035,44 +1079,48 @@ export const probeHostedTypeDbCloud = action({
       distribution: probe.distribution,
       version: probe.version,
       latencyMs: probe.latencyMs,
-      httpAddress: config.httpAddress,
-      tlsEnabled: process.env.TYPEDB_TLS_ENABLED === 'true',
+      tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
       executionAuthority: 'none' as const,
     };
   },
 });
 
 /**
- * Executes an allowlisted graph query inside Convex Cloud against hosted TypeDB Cloud
- * (`aci_macro_intelligence_staging`) when the caller's web server does not hold `TYPEDB_PASSWORD`.
+ * Allowlisted graph query for a signed-in human researcher. The caller identity is taken from the verified
+ * token; the previous client-supplied `callerId` argument (and anonymous access) has been removed.
  */
 export const executeAllowlistedCloudGraphQuery = action({
   args: {
-    callerId: v.string(),
     requestJson: v.string(),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    const rawIdentity = await ctx.auth.getUserIdentity();
+    if (!rawIdentity) throw new Error('Sign in required');
+    const identity = verifyIdentityClaims(rawIdentity);
+    if (identity.actorType !== undefined && identity.actorType !== 'human') {
+      throw new Error('Model or automated actors cannot query the research graph');
+    }
     const rawInput = JSON.parse(args.requestJson);
     const dataset = loadInitialAcceptanceDataset();
     return await executeAllowlistedGraphQuery(rawInput, {
-      callerId: args.callerId,
+      callerId: identity.tokenIdentifier,
       datasets: [dataset],
       preferLiveTypeDb: true,
     });
   },
 });
 
-/**
- * Executes a verified read-only `match` TypeQL query inside Convex Cloud against
- * hosted TypeDB Cloud (`aci_macro_intelligence_staging`) so server-side query gateways
- * and test suites never need local plaintext `TYPEDB_PASSWORD`.
- */
 export const executeReadOnlyCloudTypeQl = action({
   args: {
     typeql: v.string(),
+    bridgeKey: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
+    assertBridgeKey(args.bridgeKey);
     const trimmed = args.typeql.trim();
+    if (trimmed.length > 20_000) {
+      throw new Error('Security violation: TypeQL query exceeds the permitted size.');
+    }
     const withoutComments = trimmed
       .split('\n')
       .filter((line) => !line.trim().startsWith('#'))
@@ -1080,7 +1128,7 @@ export const executeReadOnlyCloudTypeQl = action({
       .trim();
     if (
       !withoutComments.startsWith('match') ||
-      /\b(insert|delete|put|define|undefine|redefine)\b/i.test(withoutComments)
+      /\b(insert|delete|put|define|undefine|redefine|update)\b/i.test(withoutComments)
     ) {
       throw new Error('Security violation: only read-only match TypeQL queries are permitted.');
     }
@@ -1089,13 +1137,10 @@ export const executeReadOnlyCloudTypeQl = action({
   },
 });
 
-/**
- * Read-only verification action that inspects live TypeDB Cloud (`aci_macro_intelligence_staging`)
- * concept counts and returns a verified projection report without exposing `TYPEDB_PASSWORD`.
- */
 export const verifyHostedTypeDbCloud = action({
-  args: {},
-  handler: async () => {
+  args: { bridgeKey: v.optional(v.string()) },
+  handler: async (_ctx, args) => {
+    assertBridgeKey(args.bridgeKey);
     const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
     const probe = await probeTypeDbServer(config);
     const graphCounts = await inspectLiveTypeDbGraphCounts(config);
@@ -1131,11 +1176,10 @@ export const verifyHostedTypeDbCloud = action({
 });
 
 /**
- * Executes all 5 Macro Case 001 (US to Ireland AI Infrastructure Contagion) graph investigations
- * against hosted TypeDB Cloud and returns source-backed findings,
- * non-double-counted commitment totals, scenario comparisons, and benchmark latency metrics.
+ * Macro Case 001 verification against hosted TypeDB Cloud. Internal: it has no application caller and was
+ * an anonymous public action that anyone could use to drive TypeDB load.
  */
-export const verifyMacroCase001Cloud = action({
+export const verifyMacroCase001Cloud = internalAction({
   args: {},
   handler: async () => {
     return await runMacroCase001GraphInvestigations({
@@ -1159,10 +1203,7 @@ export const reconcileAndVerifyProductionIsolationCloud = internalAction({
     owner: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const owner =
-      args.owner ??
-      process.env.RESEARCH_OWNER_ID ??
-      'https://harmless-akita-9211.clerk.accounts.dev|user_3LjSsuJX398YIJRdss5Q7PqsSH9';
+    const owner = requireExplicitOwner(args.owner);
     const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
 
     // 1. Verify destructive replay protection on production database

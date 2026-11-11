@@ -43,7 +43,7 @@ async function main() {
 
     // Verify Live TypeDB 3.14.2 pill is displayed
     const pillText = await page.textContent('[data-testid="typedb-live-pill"]');
-    if (!pillText?.includes('LIVE (3.14.2)')) {
+    if (!pillText?.includes('REACHABLE (3.14.2)')) {
       throw new Error(`Expected live TypeDB 3.14.2 status pill, got: ${pillText}`);
     }
 
@@ -120,8 +120,8 @@ async function main() {
 
     await page.click('[data-testid="replay-checkpoint-btn"]');
     const recoveredLagText = await page.textContent('[data-testid="projection-lag-pill"]');
-    if (!recoveredLagText?.includes('23/23 Projected (0ms lag)')) {
-      throw new Error(`Expected projection-lag-pill to recover to 23/23 Projected (0ms lag) after checkpoint 0 replay, got: ${recoveredLagText}`);
+    if (!recoveredLagText?.includes('relationships in bundled dataset')) {
+      throw new Error(`Expected projection-lag-pill to return to the bundled-dataset label after checkpoint 0 replay, got: ${recoveredLagText}`);
     }
 
     const desktopDrawerVisible = await page.isVisible('[data-testid="desktop-evidence-drawer"]');

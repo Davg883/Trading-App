@@ -5,13 +5,15 @@ import {
  MAX_STAGING_PAYLOAD_BYTES,
  stagedSubmissionRequestSchema,
 } from '../lib/remote-ops/contracts';
+import {parseAcceptanceToken,pickTurnAuditFields,questionDigest,randomHex,sha256Hex} from './acceptanceNonces';
+import {verifyIdentityClaims} from './authz';
 
 const http=httpRouter();
 
 const headers={
  'Cache-Control':'private, no-store, max-age=0',
  'Pragma':'no-cache',
- 'Vary':'Authorization',
+ 'Vary':'Authorization, X-ACI-Gateway-Authorization',
  'X-Content-Type-Options':'nosniff',
 };
 
@@ -170,6 +172,224 @@ http.route({
    ...(body.jobs?{jobs:body.jobs}:{}),
   });
   return Response.json(res,{status:200,headers});
+ }),
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Evidence-Locked Chat gateway (MVP hardening, work package 2)
+//
+// Server-to-Convex routes for the Next.js chat route. They are the only way to reach the internal nonce and
+// attested audit mutations. Authentication is a dedicated machine secret sent in `X-ACI-Gateway-Authorization`;
+// it proves only that the request comes from the trusted application server. It never establishes who the end
+// user is: the owner comes from the nonce row (acceptance) or from the Convex-verified user JWT (`/turn`).
+// ---------------------------------------------------------------------------------------------------------
+const GATEWAY_HEADER='x-aci-gateway-authorization';
+const MAX_GATEWAY_PAYLOAD_BYTES=1_900_000;
+const nonceM=(name:string)=>makeFunctionReference<'mutation'>(`acceptanceNonces:${name}`);
+const chatM=(name:string)=>makeFunctionReference<'mutation'>(`evidenceChat:${name}`);
+const budgetM=(name:string)=>makeFunctionReference<'mutation'>(`chatBudget:${name}`);
+
+/** Current and (during rotation) previous gateway secrets. A secret shared with another machine credential is refused. */
+function gatewaySecrets():string[]|null{
+ const others=[process.env.OPERATIONS_SCHEDULER_SECRET,process.env.RESEARCH_STAGING_TOKEN].filter(Boolean);
+ const candidates=[process.env.EVIDENCE_CHAT_GATEWAY_SECRET,process.env.EVIDENCE_CHAT_GATEWAY_SECRET_PREVIOUS]
+  .filter((s):s is string=>typeof s==='string'&&s.length>=32);
+ if(!process.env.EVIDENCE_CHAT_GATEWAY_SECRET||process.env.EVIDENCE_CHAT_GATEWAY_SECRET.length<32)return null;
+ if(candidates.some(c=>others.includes(c)))return null;
+ return candidates;
+}
+function gatewayGuard(request:Request):Response|null{
+ const secrets=gatewaySecrets();
+ if(!secrets)return Response.json({error:{code:'not_configured',message:'Evidence chat gateway is not configured.'}},{status:503,headers});
+ const presented=request.headers.get(GATEWAY_HEADER);
+ let ok=false;
+ for(const s of secrets)ok=constantTimeBearerMatch(presented,s)||ok;
+ if(!ok)return Response.json({error:{code:'unauthorized_gateway',message:'Valid evidence chat gateway credential required.'}},{status:401,headers});
+ return null;
+}
+async function gatewayJson(request:Request):Promise<{ok:true;body:Record<string,unknown>}|{ok:false;response:Response}>{
+ const raw=await request.text();
+ if(new TextEncoder().encode(raw).length>MAX_GATEWAY_PAYLOAD_BYTES)return {ok:false,response:Response.json({error:{code:'invalid_request',message:'Payload too large.'}},{status:413,headers})};
+ try{
+  const parsed:unknown=JSON.parse(raw);
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('not an object');
+  // Identity is never accepted from the payload.
+  if('owner' in parsed||'callerId' in parsed)return {ok:false,response:Response.json({error:{code:'forbidden_field',message:'Owner identity cannot be supplied by the caller.'}},{status:400,headers})};
+  return {ok:true,body:parsed as Record<string,unknown>};
+ }catch{
+  return {ok:false,response:Response.json({error:{code:'invalid_request',message:'Invalid JSON payload.'}},{status:400,headers})};
+ }
+}
+const str=(value:unknown,max:number)=>typeof value==='string'&&value.length>0&&value.length<=max?value:null;
+const nonceRejected=(reason:string,violations?:string[])=>Response.json({error:{code:'nonce_rejected',reason,...(violations?{violations}:{})}},{status:reason==='invalid_audit_record'?400:409,headers});
+
+http.route({
+ path:'/api/evidence-chat/acceptance/consume',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const token=str(parsed.body.token,200),question=str(parsed.body.question,1000);
+  const tokenParts=token?parseAcceptanceToken(token):null;
+  if(!tokenParts||!question)return Response.json({error:{code:'invalid_request',message:'token and question are required.'}},{status:400,headers});
+  const reservation=randomHex(32);
+  const result=await ctx.runMutation(nonceM('consumeNonceInternal'),{
+   nonceId:tokenParts.nonceId,
+   secretSha256:await sha256Hex(tokenParts.secret),
+   questionSha256:await questionDigest(question),
+   reservationSha256:await sha256Hex(reservation),
+  }) as {ok:false;reason:string}|{ok:true;owner:string;recordDeadlineMs:number;budget:unknown;context:unknown};
+  if(!result.ok)return nonceRejected(result.reason);
+  return Response.json({owner:result.owner,reservation,recordDeadlineMs:result.recordDeadlineMs,budget:result.budget,context:result.context,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+http.route({
+ path:'/api/evidence-chat/acceptance/record',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const token=str(parsed.body.token,200),reservation=str(parsed.body.reservation,64);
+  const tokenParts=token?parseAcceptanceToken(token):null;
+  const picked=pickTurnAuditFields(parsed.body.turn);
+  if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation)||!picked.ok){
+   return Response.json({error:{code:'invalid_request',message:'token, reservation and a turn containing only audit fields are required.'}},{status:400,headers});
+  }
+  try{
+   // Trusted values are set after the allowlisted turn fields and cannot be supplied by the caller. The
+   // question binding is verified inside the mutation against the hash persisted on the nonce row.
+   const result=await ctx.runMutation(nonceM('recordNonceTurnInternal'),{
+    ...picked.turn,
+    nonceId:tokenParts.nonceId,
+    secretSha256:await sha256Hex(tokenParts.secret),
+    reservationSha256:await sha256Hex(reservation),
+   }) as {ok:false;reason:string;violations?:string[]}|{ok:true;auditId:string;duplicate:boolean};
+   if(!result.ok)return nonceRejected(result.reason,result.violations);
+   return Response.json({auditId:result.auditId,duplicate:result.duplicate,executionAuthority:'none'},{status:200,headers});
+  }catch{
+   // Argument-validator failures (unknown or mistyped turn fields) are reported without echoing the payload.
+   return Response.json({error:{code:'invalid_request',message:'Turn record failed schema validation.'}},{status:400,headers});
+  }
+ }),
+});
+
+http.route({
+ path:'/api/evidence-chat/acceptance/fail',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const token=str(parsed.body.token,200),reservation=str(parsed.body.reservation,64),failureCode=str(parsed.body.failureCode,60);
+  const tokenParts=token?parseAcceptanceToken(token):null;
+  if(!tokenParts||!reservation||!failureCode)return Response.json({error:{code:'invalid_request',message:'token, reservation and failureCode are required.'}},{status:400,headers});
+  const result=await ctx.runMutation(nonceM('failNonceInternal'),{
+   nonceId:tokenParts.nonceId,
+   secretSha256:await sha256Hex(tokenParts.secret),
+   reservationSha256:await sha256Hex(reservation),
+   failureCode,
+  }) as {ok:boolean;reason?:string};
+  if(!result.ok)return nonceRejected(result.reason??'not_consumed');
+  return Response.json({failed:true,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/** Resolves the verified human owner of a gateway request, or returns the refusal response. */
+async function gatewayOwner(ctx:{auth:{getUserIdentity():Promise<import('convex/server').UserIdentity|null>}}):Promise<{ok:true;owner:string}|{ok:false;response:Response}>{
+ const rawIdentity=await ctx.auth.getUserIdentity();
+ if(!rawIdentity)return {ok:false,response:Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401,headers})};
+ try{
+  const identity=verifyIdentityClaims(rawIdentity);
+  if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('automated actor');
+  return {ok:true,owner:identity.tokenIdentifier};
+ }catch{
+  return {ok:false,response:Response.json({error:{code:'forbidden_identity',message:'This identity cannot use research chat.'}},{status:403,headers})};
+ }
+}
+
+/**
+ * Atomic paid-inference budget reservation for a signed-in user (pre-merge risk H2). Requires the gateway
+ * credential and the user's verified JWT. The caller must not call the paid provider unless this returns 200.
+ */
+http.route({
+ path:'/api/evidence-chat/budget/reserve',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const reservation=randomHex(32);
+  const result=await ctx.runMutation(budgetM('reserveChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(reservation),source:'gateway'}) as {ok:true;spentGbp:number;ceilingGbp:number;expiresAtMs:number}|{ok:false;reason:string;spentGbp:number;ceilingGbp:number};
+  if(!result.ok)return Response.json({error:{code:result.reason,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp}},{status:result.reason==='rate_limited'?429:409,headers});
+  return Response.json({reservation,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp,expiresAtMs:result.expiresAtMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/**
+ * reserved -> in_flight for a signed-in user's reservation (Correction 2). The caller must not call the paid
+ * provider unless this returns 200. Cross-owner and expired reservations are refused.
+ */
+http.route({
+ path:'/api/evidence-chat/budget/start',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const budgetReservation=parsed.body.budgetReservation;
+  if(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))return Response.json({error:{code:'invalid_request',message:'budgetReservation is required.'}},{status:400,headers});
+  const result=await ctx.runMutation(budgetM('startChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(budgetReservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
+  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/** Starts the budget reservation taken at nonce consumption (Correction 2). Required before a paid call. */
+http.route({
+ path:'/api/evidence-chat/acceptance/start',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const token=str(parsed.body.token,200),reservation=str(parsed.body.reservation,64);
+  const tokenParts=token?parseAcceptanceToken(token):null;
+  if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation))return Response.json({error:{code:'invalid_request',message:'token and reservation are required.'}},{status:400,headers});
+  const result=await ctx.runMutation(nonceM('startAcceptanceBudgetInternal'),{nonceId:tokenParts.nonceId,secretSha256:await sha256Hex(tokenParts.secret),reservationSha256:await sha256Hex(reservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
+  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
+ }),
+});
+
+/**
+ * Attested audit record for an ordinary signed-in chat turn. Requires BOTH the gateway credential (the request
+ * comes from the application server, not a browser) and the end user's Convex-verified JWT in `Authorization`
+ * (who the turn belongs to). Either one alone is refused.
+ */
+http.route({
+ path:'/api/evidence-chat/turn',
+ method:'POST',
+ handler:httpActionGeneric(async(ctx,request)=>{
+  const denied=gatewayGuard(request);if(denied)return denied;
+  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const owner=who.owner;
+  const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
+  const picked=pickTurnAuditFields(parsed.body.turn);
+  if(!picked.ok)return Response.json({error:{code:'invalid_request',message:'turn must contain only audit fields.'}},{status:400,headers});
+  const budgetReservation=parsed.body.budgetReservation;
+  if(budgetReservation!==undefined&&(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))){
+   return Response.json({error:{code:'invalid_request',message:'budgetReservation must be the value returned by the reserve route.'}},{status:400,headers});
+  }
+  try{
+   // Owner, provenance and the reservation digest come only from the verified token and this route; applied last.
+   const result=await ctx.runMutation(chatM('recordEvidenceChatTurnInternal'),{
+    ...picked.turn,
+    owner,
+    recordedVia:'server_gateway',
+    ...(typeof budgetReservation==='string'?{budgetReservationSha256:await sha256Hex(budgetReservation)}:{}),
+   }) as {auditId:string;duplicate:boolean};
+   return Response.json({auditId:result.auditId,duplicate:result.duplicate,executionAuthority:'none'},{status:200,headers});
+  }catch{
+   return Response.json({error:{code:'invalid_request',message:'Turn record failed validation.'}},{status:400,headers});
+  }
  }),
 });
 

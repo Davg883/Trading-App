@@ -281,6 +281,12 @@ export interface PartAQualityGateAudit {
 }
 
 export interface LiveGeminiThesisInferenceRecord {
+  /** MVP hardening WP6: how these telemetry values were obtained. */
+  telemetryProvenance: {
+    kind: 'hand_entered_constant';
+    verified: false;
+    note: string;
+  };
   executedAtIso: string;
   turnId: string;
   bundleId: string;
@@ -777,9 +783,16 @@ export const MACRO_CLAIM_VERIFICATION_AUDITS: readonly MacroClaimVerificationAud
 ] as const;
 
 /**
- * Verified Live Gemini Inference Record captured against Vercel Production / Google GenAI SDK (`gemini-2.5-flash` / `gemini-3.6-flash` allowlist).
+ * Live Gemini inference record as reported in an earlier phase. CORRECTION (MVP hardening WP6, 10 Nov 2026):
+ * these values are an unverified, hand-entered claim; see `telemetryProvenance`. The export name is kept for
+ * compatibility and does not mean the record has been verified.
  */
 export const VERIFIED_LIVE_GEMINI_THESIS_INFERENCE: LiveGeminiThesisInferenceRecord = {
+  telemetryProvenance: {
+    kind: 'hand_entered_constant',
+    verified: false,
+    note: 'Hand-entered constant in source code, not a record read from the audit log or returned by the provider at runtime. The same request id appears in lib/graph/chat-benchmark-50.ts with different token counts (3,103 / 527 / 98 thinking) and a different cost, so these figures cannot all be provider observations. Treat as an unverified claim until matched to a provider-side log or the evidenceChatAudit row.',
+  },
   executedAtIso: '2026-11-09T21:38:27Z',
   turnId: 'chat-7a521cb1f5-1794260270531',
   bundleId: 'bundle-7a521cb1f559b2a3',

@@ -44,12 +44,32 @@ export const ALLOWLISTED_GEMINI_MODELS = [
 const INPUT_COST_GBP_PER_TOKEN = 0.117 / 1_000_000;
 const OUTPUT_COST_GBP_PER_TOKEN = 0.468 / 1_000_000;
 
+// PROCESS-LOCAL limiter. On serverless hosting each instance has its own Map and instances are recycled, so
+// this bounds bursts within one warm instance only. It is NOT a deployment-wide rate limit and must not be
+// described as one. Cost ceilings and the shared per-owner turn limit are enforced from Convex instead.
 const callerChatRateWindow = new Map<string, number[]>();
 let cachedVerifiedModelEndpoint: {
   modelId: string;
   verifiedAtMs: number;
 } | null = null;
 const MODEL_ENDPOINT_CACHE_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Classifies a failed provider call for budget accounting. A timeout or transport failure may still have been
+ * processed (and billed) by the provider, so its cost is unknown; an explicit error response was not.
+ */
+export function classifyProviderFailure(err: unknown): 'error_response' | 'timeout_or_transport' | 'unknown' {
+  const e = err as { name?: unknown; message?: unknown; status?: unknown; code?: unknown } | null;
+  const name = typeof e?.name === 'string' ? e.name : '';
+  const message = typeof e?.message === 'string' ? e.message : String(err ?? '');
+  if (name === 'AbortError' || name === 'TimeoutError' || /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|fetch failed|network/i.test(message)) {
+    return 'timeout_or_transport';
+  }
+  if (typeof e?.status === 'number' || /\bHTTP [45]\d\d\b|\b(INVALID_ARGUMENT|PERMISSION_DENIED|RESOURCE_EXHAUSTED|NOT_FOUND|FAILED_PRECONDITION|UNAUTHENTICATED)\b|"code":\s*[45]\d\d/.test(message)) {
+    return 'error_response';
+  }
+  return 'unknown';
+}
 
 export function checkGeminiChatRateLimit(
   callerId: string,
@@ -939,6 +959,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
         modelVerifiedViaEndpoint: false,
         generationMode: 'abstention_only',
         providerStatus: 'provider_error',
+        providerFailureKind: 'simulated',
         latencyMs: Math.max(1, Date.now() - startMs),
         inputTokens: 0,
         outputTokens: 0,
@@ -1025,7 +1046,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
         inputTokens: 0,
         outputTokens: 0,
         cachedTokens: 0,
-        estimatedCostGbp: estRequestCostGbp,
+        // The request was refused before any provider call, so no cost was incurred or may be recorded.
+        estimatedCostGbp: 0,
         actualCostGbp: 0,
         errorCode: 'budget_exceeded',
         sanitisedError: reason,
@@ -1061,10 +1083,12 @@ export async function generateAndValidateEvidenceLockedAnswer(
         modelId: `${modelId} (deterministic-evidence-verifier)`,
         modelVerifiedViaEndpoint: false,
         generationMode: 'deterministic_evidence_synthesis',
-        providerStatus: validatedAnswer.supportStatus === 'unsupported' ? 'disabled_by_default' : 'succeeded',
+        // No provider request is made on this path: it must never be reported as a provider success,
+        // and locally estimated sizes must never be reported as provider token usage.
+        providerStatus: 'not_invoked',
         latencyMs: Math.max(1, Date.now() - startMs),
-        inputTokens: bundle.estimatedBundleTokens,
-        outputTokens: Math.ceil(JSON.stringify(validatedAnswer).length / 4),
+        inputTokens: 0,
+        outputTokens: 0,
         cachedTokens: 0,
         estimatedCostGbp: 0,
         actualCostGbp: 0,
@@ -1136,8 +1160,9 @@ export async function generateAndValidateEvidenceLockedAnswer(
         generationMode: 'deterministic_evidence_synthesis',
         providerStatus: statusCode,
         latencyMs: Math.max(1, Date.now() - startMs),
-        inputTokens: bundle.estimatedBundleTokens,
-        outputTokens: Math.ceil(JSON.stringify(validatedAnswer).length / 4),
+        // Deterministic fallback: no provider tokens were consumed, so none are reported.
+        inputTokens: 0,
+        outputTokens: 0,
         cachedTokens: 0,
         estimatedCostGbp: 0,
         actualCostGbp: 0,
@@ -1628,6 +1653,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
       modelVerifiedViaEndpoint: endpointVerified,
       generationMode: 'abstention_only',
       providerStatus: 'provider_error',
+      providerFailureKind: classifyProviderFailure(lastError),
       latencyMs: Math.max(1, Date.now() - startMs),
       inputTokens: 0,
       outputTokens: 0,

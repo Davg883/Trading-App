@@ -4,6 +4,7 @@ import {verifyBrokerVaultSelfTest} from "../lib/brokers/vault";
 import {resolveGeminiApiKey} from "../lib/graph/gemini-provider-adapter";
 import {researchFeed} from "../lib/portfolio/research-feed";
 import {fetchLiveOperationsOverview} from "../lib/remote-ops/server";
+import {executionPermitted} from "../lib/trading/execution-boundary";
 import {buildWorkspaceConnectionsReport} from "../lib/remote-ops/workspace-connections";
 import "./command-centre.css";
 import "./broker-sync.css";
@@ -12,7 +13,7 @@ export const dynamic="force-dynamic";
 export default async function Home(){
   const configured=Boolean(process.env.NEXT_PUBLIC_CONVEX_URL&&process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY&&process.env.CLERK_SECRET_KEY);
   // Display only: the homepage reads the server execution flags and cannot change them.
-  const flags={demo:process.env.DEMO_TRADING_ENABLED==="true",live:process.env.LIVE_TRADING_ENABLED==="true"};
+  const flags={demo:executionPermitted()&&process.env.DEMO_TRADING_ENABLED==="true",live:executionPermitted()&&process.env.LIVE_TRADING_ENABLED==="true"};
   const baseFeed=researchFeed();
   const liveOps=await fetchLiveOperationsOverview();
   const latestMap=new Map((liveOps?.marketData?.latestBySymbol??[]).map(o=>[o.symbol,o]));

@@ -1,3 +1,4 @@
+import os
 import unittest
 from worker.graph_projection import (
     compute_deterministic_projection_key,
@@ -23,6 +24,10 @@ class TestGraphProjectionWorker(unittest.TestCase):
         self.assertTrue(key1.startswith("proj:"))
         self.assertEqual(len(key1), 5 + 64)
 
+    @unittest.skipUnless(
+        os.environ.get("ACI_LIVE_TYPEDB_TESTS") == "1",
+        "live TypeDB integration test; set ACI_LIVE_TYPEDB_TESTS=1 and install the typedb driver",
+    )
     def test_live_typedb_grpc_driver_verification(self) -> None:
         dataset = load_initial_acceptance_dataset()
         report = verify_live_typedb_grpc()

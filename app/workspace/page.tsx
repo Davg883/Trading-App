@@ -6,6 +6,7 @@ import {
   resolveGeminiApiKey,
 } from '../../lib/graph/gemini-provider-adapter';
 import { fetchLiveOperationsOverview } from '../../lib/remote-ops/server';
+import { executionPermitted } from '../../lib/trading/execution-boundary';
 import { buildWorkspaceConnectionsReport } from '../../lib/remote-ops/workspace-connections';
 
 export const dynamic = 'force-dynamic';
@@ -59,8 +60,8 @@ export default async function WorkspacePage() {
     modelProviderConfigured,
     brokerVaultKeyConfigured: vaultReady,
     brokerStorageConfigured: Boolean(configured && vaultReady),
-    liveTradingEnabled: process.env.LIVE_TRADING_ENABLED === 'true',
-    demoTradingEnabled: process.env.DEMO_TRADING_ENABLED === 'true',
+    liveTradingEnabled: executionPermitted() && process.env.LIVE_TRADING_ENABLED === 'true',
+    demoTradingEnabled: executionPermitted() && process.env.DEMO_TRADING_ENABLED === 'true',
   });
   return <main style={{maxWidth:1100,margin:'40px auto',padding:24}}>
     <Link href="/">← Back to research demo</Link>
