@@ -245,3 +245,9 @@ The open risks from §2 (H3 rollout-window cancel path, H4 Convex admin key in N
 5. Deploy only with owner approval, in the order in §11.5, followed by the post-deployment checks in `03` §7.
 
 This document must not be read as production-verified.
+
+---
+
+## 12. Final targeted corrections (11 November 2026)
+
+Five further corrections (credential ambiguity, durable budget reservation states, fail-closed audit recording, strict inner evidence validation, and deployment identifiers in public status text) are recorded in `12-final-corrections-report.md`, commits `c9c274b`, `8f382d3`, `f892962`, `74fd033` and `90de0a3`. The decision in §11.7 is unchanged: **approve with conditions as a release candidate for independent review; not for merge.** The added staging requirements are listed in `12` §11.
