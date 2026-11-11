@@ -53,11 +53,27 @@ The P4 decision is accepted. The owner set the following **provisional** expiry 
 - Entry-authorisation expiry stays **separate from position exit rules**.
 - The parameters are frozen at formal experiment registration. They are reviewed using forward-recorded evidence; any change creates a new strategy version.
 
-### Points for confirmation at registration
+## 5. Final rules clarification (owner decision, 11 November 2026)
 
-| Point | Specification default (assumption, not owner instruction) |
+This section replaces the earlier "points for confirmation"; the owner has decided each of them. The rules are specified in `01` §8.1.1 and §8.1.2 and tested by `07` A24 and A25.
+
+| Subject | Owner decision |
 |---|---|
-| What "invalidated" means for S1 | The price reaches the stop level, or trades above the limit price, before an entry fill |
-| Invalidation for S2 and S3 | Not applied, because the owner specified it for S1 only. Entry is still impossible at or below the stop, because the risk engine rejects a plan with no positive distance to stop. |
-| Boundary between "pre-market" and "regular-session" candidates | `decidedAtMs` before or after 09:30 New York on the entry session |
+| S1 early invalidation | An unfilled setup is invalidated if the original price invalidation level is reached, a defined entry range is breached, or the verified news thesis is materially invalidated. |
+| S1 buy limit | A price moving beyond a buy-limit order does **not** automatically invalidate the signal. The order may simply stay unfilled until expiry. |
+| S2 and S3 early invalidation | Common safeguards: stale or erroneous data, exchange halts, exhausted risk limits and materially invalidated research theses. |
+| Price thresholds | No new discretionary price thresholds without a separately registered strategy rule. |
+| Pre-market classification | 09:30 America/New_York is the normal regular-session opening, adjusted for official exchange holidays and exceptional schedules. |
+| Pre-market expiries | S2 10:00 and S3 11:00 New York are kept. |
+| Unchanged | The human-approval requirement, the risk limits and the research-only execution boundary. |
 
+### Specification details still to be fixed at registration
+
+These are drafting choices in `01` §8.1.1, not owner instructions:
+
+| Detail | Current drafting |
+|---|---|
+| S1 "defined entry range" | No range exists in the S1 rule today, so the condition is inactive. A range takes effect only when it is registered as part of the S1 rule. |
+| Definition of "materially invalidated" | A source correction or retraction, a later validated expectation-lowering item on the same subject, or a reviewer-recorded invalidation with evidence |
+| Whether invalidation is final | Final: a setup is never reinstated when a condition (for example stale data) clears |
+| Common safeguards and S1 | Stale data, halts and risk limits keep blocking S1 entries under `02` §3 but are not recorded as S1 early invalidations |
