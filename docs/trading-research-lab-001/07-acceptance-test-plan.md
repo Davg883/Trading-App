@@ -13,7 +13,7 @@ Tests are hermetic: no live market data, no paid models, no broker calls. The ex
 | A7 | 6 Record before outcome | Attempt to write a decision whose `decidedAtMs` is after the first outcome bar it depends on | Refused |
 | A8 | 7 Deterministic sizing and costs | Golden cases, including the notional cap, minimum order, gap through stop, and FX | Exact quantities, effective R and cost components |
 | A9 | 10 Metrics | Fixture trade set | Net P&L, drawdown, win rate, expectancy (with bootstrap CI), profit factor, costs, excess vs QQQ equal reference values computed independently in the test |
-| A10 | 9 Human review | Approve-each mode: no order before approval. Veto-window mode: a veto inside the window prevents the order. Override: WAIT converted to TRADE is journaled as human-originated | Each journal entry is present; originals unchanged |
+| A10 | 9 Human review | No order intent before approval; for each of approve, amend, reject, defer and convert WAIT to TRADE, the event is journaled with reviewer, time and latency; an amendment that raises risk above the proposal or a limit is refused | Each journal entry is present; originals unchanged; only approve and amend produce intents |
 | A11 | 12 Duplicates and fills | Two simultaneous intents for one decision; a retried intent; an ambiguous broker response (mocked) | Exactly one order claim; retry refused; ambiguous goes to `unknown` and blocks the symbol until reconciled; intended vs model vs demo fill recorded |
 | A12 | 8 Demo only | Source and **built bundle** contain no live base URL; client construction with a non-demo environment throws; the research app's boundary suite still passes | All pass. **Staging:** a demo order round-trip on the Trading 212 demo account |
 | A13 | 13 Limits and halts | Daily, weekly and drawdown loss limits; exposure and cluster caps; data staleness; kill switch | Each blocks new entries inside the claim mutation, not only in the UI |
@@ -22,6 +22,10 @@ Tests are hermetic: no live market data, no paid models, no broker calls. The ex
 | A16 | Security | Unsigned, expired, altered or replayed intents; secret reuse | All refused |
 | A17 | Statistics guard | The report generator after L4 | Report template contains no "profitable" or "beats" language unless the pre-registered L5 criteria are met (lint-style check) |
 | A18 | NVIDIA case | Registration before release; post-release decision references it; attempt to edit the pre-release entry | Edit impossible; correction creates a new entry; both are reported |
+| A19 | P4 D3, D6 Signal immutability | Journal a TRADE; apply every kind of review event; recompute R1 | R1 results and the decision's `entrySha256` are byte-identical before and after; the decision is journaled before it is visible in the queue |
+| A20 | P4 D5 Expiry and missed opportunities | Leave a decision unreviewed past expiry; then attempt approval; approve one whose limit never fills | `review_expired` recorded and approval refused; `order_missed` recorded; both appear in R1 and as no trade in R2 |
+| A21 | P4 D1, D2 No automatic execution | Static check that no scheduled function, timer or configuration value issues an order intent; time-advance test with a pending decision and no review | No intent is created; the paper service refuses an intent without a matching approval event |
+| A22 | P4 D4 Two records | Fixture set with approvals, rejections, amendments, delays and misses | R1 and R2 metrics match an independent calculation; the attribution terms sum to R1 − R2 |
 
 **Staging tests (owner-approved, non-production)**, mapped to the requirements above:
 - A12: a demo order round trip;

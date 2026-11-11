@@ -19,7 +19,7 @@ It is a laboratory, not a trading product:
 | P1 | Security PR Davg883/Trading-App#1 has had an **independent** security review and has been **safely released** to production, with post-deployment checks recorded | The lab reuses its identity, audit, budget-reservation, evidence-validation and research-only boundary |
 | P2 | Branch protection on `main` requires the CI gate | The lab adds order-capable code; nothing unreviewed may reach production |
 | P3 | A licensed or otherwise permitted **news** feed and an **intraday price** source are contracted (see `03-data-source-assessment.md`) | Without them, three of the four signal inputs and every intraday entry are missing |
-| P4 | Owner decision recorded on whether automated **demo** orders are permitted (with human veto) or every demo order needs explicit approval | Requirement 9 allows either; the security design differs slightly |
+| P4 | ~~Owner decision on automated demo orders versus explicit approval~~ **Met (11 Nov 2026):** every demo order requires explicit human approval; no veto-window execution; separate autonomous-shadow and human-approved records (`08-owner-decision-p4.md`) | Specification updated; not implementation authority |
 | P5 | Budget for data, model inference and engineering approved (see `04-cost-model.md` §4) | |
 
 ## 3. Deliverables in this folder
@@ -33,6 +33,7 @@ It is a laboratory, not a trading product:
 | `05-simulation-methodology.md` | Forward recording, ledgers, benchmark, metrics, statistics, NVIDIA case study |
 | `06-security-architecture.md` | Separation from the research app, demo-only execution, journal integrity |
 | `07-acceptance-test-plan.md` | Tests mapped to the 14 product requirements |
+| `08-owner-decision-p4.md` | Owner decision P4: explicit approval of every demo order; shadow and human-approved records; Phases A–C |
 
 ## 4. Headline limitations, stated up front
 

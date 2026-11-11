@@ -7,7 +7,7 @@
 3. **Models and research agents have no execution authority.**
    - They classify evidence only.
    - Sizes, prices, stops and orders come from deterministic code.
-   - Orders are placed only after the human review step required by the selected mode.
+   - A demo order is placed only after a named reviewer has explicitly approved that decision (owner decision P4). No timer, default or configuration value can cause an order. There is no veto-window mode.
 4. **Every decision, override, order intent, fill and correction is journaled** in an append-only, hash-chained record before it can affect anything downstream.
 
 ## 2. Components and trust boundaries
@@ -17,7 +17,7 @@
 | Research app (existing Next.js + Convex) | Evidence, decisions, journal, review state; model budget | Record decisions; sign **order intents** for approved TRADE decisions | Hold broker credentials for orders; call order endpoints |
 | **Paper execution service** (new, separate deployment and separate Convex project) | Demo API key (its own vault key); order state machine; demo fills | Place, reconcile and cancel orders on `demo.trading212.com` only | Reach the live host; read research evidence beyond the intent; accept unsigned intents |
 | AI research assistant | Read-only evidence bundle | Return a validated classification | Anything else |
-| Reviewer (human, explicit reviewer grant) | — | Approve, veto, override, halt | Edit or delete journal entries |
+| Reviewer (human, explicit reviewer grant) | — | Approve, amend (within limits), reject, defer, convert WAIT to TRADE, halt | Edit or delete journal entries; alter the original decision; approve after expiry |
 
 ## 3. Demo-only enforcement (defence in depth)
 
@@ -36,7 +36,8 @@
   - the signature;
   - expiry (60 seconds);
   - that the journal entry exists, through an authenticated read-only gateway route;
-  - that the entry's approval state matches the review mode;
+  - that an `approved` or `amended` review event exists for the decision, made by a reviewer holding a grant, before `decisionExpiresAtMs`;
+  - that the intent's plan hash equals the approved plan (original or amended);
   - that no halt is active.
 - **Idempotency:** one order per `decisionId`, enforced by a unique index and the existing claim pattern (`claimSubmissionInternal`: a single atomic claim, exactly one submit attempt, no automatic resubmission). An ambiguous broker response moves the order to `unknown` and blocks the symbol until it is reconciled.
 - **Stops and targets** are managed by the service as order rules (stop orders where the broker supports them, otherwise monitored exits). Every exit order is also journaled with its triggering rule.
@@ -66,6 +67,8 @@
 | Silent revision of a recorded prediction | Hash chain; corrections only as new entries; external exports |
 | Live-environment access by mistake | Section 3 layers; no live code path exists to enable |
 | Model cost runaway | Existing budget reservation (fail closed) |
+| An order placed without human approval (timer, default, dormant automation) | The intent is issued only from a review event; the paper service re-checks it; no scheduled function can issue intents; `07` A21 |
+| A reviewer rewrites the AI's original signal | Decision entries have no update path; amendments are new plans with new hashes; R1 reads decision entries only |
 | Credential leakage from the research app | The research app holds no order credential at all |
 
 ## 7. Prerequisites from the security PR

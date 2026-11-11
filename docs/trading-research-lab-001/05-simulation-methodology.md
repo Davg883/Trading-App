@@ -12,7 +12,18 @@
 4. **Frozen rules.** Strategy thresholds, the universe, cost parameters and the risk model are hashed into `strategyVersion` and `experimentId` at registration. Any change starts a new version, and results are never pooled across versions.
 5. **Survivorship.** The universe is fixed at registration, and delisted or halted names stay in the denominators.
 
-## 2. Two ledgers per trade
+## 2. Two performance records (owner decision P4) and two fill ledgers
+
+The two **performance records** are kept separately from the first decision. They are never pooled.
+
+| Record | Contains | Source of trades | Fills |
+|---|---|---|---|
+| **R1: autonomous shadow strategy** | What would have happened with no human intervention | Every TRADE decision exactly as journaled, at its `decidedAtMs`, with its original plan; review events are never read | Model ledger only |
+| **R2: human-approved demo strategy** | What actually happened | Approved and amended orders, entered at approval time; rejected, expired and missed decisions appear as no trade; human-originated trades are a separate cohort | Demo ledger (actual fills), with a model-ledger fill at the approval time for comparison |
+
+Each record has its own equity curve, risk state and halts (`02` §6). The two **fill ledgers** below are the fill rules used to price them.
+
+### 2.1 Fill ledgers
 
 | Ledger | Fill rule | Purpose |
 |---|---|---|
@@ -32,9 +43,16 @@ Demo fills are **not** evidence of live fill quality: demo matching may differ f
 
 - Outcomes are computed by deterministic code from licensed, corporate-action-adjusted prices after each exit.
 - WAIT and REJECT decisions are evaluated on their shadow plans with the same rules. This measures whether the filters remove losing trades or winning ones.
-- Human-originated trades (WAIT converted to TRADE by a reviewer) and vetoed trades are reported as separate cohorts.
+- Human-originated trades (WAIT converted to TRADE by a reviewer) are a separate cohort in R2 and never enter R1.
+- **Intervention attribution** (the basis for Phase B). The difference R1 − R2, per decision and in total, is split into:
+  - **rejection effect:** the R1 outcome of rejected decisions;
+  - **missed-opportunity effect:** the R1 outcome of `review_expired` and `order_missed` decisions, reported separately;
+  - **amendment effect:** amended plan versus original plan, both priced on the model ledger at approval time;
+  - **delay effect:** the original plan on the model ledger at approval time versus at `decidedAtMs`;
+  - **execution effect:** the demo fill versus the model-ledger fill at approval time.
+- Review latency (median, p95) and the counts of each review event are reported for every strategy.
 
-## 5. Metrics (per strategy, per cohort, per ledger; gross and net)
+## 5. Metrics (per record, per strategy, per cohort, per ledger; gross and net)
 
 | Metric | Definition |
 |---|---|
