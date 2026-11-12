@@ -47,6 +47,9 @@ export interface MacroDataRoomProps {
   dataset: MacroGraphDataset;
   benchmark: BenchmarkComparisonReport;
   initialView?: DataRoomViewKey;
+  initialAsOfMs?: number;
+  initialTemporalBasis?: TemporalBasis;
+  initialSelectedRelationshipId?: string;
   liveTypeDbStatus: {
     reachable: boolean;
     authenticated?: boolean;
@@ -123,16 +126,19 @@ export default function MacroDataRoom({
   dataset,
   benchmark,
   initialView = 'executive_overview',
+  initialAsOfMs = 1794146400000,
+  initialTemporalBasis = 'receipt',
+  initialSelectedRelationshipId = 'rel-loughton-msft-r2',
   liveTypeDbStatus,
 }: MacroDataRoomProps) {
   const [activeView, setActiveView] = useState<DataRoomViewKey>(initialView);
-  const [asOfMs, setAsOfMs] = useState<number>(1794146400000);
-  const [temporalBasis, setTemporalBasis] = useState<TemporalBasis>('receipt');
+  const [asOfMs, setAsOfMs] = useState<number>(initialAsOfMs);
+  const [temporalBasis, setTemporalBasis] = useState<TemporalBasis>(initialTemporalBasis);
   const [includeSuperseded, setIncludeSuperseded] = useState<boolean>(false);
   const [focalId, setFocalId] = useState<string>('org-nscale');
   const [maxDepth, setMaxDepth] = useState<1 | 2>(2);
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string>(
-    'rel-loughton-msft-r2',
+    initialSelectedRelationshipId,
   );
   const [selectedSourceDocId, setSelectedSourceDocId] = useState<string | null>(null);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
@@ -498,16 +504,18 @@ export default function MacroDataRoom({
     dataset,
   ]);
 
-  const selectedRelationship: MacroRelationship = useMemo(() => {
-    const found =
-      temporalSlice.activeRelationships.find(
-        (r) => r.relationshipId === selectedRelationshipId,
-      ) ??
-      dataset.relationships.find((r) => r.relationshipId === selectedRelationshipId) ??
-      temporalSlice.activeRelationships[0] ??
-      dataset.relationships[0]!;
-    return found;
-  }, [selectedRelationshipId, temporalSlice.activeRelationships, dataset.relationships]);
+  const selectedRelationship: MacroRelationship | null = useMemo(() => {
+    return (
+      dataset.relationships.find((r) => r.relationshipId === selectedRelationshipId) ?? null
+    );
+  }, [selectedRelationshipId, dataset.relationships]);
+
+  const isSelectedRelationshipInActiveSlice = useMemo(() => {
+    if (!selectedRelationship) return false;
+    return temporalSlice.activeRelationships.some(
+      (r) => r.relationshipId === selectedRelationship.relationshipId,
+    );
+  }, [selectedRelationship, temporalSlice.activeRelationships]);
 
   const selectRelationshipForDrawer = (relId: string) => {
     setSelectedRelationshipId(relId);
@@ -521,12 +529,17 @@ export default function MacroDataRoom({
   ) => {
     setSelectedSourceDocId(evidenceId);
     const matchingRel =
+      dataset.relationships.find(
+        (r) =>
+          r.sourceDocIds.includes(evidenceId) &&
+          (fallbackRelIds.length === 0 || fallbackRelIds.includes(r.relationshipId)),
+      ) ??
       dataset.relationships.find((r) => r.sourceDocIds.includes(evidenceId)) ??
-      (fallbackRelIds[0]
-        ? dataset.relationships.find((r) => r.relationshipId === fallbackRelIds[0])
-        : null);
+      null;
     if (matchingRel) {
       setSelectedRelationshipId(matchingRel.relationshipId);
+    } else {
+      setSelectedRelationshipId(`unmatched-source:${evidenceId}`);
     }
     setMobileDrawerOpen(true);
   };
@@ -586,13 +599,12 @@ export default function MacroDataRoom({
     decision: 'approved' | 'rejected',
   ) => {
     const nowMs = Date.now();
-    const reviewerId =
-      rel.reviewedBy ?? 'https://clerk.capital.aiguides.co.uk|reviewer_human';
+    const reviewerId = 'demo:browser_local_reviewer';
     const note =
       reviewNoteInput.trim() ||
       (decision === 'approved'
-        ? 'Approved for Convex graphProjectionOutbox promotion.'
-        : 'Rejected pending primary SEC filing verification.');
+        ? 'Browser-local demo approval (not persisted to Convex outbox).'
+        : 'Browser-local demo rejection (not persisted to Convex).');
 
     if (decision === 'approved') {
       const gov = validateRelationshipGovernance(rel, dataset.relationships, sourcesById);
@@ -639,26 +651,28 @@ export default function MacroDataRoom({
     }
   };
 
-  const handleSimulateDeadLetter = (rel: MacroRelationship) => {
+  const handleSimulateDeadLetter = (rel: MacroRelationship | null) => {
+    const targetRel = rel ?? dataset.relationships[0];
+    if (!targetRel) return;
     const nowMs = Date.now();
     const projKey = computeDeterministicProjectionKey(
       'public_research',
       'public_research',
-      rel,
+      targetRel,
     );
-    setSimulatedOutboxFailureRelId(rel.relationshipId);
+    setSimulatedOutboxFailureRelId(targetRel.relationshipId);
     setReviewerDecisions((prev) => ({
       ...prev,
-      [rel.relationshipId]: {
-        relationshipId: rel.relationshipId,
-        version: rel.version,
+      [targetRel.relationshipId]: {
+        relationshipId: targetRel.relationshipId,
+        version: targetRel.version,
         decision: 'approved',
-        reviewer: rel.reviewedBy ?? 'https://clerk.capital.aiguides.co.uk|reviewer_human',
+        reviewer: 'demo:browser_local_reviewer',
         reviewedAtMs: nowMs,
-        reviewNote: 'Outbox lease attempt failed during simulated TypeDB downtime.',
-        sourceDocIds: rel.sourceDocIds,
-        epistemicStatus: rel.epistemicStatus,
-        contractualStatus: rel.contractualStatus,
+        reviewNote: 'Browser-local demo: simulated outbox lease failure.',
+        sourceDocIds: targetRel.sourceDocIds,
+        epistemicStatus: targetRel.epistemicStatus,
+        contractualStatus: targetRel.contractualStatus,
         projectionKey: projKey,
         outboxStatus: 'dead_letter',
         lastError: 'Simulated TypeDB HTTP timeout (attempt 3/3 -> dead_letter)',
@@ -692,7 +706,60 @@ export default function MacroDataRoom({
     </span>
   );
 
-  const renderEvidenceDrawerContent = (rel: MacroRelationship, isMobile: boolean = false) => {
+  const renderEvidenceDrawerContent = (
+    rel: MacroRelationship | null,
+    isMobile: boolean = false,
+  ) => {
+    if (!rel) {
+      return (
+        <div data-testid="evidence-drawer-content" className="dr-drawer-inner">
+          <div className="dr-drawer-header">
+            <div>
+              <span className="eyebrow">IMMUTABLE EVIDENCE DRAWER</span>
+              <h3 style={{ margin: '6px 0 4px', fontSize: '15px', color: '#192434' }}>
+                Unmatched Relationship Selection
+              </h3>
+            </div>
+            {isMobile && (
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setMobileDrawerOpen(false)}
+                aria-label="Close evidence drawer"
+              >
+                Close
+              </button>
+            )}
+          </div>
+          <div
+            className="dr-drawer-scrollable-body"
+            data-testid="evidence-drawer-scrollable-body"
+            tabIndex={0}
+            role="region"
+            aria-label="Evidence details and source records"
+          >
+            <div
+              role="alert"
+              data-testid="drawer-no-relationship-notice"
+              style={{
+                background: '#fff5f5',
+                border: '1px solid #feb2b2',
+                borderRadius: '6px',
+                padding: '12px',
+                fontSize: '12px',
+                color: '#742a2a',
+              }}
+            >
+              <strong>No Matching Relationship in Dataset:</strong> Requested relationship ID{' '}
+              <code>{selectedRelationshipId || '(none)'}</code> does not exist in the static
+              demonstration dataset. Supporting evidence from another relationship is{' '}
+              <b>never substituted</b>.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const linkedSources = rel.sourceDocIds
       .map((id) => sourcesById.get(id))
       .filter((s): s is NonNullable<typeof s> => Boolean(s));
@@ -704,7 +771,7 @@ export default function MacroDataRoom({
       <div data-testid="evidence-drawer-content" className="dr-drawer-inner">
         <div className="dr-drawer-header">
           <div>
-            <span className="eyebrow">IMMUTABLE EVIDENCE DRAWER</span>
+            <span className="eyebrow">IMMUTABLE EVIDENCE DRAWER (STATIC FIXTURE)</span>
             <h3 style={{ margin: '6px 0 4px', fontSize: '15px', color: '#192434' }}>
               {rel.relationshipId} (v{rel.version})
             </h3>
@@ -712,6 +779,11 @@ export default function MacroDataRoom({
               {renderEpistemicBadge(rel.epistemicStatus)}
               <span className="tag">{rel.relationType}</span>
               <span className="tag">{rel.contractualStatus}</span>
+              {!isSelectedRelationshipInActiveSlice && (
+                <span className="tag amber" data-testid="drawer-excluded-cutoff-badge">
+                  Excluded at {formatUtcDate(asOfMs)} ({temporalBasis})
+                </span>
+              )}
             </div>
           </div>
           {isMobile && (
@@ -733,265 +805,322 @@ export default function MacroDataRoom({
           role="region"
           aria-label="Evidence details and source records"
         >
+          {!isSelectedRelationshipInActiveSlice && (
+            <div
+              role="status"
+              data-testid="drawer-temporal-exclusion-notice"
+              style={{
+                background: '#fffaf0',
+                border: '1px solid #ecc94b',
+                borderRadius: '6px',
+                padding: '10px 12px',
+                marginBottom: '12px',
+                fontSize: '11px',
+                color: '#744210',
+              }}
+            >
+              <strong>Excluded by Active Historical Cutoff:</strong> Relationship{' '}
+              <code>{rel.relationshipId}</code> (published {formatUtcDate(rel.publishedAtMs)},
+              received {formatUtcDate(rel.receivedAtMs)}) is outside the active point-in-time
+              slice as of <b>{formatUtcDate(asOfMs)}</b> ({temporalBasis} basis). Post-cutoff
+              supporting sources for this relationship are withheld from the active slice, and{' '}
+              <b>another relationship&apos;s evidence is never substituted</b>.
+            </div>
+          )}
+
           <p style={{ fontSize: '12px', color: '#2b394a', marginBottom: '12px' }}>
             {rel.conditionsSummary}
           </p>
 
-        <dl className="dr-drawer-meta">
-          <div>
-            <dt>Principal / Capacity</dt>
-            <dd>
-              {rel.principalAmount !== null
-                ? formatUsdPrincipal(rel.principalAmount, rel.currencyCode)
-                : rel.capacityQuantity !== null && rel.capacityUnit !== null
-                  ? `${rel.capacityQuantity} ${rel.capacityUnit}`
-                  : 'Undisclosed (Null Preserved)'}
-            </dd>
-          </div>
-          <div>
-            <dt>Extraction & Review</dt>
-            <dd>
-              {rel.extractionStatus} · {rel.reviewerStatus}
-            </dd>
-          </div>
-          <div>
-            <dt>Published Timestamp</dt>
-            <dd>{formatUtcDate(rel.publishedAtMs)}</dd>
-          </div>
-          <div>
-            <dt>Received Timestamp</dt>
-            <dd>{formatUtcDate(rel.receivedAtMs)}</dd>
-          </div>
-          <div>
-            <dt>Effective Start → End</dt>
-            <dd>
-              {formatUtcDate(rel.effectiveFromMs)} →{' '}
-              {rel.effectiveToMs ? formatUtcDate(rel.effectiveToMs) : 'Open'}
-            </dd>
-          </div>
-          <div>
-            <dt>Execution Authority</dt>
-            <dd>none (Read-Only Graph)</dd>
-          </div>
-        </dl>
-
-        {supersededTarget && (
-          <div
-            style={{
-              background: '#fff8eb',
-              border: '1px solid #efd5a2',
-              borderRadius: '6px',
-              padding: '10px 12px',
-              marginBottom: '12px',
-              fontSize: '11px',
-            }}
-          >
-            <strong>Non-Destructive Supersession Lineage:</strong> Supersedes{' '}
-            <code>{supersededTarget.relationshipId}</code> (v
-            {supersededTarget.version}, {supersededTarget.contractualStatus}).{' '}
-            <button
-              type="button"
-              className="text-link"
-              onClick={() => setSelectedRelationshipId(supersededTarget.relationshipId)}
-            >
-              Inspect Superseded v1 Record →
-            </button>
-          </div>
-        )}
-
-        <div style={{ marginBottom: '12px' }}>
-          <strong style={{ fontSize: '11px', color: '#516072', display: 'block' }}>
-            TYPED ROLE PARTICIPANTS ({rel.participants.length})
-          </strong>
-          <div className="dr-participants-row">
-            {rel.participants.map((p, idx) => (
-              <span key={`${p.role}-${p.entityId}-${idx}`} className="dr-participant-chip">
-                <b>{p.role}:</b> {entityNameById.get(p.entityId) ?? p.entityId}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <strong
-            style={{
-              fontSize: '11px',
-              color: '#516072',
-              display: 'block',
-              marginBottom: '8px',
-            }}
-          >
-            SUPPORTING PRIMARY & CORROBORATED SOURCES ({linkedSources.length})
-          </strong>
-          {linkedSources.map((src) => (
-            <div
-              key={src.sourceDocId}
-              className="dr-source-item"
-              data-testid={`drawer-source-${src.sourceDocId}`}
-              style={
-                selectedSourceDocId === src.sourceDocId
-                  ? {
-                      border: '2px solid #2b6cb0',
-                      background: '#f0f7ff',
-                    }
-                  : undefined
-              }
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                  fontSize: '10px',
-                  color: '#6b7786',
-                }}
-              >
-                <span>
-                  <b>{src.authority}</b> · {src.kind}
-                </span>
-                <span>SHA-256: {src.contentSha256.slice(0, 12)}…</span>
-              </div>
-              <h4>{src.title}</h4>
-              <div className="dr-source-snippet">
-                Basis: {src.publicationBasis} · Verified immutable source record (
-                <code>{src.sourceDocId}</code>)
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '10px',
-                  color: '#657383',
-                }}
-              >
-                <span>
-                  Pub: {formatUtcDate(src.publishedAtMs)} · Rec:{' '}
-                  {formatUtcDate(src.receivedAtMs)}
-                </span>
-                <a
-                  href={src.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#396b24', fontWeight: 600 }}
-                >
-                  Source Filing ↗
-                </a>
-              </div>
+          <dl className="dr-drawer-meta">
+            <div>
+              <dt>Principal / Capacity</dt>
+              <dd>
+                {rel.principalAmount !== null
+                  ? formatUsdPrincipal(rel.principalAmount, rel.currencyCode)
+                  : rel.capacityQuantity !== null && rel.capacityUnit !== null
+                    ? `${rel.capacityQuantity} ${rel.capacityUnit}`
+                    : 'Undisclosed (Null Preserved)'}
+              </dd>
             </div>
-          ))}
-        </div>
+            <div>
+              <dt>Extraction &amp; Synthetic Review Fixture</dt>
+              <dd data-testid="drawer-synthetic-review-status">
+                {rel.extractionStatus} · {rel.reviewerStatus} (Synthetic Fixture Example)
+              </dd>
+            </div>
+            <div>
+              <dt>Published Timestamp</dt>
+              <dd>{formatUtcDate(rel.publishedAtMs)}</dd>
+            </div>
+            <div>
+              <dt>Received Timestamp</dt>
+              <dd>{formatUtcDate(rel.receivedAtMs)}</dd>
+            </div>
+            <div>
+              <dt>Effective Start → End</dt>
+              <dd>
+                {formatUtcDate(rel.effectiveFromMs)} →{' '}
+                {rel.effectiveToMs ? formatUtcDate(rel.effectiveToMs) : 'Open'}
+              </dd>
+            </div>
+            <div>
+              <dt>Execution Authority</dt>
+              <dd>none (Read-Only Graph)</dd>
+            </div>
+          </dl>
 
-        {/* Stage 4 Human Review & Outbox Promotion Controls */}
-        <div
-          style={{
-            marginTop: '14px',
-            padding: '12px',
-            background: '#f6f8fb',
-            border: '1px solid #d8e1ec',
-            borderRadius: '6px',
-          }}
-          data-testid="drawer-reviewer-promotion"
-        >
-          <strong
-            style={{
-              fontSize: '11px',
-              color: '#192434',
-              display: 'block',
-              marginBottom: '6px',
-            }}
-          >
-            HUMAN REVIEW &amp; OUTBOX PROMOTION (STAGE 4)
-          </strong>
-          <p style={{ fontSize: '11px', color: '#4c5b6d', margin: '0 0 8px' }}>
-            Approving a source document never auto-confirms extracted relationships. Each
-            hyperedge requires explicit reviewer sign-off before promotion into{' '}
-            <code>graphProjectionOutbox</code> and hosted TypeDB Cloud (
-            <code>aci_macro_intelligence_staging</code>).
-          </p>
-          <label
-            htmlFor={`review-note-${rel.relationshipId}`}
-            style={{ fontSize: '10px', fontWeight: 600, display: 'block', marginBottom: '4px' }}
-          >
-            Reviewer Decision Rationale:
-          </label>
-          <input
-            id={`review-note-${rel.relationshipId}`}
-            type="text"
-            data-testid="reviewer-note-input"
-            value={reviewNoteInput}
-            onChange={(e) => setReviewNoteInput(e.target.value)}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              fontSize: '11px',
-              padding: '6px 8px',
-              borderRadius: '4px',
-              border: '1px solid #cbd5e1',
-              marginBottom: '8px',
-            }}
-          />
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="button primary"
-              data-testid="approve-promote-relationship-btn"
-              style={{ padding: '6px 10px', fontSize: '11px' }}
-              onClick={() => handleReviewerDecision(rel, 'approved')}
-            >
-              Approve &amp; Promote to Outbox
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              data-testid="reject-relationship-btn"
-              style={{ padding: '6px 10px', fontSize: '11px' }}
-              onClick={() => handleReviewerDecision(rel, 'rejected')}
-            >
-              Reject Relationship
-            </button>
-          </div>
-          {reviewerDecisions[rel.relationshipId] && (
+          {supersededTarget && (
             <div
-              data-testid="drawer-review-outcome"
               style={{
-                marginTop: '8px',
-                padding: '8px',
-                background:
-                  reviewerDecisions[rel.relationshipId]!.decision === 'approved'
-                    ? '#edf7ed'
-                    : '#fff4f4',
-                border: '1px solid #c6e0c6',
-                borderRadius: '4px',
+                background: '#fff8eb',
+                border: '1px solid #efd5a2',
+                borderRadius: '6px',
+                padding: '10px 12px',
+                marginBottom: '12px',
                 fontSize: '11px',
               }}
             >
-              <div>
-                <b>Decision:</b>{' '}
-                {reviewerDecisions[rel.relationshipId]!.decision.toUpperCase()} ·{' '}
-                <b>Outbox:</b> {reviewerDecisions[rel.relationshipId]!.outboxStatus}
-              </div>
-              <div>
-                <b>Reviewer:</b>{' '}
-                <code>{reviewerDecisions[rel.relationshipId]!.reviewer}</code> ·{' '}
-                {formatUtcDate(reviewerDecisions[rel.relationshipId]!.reviewedAtMs)}
-              </div>
-              {reviewerDecisions[rel.relationshipId]!.projectionKey && (
-                <div style={{ wordBreak: 'break-all', fontSize: '10px', color: '#435365' }}>
-                  <b>Key:</b>{' '}
-                  <code>
-                    {reviewerDecisions[rel.relationshipId]!.projectionKey!.slice(0, 28)}…
-                  </code>
-                </div>
-              )}
-              {reviewerDecisions[rel.relationshipId]!.lastError && (
-                <div style={{ color: '#9c2b2b', marginTop: '4px' }}>
-                  <b>Failure:</b> {reviewerDecisions[rel.relationshipId]!.lastError}
-                </div>
-              )}
+              <strong>Non-Destructive Supersession Lineage:</strong> Supersedes{' '}
+              <code>{supersededTarget.relationshipId}</code> (v
+              {supersededTarget.version}, {supersededTarget.contractualStatus}).{' '}
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => setSelectedRelationshipId(supersededTarget.relationshipId)}
+              >
+                Inspect Superseded v1 Record →
+              </button>
             </div>
           )}
-        </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <strong style={{ fontSize: '11px', color: '#516072', display: 'block' }}>
+              TYPED ROLE PARTICIPANTS ({rel.participants.length})
+            </strong>
+            <div className="dr-participants-row">
+              {rel.participants.map((p, idx) => (
+                <span key={`${p.role}-${p.entityId}-${idx}`} className="dr-participant-chip">
+                  <b>{p.role}:</b> {entityNameById.get(p.entityId) ?? p.entityId}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <strong
+              style={{
+                fontSize: '11px',
+                color: '#516072',
+                display: 'block',
+                marginBottom: '8px',
+              }}
+            >
+              SUPPORTING STATIC FIXTURE SOURCES (
+              {isSelectedRelationshipInActiveSlice ? linkedSources.length : 0} ACTIVE AT CUTOFF)
+            </strong>
+            {!isSelectedRelationshipInActiveSlice ? (
+              <div
+                data-testid="drawer-sources-withheld-by-cutoff"
+                style={{
+                  padding: '10px',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  color: '#475569',
+                }}
+              >
+                {linkedSources.length} static fixture source(s) (
+                <code>{rel.sourceDocIds.join(', ')}</code>) for{' '}
+                <code>{rel.relationshipId}</code> are withheld at the{' '}
+                <b>{formatUtcDate(asOfMs)}</b> ({temporalBasis}) cutoff to prevent hindsight
+                leakage. No other relationship&apos;s sources are substituted.
+              </div>
+            ) : (
+              linkedSources.map((src) => (
+                <div
+                  key={src.sourceDocId}
+                  className="dr-source-item"
+                  data-testid={`drawer-source-${src.sourceDocId}`}
+                  style={
+                    selectedSourceDocId === src.sourceDocId
+                      ? {
+                          border: '2px solid #2b6cb0',
+                          background: '#f0f7ff',
+                        }
+                      : undefined
+                  }
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      fontSize: '10px',
+                      color: '#6b7786',
+                    }}
+                  >
+                    <span>
+                      <b>{src.authority}</b> · {src.kind}
+                    </span>
+                    <span>SHA-256: {src.contentSha256.slice(0, 12)}…</span>
+                  </div>
+                  <h4>{src.title}</h4>
+                  <div className="dr-source-snippet">
+                    Basis: {src.publicationBasis} · Static demonstration source fixture (
+                    <code>{src.sourceDocId}</code>)
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                      fontSize: '10px',
+                      color: '#657383',
+                    }}
+                  >
+                    <span>
+                      Pub: {formatUtcDate(src.publishedAtMs)} · Rec:{' '}
+                      {formatUtcDate(src.receivedAtMs)}
+                    </span>
+                    <span
+                      data-testid={`drawer-source-reference-${src.sourceDocId}`}
+                      style={{ color: '#475569', wordBreak: 'break-all' }}
+                    >
+                      Reference URI (static fixture, not a live external link):{' '}
+                      <code>{src.url}</code>
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Stage 4 Human Review & Outbox Promotion Controls (Browser-Only Demo) */}
+          <div
+            style={{
+              marginTop: '14px',
+              padding: '12px',
+              background: '#f6f8fb',
+              border: '1px solid #d8e1ec',
+              borderRadius: '6px',
+            }}
+            data-testid="drawer-reviewer-promotion"
+          >
+            <strong
+              style={{
+                fontSize: '11px',
+                color: '#192434',
+                display: 'block',
+                marginBottom: '6px',
+              }}
+            >
+              STAGE 4 HUMAN REVIEW &amp; OUTBOX PROMOTION (BROWSER-ONLY DEMONSTRATION)
+            </strong>
+            <div
+              data-testid="demo-review-controls-notice"
+              style={{
+                fontSize: '11px',
+                color: '#744210',
+                background: '#fffaf0',
+                border: '1px solid #f6e05e',
+                borderRadius: '4px',
+                padding: '6px 8px',
+                marginBottom: '8px',
+              }}
+            >
+              <b>Browser-Only Demo Control — Local State Only:</b> These buttons demonstrate
+              local governance validation in React component state using{' '}
+              <code>demo:browser_local_reviewer</code>. They do not authenticate a human
+              reviewer or persist mutations to Convex <code>graphRelationshipReviews</code> or{' '}
+              <code>graphProjectionOutbox</code>.
+            </div>
+            <label
+              htmlFor={`review-note-${rel.relationshipId}`}
+              style={{ fontSize: '10px', fontWeight: 600, display: 'block', marginBottom: '4px' }}
+            >
+              Demo Reviewer Decision Rationale:
+            </label>
+            <input
+              id={`review-note-${rel.relationshipId}`}
+              type="text"
+              data-testid="reviewer-note-input"
+              value={reviewNoteInput}
+              onChange={(e) => setReviewNoteInput(e.target.value)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                fontSize: '11px',
+                padding: '6px 8px',
+                borderRadius: '4px',
+                border: '1px solid #cbd5e1',
+                marginBottom: '8px',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="button primary"
+                data-testid="approve-promote-relationship-btn"
+                style={{ padding: '6px 10px', fontSize: '11px' }}
+                onClick={() => handleReviewerDecision(rel, 'approved')}
+              >
+                Demo: Approve in Browser State
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                data-testid="reject-relationship-btn"
+                style={{ padding: '6px 10px', fontSize: '11px' }}
+                onClick={() => handleReviewerDecision(rel, 'rejected')}
+              >
+                Demo: Reject in Browser State
+              </button>
+            </div>
+            {reviewerDecisions[rel.relationshipId] && (
+              <div
+                data-testid="drawer-review-outcome"
+                style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  background:
+                    reviewerDecisions[rel.relationshipId]!.decision === 'approved'
+                      ? '#edf7ed'
+                      : '#fff4f4',
+                  border: '1px solid #c6e0c6',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                }}
+              >
+                <div>
+                  <b>Demo Decision (Local State):</b>{' '}
+                  {reviewerDecisions[rel.relationshipId]!.decision.toUpperCase()} ·{' '}
+                  <b>Simulated Outbox:</b> {reviewerDecisions[rel.relationshipId]!.outboxStatus}
+                </div>
+                <div>
+                  <b>Demo Reviewer Actor:</b>{' '}
+                  <code>{reviewerDecisions[rel.relationshipId]!.reviewer}</code> ·{' '}
+                  {formatUtcDate(reviewerDecisions[rel.relationshipId]!.reviewedAtMs)}
+                </div>
+                {reviewerDecisions[rel.relationshipId]!.projectionKey && (
+                  <div style={{ wordBreak: 'break-all', fontSize: '10px', color: '#435365' }}>
+                    <b>Key:</b>{' '}
+                    <code>
+                      {reviewerDecisions[rel.relationshipId]!.projectionKey!.slice(0, 28)}…
+                    </code>
+                  </div>
+                )}
+                {reviewerDecisions[rel.relationshipId]!.lastError && (
+                  <div style={{ color: '#9c2b2b', marginTop: '4px' }}>
+                    <b>Failure:</b> {reviewerDecisions[rel.relationshipId]!.lastError}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -1005,13 +1134,13 @@ export default function MacroDataRoom({
           <div>
             <span>AI CAPITAL INTELLIGENCE · MACRO INTELLIGENCE DATA ROOM</span>
             <small>
-              TypeDB 3.14 Knowledge Graph · Convex Outbox · Read-Only Gateway (Execution Authority: None)
+              Static Demonstration Dataset · Deterministic Governance · Read-Only Gateway (Execution Authority: None)
             </small>
           </div>
         </div>
-        <div className="data-room-status-cluster">
+        <div className="data-room-status-cluster" data-testid="data-room-provenance-bar">
           <span className="dr-pill live" data-testid="typedb-live-pill">
-            TypeDB server probe:{' '}
+            1. TypeDB server probe:{' '}
             {liveTypeDbStatus.reachable
               ? `REACHABLE (${liveTypeDbStatus.version})${
                   liveTypeDbStatus.databaseName
@@ -1023,15 +1152,21 @@ export default function MacroDataRoom({
           <span
             className="dr-pill"
             data-testid="graph-data-source-pill"
-            title="The connectivity probe does not mean the graph on this page was read from TypeDB. Graph views on this page render the reviewed acceptance dataset bundled with the application; individual query results state their own backend mode."
+            title="The connectivity probe does not mean the graph on this page was read from TypeDB. Graph views on this page render the static demonstration dataset bundled with the application."
           >
-            Displayed graph: static repository dataset (not a live TypeDB read)
+            2. Displayed dataset: static repository demonstration fixture (not a live TypeDB read)
+          </span>
+          <span className="dr-pill" data-testid="live-retrieval-status-pill">
+            3. Live TypeDB retrieval: inactive on Data Room views (rendered from static mirror)
+          </span>
+          <span className="dr-pill" data-testid="validation-status-pill">
+            4. Validation: deterministic local schema &amp; non-double-counting checks
           </span>
           <span className="dr-pill" data-testid="projection-lag-pill">
-            Outbox:{' '}
+            5. Audit &amp; outbox status:{' '}
             {simulatedOutboxFailureRelId
-              ? 'STALE (1 retrying / dead_letter)'
-              : `${dataset.relationships.length} relationships in bundled dataset (projection lag not measured here)`}
+              ? 'Browser-local demo simulation (1 retrying / dead_letter)'
+              : `${dataset.relationships.length} bundled static relationships (browser-local demo state; not persisted to Convex)`}
           </span>
           <Link
             href="/"
@@ -1043,6 +1178,26 @@ export default function MacroDataRoom({
           </Link>
         </div>
       </header>
+
+      {/* Static Demonstration & Synthetic Fixture Disclosure Banner */}
+      <div
+        data-testid="static-demo-dataset-banner"
+        style={{
+          background: '#fffaf0',
+          borderBottom: '1px solid #f6e05e',
+          padding: '8px 18px',
+          fontSize: '12px',
+          color: '#744210',
+        }}
+      >
+        <strong>Static Demonstration &amp; Synthetic Stress-Test Dataset Notice:</strong> This
+        Data Room renders bundled static fixture records from{' '}
+        <code>data/graph/initial-acceptance-dataset.json</code> (including future-dated 2026
+        Macro Case 001 stress-test filings, synthetic reviewer allocations, and non-live
+        reference URIs) for staging and governance verification. It does not perform live
+        TypeDB queries on page load or write browser review actions to production Convex
+        tables.
+      </div>
 
       {/* Sub-navigation & Temporal Time Machine */}
       <nav className="data-room-subnav" aria-label="Macro Data Room Views">
@@ -1206,6 +1361,7 @@ export default function MacroDataRoom({
                       key={i}
                       type="button"
                       className={`dr-bullet-item ${
+                        selectedRelationship !== null &&
                         b.relationshipIds.includes(selectedRelationship.relationshipId)
                           ? 'selected'
                           : ''
@@ -1328,19 +1484,20 @@ export default function MacroDataRoom({
                 <div className="dr-card-header" style={{ marginBottom: '12px' }}>
                   <div>
                     <span className="eyebrow">
-                      CASE ID: {MACRO_CASE_001_ID} · HOSTED TYPEDB CLOUD DOSSIER
+                      CASE ID: {MACRO_CASE_001_ID} · STATIC DEMONSTRATION CASE DOSSIER (BUNDLED FIXTURE)
                     </span>
                     <h2 style={{ fontSize: '17px', marginTop: '4px' }}>
-                      Macro Case 001: AI Infrastructure Contagion, US to Ireland
+                      Macro Case 001: AI Infrastructure Contagion, US to Ireland (Static Stress-Test Scenario)
                     </h2>
                     <p style={{ fontSize: '12px', color: '#425265', marginTop: '4px' }}>
-                      Secondary-source discovery from Eamon Quinn’s 8 Nov 2026{' '}
-                      <i>Irish News</i> article (<code>irish-news-quinn-2026-11-08</code>,
-                      retained strictly as <code>reported</code>), verified against primary
-                      SEC filings (Anthropic Form S-1 &amp; S-1/A, Nscale Form S-1, Intel Q3
-                      2026 10-Q) and primary Irish regulatory publications (CBI FSR 2026 I,
-                      Governor Gabriel Makhlouf’s 2 Nov 2026 Croke Park speech, Department of
-                      Finance July 2026 COSMO analysis, CRU/EirGrid).
+                      Static demonstration dataset modelling secondary-source discovery from Eamon
+                      Quinn’s 8 Nov 2026 <i>Irish News</i> article (
+                      <code>irish-news-quinn-2026-11-08</code>, retained strictly as{' '}
+                      <code>reported</code>) alongside synthetic/reference 2026 primary filing
+                      fixtures (Anthropic Form S-1 &amp; S-1/A, Nscale Form S-1, Intel Q3 2026
+                      10-Q) and Irish regulatory publications (CBI FSR 2026 I, Governor Gabriel
+                      Makhlouf’s 2 Nov 2026 Croke Park speech, Department of Finance July 2026
+                      COSMO analysis, CRU/EirGrid).
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -1363,24 +1520,26 @@ export default function MacroDataRoom({
                     color: '#233243',
                   }}
                 >
-                  <strong>Executive Case TL;DR &amp; Discovery Governance:</strong> Eamon
-                  Quinn’s 8 November 2026 <i>Irish News</i> article serves strictly as a{' '}
+                  <strong>
+                    Executive Case TL;DR &amp; Discovery Governance (Static Demonstration Fixture):
+                  </strong>{' '}
+                  Within this bundled static stress-test dataset, Eamon Quinn’s 8 November 2026{' '}
+                  <i>Irish News</i> article serves strictly as a{' '}
                   <b>secondary-source discovery trigger</b> (
                   <code>rel-quinn-irish-news-discovery-contagion-r1</code>,{' '}
                   <code>epistemicStatus: &quot;reported&quot;</code>) and is{' '}
-                  <b>never promoted to a confirmed graph edge on its own</b>. Primary SEC and
-                  Irish official disclosures confirm: (1) Anthropic’s Form S-1/A (2 Nov 2026)
-                  discloses <b>USD 895.40B</b> in aggregate signed multi-year compute
-                  commitments (inclusive of Nscale’s <b>USD 44.60B</b> Monarch contract) and
-                  a 9M 2026 GAAP net loss of <b>-USD 104.00B</b> alongside dual-role backing
-                  from Amazon and Alphabet (up to <b>USD 40.00B</b>); (2) Ireland’s
-                  multinational tech sector accounts for <b>17.0%</b> of income tax and{' '}
-                  <b>&gt;20.0%</b> of corporate tax receipts while data centres consume{' '}
-                  <b>21.0%</b> of national electricity; and (3) Department of Finance COSMO
-                  scenarios model a <b>-1.6%</b> Irish MDD contraction under a -10% US tech
-                  equity shock and <b>-3.25%</b> under a severe -20% shock, while Governor
-                  Makhlouf judges domestic Irish retail banks &quot;not that exposed to
-                  AI&quot; directly.
+                  <b>never promoted to a confirmed graph edge on its own</b>. In the bundled
+                  demonstration fixtures: (1) Anthropic’s Form S-1/A fixture (2 Nov 2026) models{' '}
+                  <b>USD 895.40B</b> in aggregate signed multi-year compute commitments (inclusive
+                  of Nscale’s <b>USD 44.60B</b> Monarch contract) and a 9M 2026 GAAP net loss of{' '}
+                  <b>-USD 104.00B</b> alongside dual-role backing from Amazon and Alphabet (up to{' '}
+                  <b>USD 40.00B</b>); (2) Ireland’s multinational tech sector accounts for{' '}
+                  <b>17.0%</b> of income tax and <b>&gt;20.0%</b> of corporate tax receipts while
+                  data centres consume <b>21.0%</b> of national electricity; and (3) Department of
+                  Finance COSMO scenarios model a <b>-1.6%</b> Irish MDD contraction under a -10%
+                  US tech equity shock and <b>-3.25%</b> under a severe -20% shock, while Governor
+                  Makhlouf judges domestic Irish retail banks &quot;not that exposed to AI&quot;
+                  directly.
                 </div>
 
                 {/* Non-Double-Counting Financial Commitment Ledger */}
@@ -1503,15 +1662,14 @@ export default function MacroDataRoom({
                   </div>
                 </div>
 
-                {/* 5 Approved Graph Investigations */}
+                {/* 5 Pre-Computed Graph Investigations */}
                 <div
                   className="dr-tldr-section"
                   data-testid="macro-case-001-investigations"
                   style={{ marginBottom: '16px' }}
                 >
                   <h3>
-                    5 Approved TypeDB Cloud Graph Investigations (Live{' '}
-                    <code>aci_macro_intelligence_staging</code>)
+                    5 Pre-Computed Graph Investigation Summaries (Static Demonstration Dataset)
                   </h3>
                   <div className="dr-tldr-grid">
                     {case001Investigations.map((inv) => (
@@ -1934,6 +2092,7 @@ export default function MacroDataRoom({
                     type="button"
                     data-testid={`rel-card-${rel.relationshipId}`}
                     className={`dr-rel-card ${
+                      selectedRelationship !== null &&
                       selectedRelationship.relationshipId === rel.relationshipId
                         ? 'selected'
                         : ''
@@ -2006,12 +2165,15 @@ export default function MacroDataRoom({
                     Hypothetical Scenario: Monarch West Virginia Credit Facility Unresolved
                   </h3>
                   <p style={{ fontSize: '12px', color: '#344356' }}>
-                    If Nscale’s reported private-credit discussions (
+                    If Nscale’s reported credit-support discussions (
                     <code>rel-monarch-credit-talks-r1</code>, principal undisclosed) do not
-                    reach binding financial close, Nscale’s 600 MW Monarch campus buildout
-                    schedule faces liquidity compression alongside its{' '}
-                    <b>USD 1.4B Delayed-Draw Term Loan</b> (<code>inst-nscale-ddtl-1400m</code>
-                    ) and <b>USD 865M NVIDIA Convertible Note</b>.
+                    reach binding financial close, Nscale’s Monarch campus buildout schedule
+                    faces liquidity compression alongside its{' '}
+                    <b>USD 44.60B Monarch compute service cap</b> (
+                    <code>rel-anthropic-monarch-services-r1</code>) and{' '}
+                    <b>USD 1.00B NVIDIA Convertible Note</b> (
+                    <code>inst-nscale-conv-note-2026</code>,{' '}
+                    <code>rel-nscale-nvda-convertible-r1</code>).
                   </p>
                   <button
                     type="button"
@@ -2031,20 +2193,21 @@ export default function MacroDataRoom({
                     <span className="tag amber">Stress Pathway B</span>
                   </div>
                   <h3 style={{ textTransform: 'none', fontSize: '13px', color: '#192434' }}>
-                    Hypothetical Scenario: Grid Energisation & NY EO 62 Moratorium Spillover
+                    Hypothetical Scenario: Grid Energisation &amp; NY EO 62 Moratorium Spillover
                   </h3>
                   <p style={{ fontSize: '12px', color: '#344356' }}>
                     2-hop physical infrastructure path: CoreWeave (<code>org-crwv</code>) →
                     Applied Digital Polaris Forge 1 (<code>proj-polaris-forge-1-nd</code>) →
                     Ellendale 400 MW Substation (<code>asset-ellendale-substation</code>),
-                    while TeraWulf’s Cayuga campus (<code>proj-cayuga-ny</code>) faces New
-                    York Executive Order 62’s 120-day grid cost-allocation review (≥20 MW).
+                    while TeraWulf’s Lake Mariner campus (<code>proj-lake-mariner-ny</code>)
+                    faces New York Executive Order 62’s state DEC environmental permit
+                    moratorium (≥50 MW, <code>rel-wulf-ny-eo62-dep</code>).
                   </p>
                   <button
                     type="button"
                     className="button secondary"
                     style={{ marginTop: '8px' }}
-                    onClick={() => selectRelationshipForDrawer('rel-cayuga-ny-eo62-r1')}
+                    onClick={() => selectRelationshipForDrawer('rel-wulf-ny-eo62-dep')}
                   >
                     Inspect NY EO 62 Regulatory Dependency →
                   </button>
@@ -2052,13 +2215,16 @@ export default function MacroDataRoom({
               </div>
 
               <div className="dr-tldr-section">
-                <h3>Shared Counterparty Exposure (NVIDIA & Nscale Multi-Role Hub)</h3>
+                <h3>Shared Counterparty Exposure (NVIDIA &amp; Nscale Multi-Role Hub)</h3>
                 <p style={{ fontSize: '12px', color: '#3c4b5e', marginBottom: '10px' }}>
-                  NVIDIA (<code>org-nvda</code>) simultaneously acts as <b>GPU Supplier</b>,{' '}
-                  <b>Convertible Note Financier (USD 865M)</b>, and{' '}
-                  <b>Lease Backstop Guarantor (USD 410M)</b> across Nscale’s campuses — a
+                  NVIDIA (<code>org-nvda</code>) simultaneously acts as <b>GPU Supplier</b> (
+                  <code>rel-nvda-nscale-gpu-arch</code>),{' '}
+                  <b>Convertible Note Financier (USD 1.00B)</b> (
+                  <code>rel-nscale-nvda-convertible-r1</code>), and{' '}
+                  <b>Lease Backstop Guarantor (USD 860M / $860.3M)</b> (
+                  <code>rel-ward-county-guarantee-r1</code>) across Nscale’s campuses — a
                   circular vendor-financing topology captured natively via TypeDB N-ary
-                  relations.
+                  relations in the static demonstration dataset.
                 </p>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
@@ -2082,7 +2248,7 @@ export default function MacroDataRoom({
                   <button
                     type="button"
                     className="button secondary"
-                    onClick={() => selectRelationshipForDrawer('rel-monarch-gpu-supply-r1')}
+                    onClick={() => selectRelationshipForDrawer('rel-nvda-nscale-gpu-arch')}
                   >
                     Inspect Monarch GPU Supply
                   </button>
@@ -2158,7 +2324,7 @@ export default function MacroDataRoom({
                 ))}
               </div>
 
-              {/* Durable Outbox & Reviewer Promotion Register (Stages 4 & 5) */}
+              {/* Durable Outbox & Reviewer Promotion Register (Stages 4 & 5 — Browser-Only Demo) */}
               <div
                 className="dr-tldr-section"
                 style={{ marginBottom: '16px' }}
@@ -2176,14 +2342,13 @@ export default function MacroDataRoom({
                 >
                   <div>
                     <h3 style={{ margin: 0 }}>
-                      Convex Append-Only Graph Outbox &amp; Hosted TypeDB Cloud Sync (
-                      <code>aci_macro_intelligence_staging</code>)
+                      Stage 4 &amp; 5 Outbox &amp; Projection Simulator (Browser-Local Demonstration on Static Dataset)
                     </h3>
                     <p style={{ fontSize: '11px', color: '#5c6979', margin: '4px 0 0' }}>
-                      Deterministic SHA-256 <code>projectionKey</code> · Lease-protected
-                      worker · Non-blocking downtime isolation · Checkpoint replay
+                      Deterministic SHA-256 <code>projectionKey</code> preview · Browser-local
+                      dead-letter &amp; checkpoint replay demonstration (not persisted to Convex)
                       {lastReplayAtMs
-                        ? ` · Last Replayed ${formatUtcDate(lastReplayAtMs)}`
+                        ? ` · Last Demo Replay ${formatUtcDate(lastReplayAtMs)}`
                         : ''}
                     </p>
                   </div>
@@ -2195,7 +2360,7 @@ export default function MacroDataRoom({
                       style={{ padding: '6px 10px', fontSize: '11px' }}
                       onClick={() => handleSimulateDeadLetter(selectedRelationship)}
                     >
-                      Simulate Outbox Dead-Letter
+                      Demo: Simulate Outbox Dead-Letter (Local State)
                     </button>
                     <button
                       type="button"
@@ -2204,9 +2369,30 @@ export default function MacroDataRoom({
                       style={{ padding: '6px 10px', fontSize: '11px' }}
                       onClick={handleReplayFromCheckpoint}
                     >
-                      Replay Outbox from Checkpoint 0
+                      Demo: Replay Outbox in Browser State
                     </button>
                   </div>
+                </div>
+
+                <div
+                  data-testid="synthetic-human-review-notice"
+                  style={{
+                    fontSize: '11px',
+                    color: '#744210',
+                    background: '#fffaf0',
+                    border: '1px solid #f6e05e',
+                    borderRadius: '4px',
+                    padding: '8px 10px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <b>Synthetic Example — Static Dataset Fixture:</b> The{' '}
+                  <code>reviewerStatus</code>, <code>reviewedBy</code>, and outbox rows below are
+                  pre-populated synthetic demonstration fixtures from{' '}
+                  <code>data/graph/initial-acceptance-dataset.json</code> (plus any browser-local
+                  demo clicks in this session). They do not represent live human reviewer sign-offs
+                  in Convex <code>graphRelationshipReviews</code> or live{' '}
+                  <code>graphProjectionOutbox</code> records.
                 </div>
 
                 <div className="table-scroll">
@@ -2216,9 +2402,9 @@ export default function MacroDataRoom({
                         <th>SEQ</th>
                         <th>RELATIONSHIP ID</th>
                         <th>EPISTEMIC / CONTRACTUAL</th>
-                        <th>REVIEWER STATUS</th>
+                        <th>SYNTHETIC / DEMO REVIEW STATUS</th>
                         <th>DETERMINISTIC PROJECTION KEY</th>
-                        <th>OUTBOX STATUS</th>
+                        <th>SIMULATED OUTBOX STATUS</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2253,7 +2439,9 @@ export default function MacroDataRoom({
                               <span className="tag">{rel.contractualStatus}</span>
                             </td>
                             <td>
-                              {customDecision ? customDecision.decision : rel.reviewerStatus}
+                              {customDecision
+                                ? `${customDecision.decision} (Browser Demo)`
+                                : `${rel.reviewerStatus} (Synthetic Fixture)`}
                             </td>
                             <td>
                               <code>{pKey.slice(0, 24)}…</code>
@@ -2269,7 +2457,7 @@ export default function MacroDataRoom({
                                 }`}
                                 data-testid={`outbox-status-${rel.relationshipId}`}
                               >
-                                {status}
+                                {status} (demo)
                               </span>
                             </td>
                           </tr>
@@ -2433,14 +2621,15 @@ export default function MacroDataRoom({
                       VECTIS ONE CONTROL-FIRST ARCHITECTURE · PHASE G.4
                     </span>
                     <h3 style={{ margin: '4px 0', fontSize: '16px', color: '#192434' }}>
-                      Evidence-Locked AI Research Assistant (Gemini + TypeDB Cloud + Convex)
+                      Evidence-Locked AI Research Assistant (Closed-Evidence Bundle + 9-Check Validator)
                     </h3>
                     <p style={{ fontSize: '12px', color: '#4a5568', margin: 0 }}>
                       Answers natural-language research questions using <b>ONLY</b> the approved,
-                      stored, and authorised evidence bundle retrieved from TypeDB Cloud (
-                      <code>{liveTypeDbStatus.databaseName ?? 'aci_macro_intelligence_prod'}</code>)
-                      and Convex. Every factual claim is verified by the 9-check independent
-                      validator before rendering.
+                      stored, and authorised evidence bundle retrieved from the configured evidence
+                      source (bundled static repository mirror by default; live TypeDB{' '}
+                      <code>{liveTypeDbStatus.databaseName ?? 'aci_macro_intelligence_prod'}</code>{' '}
+                      only when explicitly connected and queried). Every factual claim is verified by
+                      the 9-check independent validator before rendering.
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -2984,7 +3173,9 @@ export default function MacroDataRoom({
           >
             <span>View Evidence Drawer</span>
             <span className="dr-trigger-badge">
-              {selectedRelationship.relationshipId} (v{selectedRelationship.version})
+              {selectedRelationship
+                ? `${selectedRelationship.relationshipId} (v${selectedRelationship.version})`
+                : 'Unmatched Selection'}
             </span>
           </button>
         </div>
