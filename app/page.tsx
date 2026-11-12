@@ -26,6 +26,7 @@ export default async function Home(){
       closeGbp:obs.closeGbp,
       usdToGbp:obs.usdToGbp,
       closeAt:obs.eventAt,
+      serverReceivedAt:obs.serverReceivedAt,
       priceBasis:obs.priceBasis,
       corporateActionsReviewed:obs.corporateActionsReviewed,
       source:obs.sourceUrl,
@@ -54,10 +55,10 @@ export default async function Home(){
         return {
           ...svc,
           status:hasProviderErrors?"degraded" as const:"configured_not_tested" as const,
-          lastVerifiedAt:Date.now(),
+          lastVerifiedAt:null,
           detail:hasProviderErrors
-            ?"GEMINI_API_KEY configured & models/gemini-2.5-flash endpoint verified on Vercel Production, but live generateContent returned HTTP 402 (RESOURCE_EXHAUSTED: Google AI Studio prepayment credits depleted). Explicit safe abstention enforced."
-            :"Google Gemini API key configured in Vercel Production server runtime (gemini-2.5-flash); awaiting first verified live generateContent call.",
+            ?"GEMINI_API_KEY configured on Vercel server runtime, but historical chat audit recorded provider errors (HTTP 402/quota); background agent LLM inference is NOT IMPLEMENTED."
+            :"Google Gemini API key present in Vercel server runtime; background agent LLM inference is NOT IMPLEMENTED (0 background LLM calls).",
         };
       }
       return svc;

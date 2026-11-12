@@ -328,39 +328,57 @@ export function buildWorkspaceConnectionsReport(
   }
 
   // 8. External AI Model Providers
+  // Never infer live model provider health from historical chat records or 0-token deterministic runs.
   const modelEnvEntry =
     health?.environmentAudit?.find((e) => e.serviceId === 'remote_ai_models') ?? null;
+  const liveAgentInferenceSucceeded = Boolean(
+    health?.agentAndProviderStages?.modelInferenceSucceeded,
+  );
   let modelStatus: WorkspaceConnectionStatus = 'Not configured';
   let modelEnv: WorkspaceConnectionEnvironment = 'Disabled';
   let modelVerifiedAt: number | null = null;
-  const chatTurns = health?.evidenceChat?.totalTurns ?? 0;
-  const dailyActual = Math.max(
-    health?.dailyCostGbp.actual ?? 0,
-    health?.evidenceChat?.dailySpendGbp ?? 0,
-  );
+  const dailyActual = health?.dailyCostGbp.actual ?? 0;
   const dailyCeiling = health?.dailyCostGbp.ceiling ?? 2;
-  const modelCheckpoint = `${chatTurns} model call${chatTurns === 1 ? '' : 's'} · £${dailyActual.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling`;
+  const modelCheckpoint = liveAgentInferenceSucceeded
+    ? `Verified background LLM inference · £${dailyActual.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling`
+    : `0 background LLM calls (live agent inference & external news collection NOT IMPLEMENTED) · £${dailyActual.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling`;
   let modelDetail =
-    'No external LLM API key configured in Production. News discovery & morning briefing operate in deterministic SEC XBRL fallback mode.';
+    'No external LLM API key configured in Production; live background LLM inference and external news collection are NOT IMPLEMENTED (news_discovery_agent & morning briefing run deterministic SEC XBRL extraction only).';
 
-  if (modelEnvEntry?.status === 'connected') {
+  if (modelEnvEntry?.status === 'intentionally_disabled' || health?.agentAndProviderStages?.providerState === 'disabled') {
+    modelStatus = 'Intentionally disabled';
+    modelEnv = 'Disabled';
+    modelVerifiedAt = null;
+    modelDetail =
+      modelEnvEntry?.detail ??
+      'Background AI research agent is intentionally disabled; deterministic SEC XBRL and EOD market collection remain isolated.';
+  } else if (health?.agentAndProviderStages?.providerState === 'failed') {
+    modelStatus = 'Failed';
+    modelEnv = 'Production';
+    modelVerifiedAt = null;
+    modelDetail =
+      health.agentAndProviderStages.detail ??
+      'Background LLM provider invocation failed or reported an upstream credential/quota error.';
+  } else if (modelEnvEntry?.status === 'connected' && liveAgentInferenceSucceeded) {
     modelStatus = 'Connected and healthy';
     modelEnv = 'Production';
     modelVerifiedAt = modelEnvEntry.lastVerifiedAt;
     modelDetail = modelEnvEntry.detail;
   } else if (
     modelEnvEntry?.status === 'degraded' ||
-    modelEnvEntry?.status === 'configured_not_tested'
+    modelEnvEntry?.status === 'configured_not_tested' ||
+    health?.agentAndProviderStages?.providerState === 'attempted' ||
+    health?.agentAndProviderStages?.providerState === 'not_tested'
   ) {
     modelStatus = 'Configured, not yet verified';
     modelEnv = 'Production';
-    modelVerifiedAt = modelEnvEntry.lastVerifiedAt;
-    modelDetail = modelEnvEntry.detail;
+    modelVerifiedAt = null;
+    modelDetail = `${modelEnvEntry?.detail ?? health?.agentAndProviderStages?.detail ?? 'Model provider configured.'} Live background LLM inference and external news collection remain NOT IMPLEMENTED.`;
   } else if (options.modelProviderConfigured) {
     modelStatus = 'Configured, not yet verified';
     modelEnv = 'Production';
     modelDetail =
-      'External model provider key is present in environment, but no verified model invocation has been recorded yet.';
+      'External model provider key is present in environment, but live background LLM inference and external news collection are NOT IMPLEMENTED (0 verified background model invocations).';
   }
 
   // 9. Morning Intelligence Briefing Schedule

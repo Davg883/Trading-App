@@ -288,34 +288,43 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    process.env.GEMINI_API_KEY||
    process.env.GOOGLE_API_KEY||
    process.env.GOOGLE_GEMINI_API_KEY||
-   process.env.GOOGLE_GENERATIVE_AI_API_KEY||
-   latestGeminiLiveTurn,
+   process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   ),
   geminiEnabled:Boolean(
-   process.env.EVIDENCE_CHAT_GEMINI_ENABLED==='true'||
-   latestGeminiLiveTurn,
+   process.env.EVIDENCE_CHAT_GEMINI_ENABLED==='true',
   ),
   lastChatAtMs:chatAuditRows[0]?.createdAtMs??null,
  };
 
  const hasStoredMarketObs=marketObsRows.length>0;
  const mktSucceeded=mktJob?.lastSuccessAt!==null&&!mktJob?.lastErrorCode;
+ // Never infer current cloud provider key presence from historical chat records (`latestGeminiLiveTurn`)
  const hasRemoteAiKey=Boolean(
   process.env.GEMINI_API_KEY||
   process.env.GOOGLE_API_KEY||
   process.env.GOOGLE_GEMINI_API_KEY||
   process.env.GOOGLE_GENERATIVE_AI_API_KEY||
   process.env.OPENAI_API_KEY||
-  process.env.ANTHROPIC_API_KEY||
-  latestGeminiLiveTurn,
+  process.env.ANTHROPIC_API_KEY,
  );
- const hasExecutedPaidAiRun=recentRuns.some(
-  r=>
-   r.jobKey==='news_discovery_agent'&&
-   r.modelVersion&&
-   !r.modelVersion.startsWith('deterministic-')&&
-   !r.modelVersion.includes('0 model calls'),
- );
+ // Require genuine model invocation evidence (not solely non-zero cost, while rejecting deterministic/0-model-call runs)
+ const hasExecutedAiRun=recentRuns.some(r=>{
+  if(r.jobKey!=='news_discovery_agent'||r.status!=='succeeded'||r.errorCode||r.conditionalSkip)return false;
+  const mv=(r.modelVersion??'').trim().toLowerCase();
+  const sum=(r.summary??'').toLowerCase();
+  if(
+   mv.startsWith('deterministic-')||
+   mv.startsWith('cursor-change-detector')||
+   mv.includes('0 model calls')||
+   mv.includes('not implemented')||
+   sum.includes('0 model calls')||
+   sum.includes('not implemented')
+  ){
+   return false;
+  }
+  const hasRealModel=mv.length>0&&/\b(gemini|gpt|claude|o1|o3|o4|sonnet|opus|haiku|flash|pro)\b/i.test(mv);
+  return hasRealModel||r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)||r.inputTokens>0||r.outputTokens>0;
+ });
  const typedbDatabaseName=process.env.TYPEDB_DATABASE||'aci_macro_intelligence_staging';
  const typedbConfigured=Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_PASSWORD);
  const typedbAddress=process.env.TYPEDB_HTTP_ADDRESS??'';
@@ -398,11 +407,11 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    serviceId:'remote_ai_models',
    name:'Remote AI Model Providers (Gemini / OpenAI / Anthropic)',
    environmentTarget:'GEMINI_API_KEY · OPENAI_API_KEY · ANTHROPIC_API_KEY',
-   status:hasRemoteAiKey?'connected':'unavailable',
-   lastVerifiedAt:hasRemoteAiKey?agentJob?.lastSuccessAt??null:null,
-   detail:hasRemoteAiKey
-    ?'Cloud LLM provider keys configured.'
-    :'API keys not configured in cloud environment (0 paid LLM calls executed, £0.00 cost); news_discovery_agent runs deterministic SEC XBRL extractor fallback.',
+   status:hasRemoteAiKey&&hasExecutedAiRun?'connected':hasRemoteAiKey?'configured_not_tested':'unavailable',
+   lastVerifiedAt:hasRemoteAiKey&&hasExecutedAiRun?agentJob?.lastSuccessAt??null:null,
+   detail:hasRemoteAiKey&&hasExecutedAiRun
+    ?'Cloud LLM provider keys configured and verified by non-zero token execution.'
+    :'Live background LLM inference and external news collection are NOT IMPLEMENTED (0 paid LLM calls executed, £0.00 cost); news_discovery_agent runs deterministic SEC XBRL extractor.',
   },
   {
    serviceId:'trading212_readonly',
@@ -485,15 +494,15 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
      ?'rate_limited'
      :agentJob?.lastErrorCode
       ?'outage'
-      :!hasRemoteAiKey&&!hasExecutedPaidAiRun
+      :!hasRemoteAiKey||!hasExecutedAiRun
        ?'unconfigured'
        :'connected',
    errorCode:agentJob?.lastErrorCode??null,
-   lastSuccessAt:agentJob?.lastSuccessAt??null,
+   lastSuccessAt:hasExecutedAiRun?agentJob?.lastSuccessAt??null:null,
    nextAllowedAt:agentJob?.nextAllowedAt??0,
    detail:
-    !hasRemoteAiKey&&!hasExecutedPaidAiRun
-     ?'Cloud LLM keys (GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY) unconfigured; operating in deterministic SEC XBRL extraction fallback (0 LLM calls, £0.00 cost).'
+    !hasRemoteAiKey||!hasExecutedAiRun
+     ?'Live background LLM inference and external news collection are NOT IMPLEMENTED; operating in deterministic SEC XBRL extraction mode (0 LLM calls, £0.00 cost).'
      :'Restricted to research staging; skips model invocations when source cursors are unchanged.',
   },
  ];

@@ -257,8 +257,46 @@ export interface MethodologyValidationReport {
   executionAuthority: 'none';
 }
 
+export interface ExecutiveBriefingOptions {
+  liveWatchlist?: Array<{
+    ticker: string;
+    close: number | null;
+    closeGbp?: number | null;
+    usdToGbp?: number | null;
+    closeAt?: number | null;
+    observedAt?: number | null;
+    change1d?: number | null;
+    source?: string;
+  }>;
+  morningBriefing?: {
+    briefingDate: string;
+    generatedAt: number;
+    modelVersion: string | null;
+    confirmedFactsCount?: number;
+    incompleteEvidenceCount?: number;
+  } | null;
+  nowMs?: number;
+  reportGeneratedAtMs?: number | null;
+}
+
 export interface ExecutiveBriefingSummary {
   asOfDateIso: string;
+  sourceObservationAtMs: number | null;
+  sourceObservationDateIso: string | null;
+  fundamentalCutoffDateIso: string;
+  reportGeneratedAtMs: number | null;
+  reportGeneratedAtIso: string | null;
+  temporalAlignment:
+    | 'aligned_historical_snapshot'
+    | 'hybrid_live_market_with_historical_fundamentals';
+  temporalAlignmentNotice: string | null;
+  provenanceMode:
+    | 'historical_snapshot'
+    | 'live_persisted_observations_deterministic';
+  provenanceLabel: string;
+  headingLabel: string;
+  isMarketObservationStale: boolean;
+  marketObservationAgeMs: number | null;
   dataReadinessStatus: 'ready_verified_evidence' | 'partial_evidence';
   sentences: {
     marketEnvironment: string;
@@ -503,18 +541,36 @@ export function evaluateCompanyResearchAssessment(
   const isFreshWithinThreshold =
     priceAgeDays <= RATING_THRESHOLDS.maxPriceStalenessDaysForLive;
 
-  const sessionChangePct =
-    effectiveClose !== null && prevBar
+  const hasDiscontinuousLiveOverride = Boolean(
+    options?.livePriceOverride?.closeAt &&
+      latestBar &&
+      options.livePriceOverride.closeAt > latestBar.eventAt,
+  );
+
+  // Never silently divide a newer single-session live override by a non-contiguous historical bar (`prevBar`).
+  const sessionChangePct = hasDiscontinuousLiveOverride
+    ? null
+    : effectiveClose !== null && prevBar
       ? Number((((effectiveClose - prevBar.close) / prevBar.close) * 100).toFixed(2))
       : null;
-  const fiveSessionChangePct =
-    effectiveClose !== null && fiveAgoBar
+  const fiveSessionChangePct = hasDiscontinuousLiveOverride
+    ? latestBar && fiveAgoBar
+      ? Number((((latestBar.close - fiveAgoBar.close) / fiveAgoBar.close) * 100).toFixed(2))
+      : null
+    : effectiveClose !== null && fiveAgoBar
       ? Number(
           (((effectiveClose - fiveAgoBar.close) / fiveAgoBar.close) * 100).toFixed(2),
         )
       : null;
-  const twentySessionChangePct =
-    effectiveClose !== null && twentyAgoBar && bars.length >= 15
+  const twentySessionChangePct = hasDiscontinuousLiveOverride
+    ? latestBar && twentyAgoBar && bars.length >= 15
+      ? Number(
+          (((latestBar.close - twentyAgoBar.close) / twentyAgoBar.close) * 100).toFixed(
+            2,
+          ),
+        )
+      : null
+    : effectiveClose !== null && twentyAgoBar && bars.length >= 15
       ? Number(
           (((effectiveClose - twentyAgoBar.close) / twentyAgoBar.close) * 100).toFixed(
             2,
@@ -1986,31 +2042,129 @@ export function runResearchMethodologyValidation(): MethodologyValidationReport 
 
 /**
  * Part 2 Section A — Builds the concise 5-sentence executive market briefing strictly from verified evidence.
+ *
+ * Enforces strict separation between:
+ * - Source observation time (`sourceObservationAtMs` / `asOfDateIso`)
+ * - Fundamental & graph filing cut-off (`fundamentalCutoffDateIso`)
+ * - Report generation time (`reportGeneratedAtMs` / `reportGeneratedAtIso`)
+ * Never silently mixes observations across incompatible research cut-offs or prepends duplicate list numbering.
  */
 export function buildExecutiveMarketBriefing(
   assessments: StockResearchAssessment[],
+  options?: ExecutiveBriefingOptions,
 ): ExecutiveBriefingSummary {
-  const priceMap = loadPriceHistoryByTicker();
+  const priceMap = loadPriceHistoryByTicker(options?.nowMs);
   const qqqBars = priceMap.get('QQQ') ?? [];
-  const qqqLatest = qqqBars.at(-1);
-  const qqqPrev = qqqBars.length >= 2 ? qqqBars.at(-2) : null;
-  const qqq1dPct =
-    qqqLatest && qqqPrev
-      ? (((qqqLatest.close - qqqPrev.close) / qqqPrev.close) * 100).toFixed(2)
+  const qqqBundledLatest = qqqBars.at(-1) ?? null;
+  const qqqBundledPrev = qqqBars.length >= 2 ? qqqBars.at(-2)! : null;
+
+  const liveQqq = (options?.liveWatchlist ?? []).find(
+    (w) =>
+      w.ticker === 'QQQ' &&
+      typeof w.close === 'number' &&
+      Number.isFinite(w.close) &&
+      w.close > 0,
+  );
+  const liveQqqAtMs = liveQqq?.closeAt ?? liveQqq?.observedAt ?? null;
+  const hasNewerPersistedQqq = Boolean(
+    liveQqq &&
+      liveQqqAtMs !== null &&
+      (!qqqBundledLatest || liveQqqAtMs > qqqBundledLatest.eventAt) &&
+      (options?.nowMs === undefined || liveQqqAtMs <= options.nowMs),
+  );
+
+  const sourceObservationAtMs = hasNewerPersistedQqq
+    ? liveQqqAtMs!
+    : (qqqBundledLatest?.eventAt ?? null);
+  const sourceObservationDateIso =
+    sourceObservationAtMs !== null
+      ? new Date(sourceObservationAtMs).toISOString().slice(0, 10)
+      : (qqqBundledLatest?.dateIso ?? '2026-11-04');
+  const asOfDateIso = sourceObservationDateIso;
+  const fundamentalCutoffDateIso = qqqBundledLatest?.dateIso ?? '2026-11-04';
+
+  const reportGeneratedAtMs =
+    options?.reportGeneratedAtMs ?? options?.morningBriefing?.generatedAt ?? null;
+  const reportGeneratedAtIso =
+    reportGeneratedAtMs !== null ? new Date(reportGeneratedAtMs).toISOString() : null;
+
+  const referenceNowMs =
+    options?.nowMs ??
+    reportGeneratedAtMs ??
+    sourceObservationAtMs ??
+    Date.parse('2026-11-04T21:00:00Z');
+  const marketObservationAgeMs =
+    sourceObservationAtMs !== null
+      ? Math.max(0, referenceNowMs - sourceObservationAtMs)
+      : null;
+  const isMarketObservationStale =
+    marketObservationAgeMs === null || marketObservationAgeMs > 4 * 86_400_000;
+
+  const provenanceMode: ExecutiveBriefingSummary['provenanceMode'] =
+    hasNewerPersistedQqq
+      ? 'live_persisted_observations_deterministic'
+      : 'historical_snapshot';
+  const provenanceLabel = hasNewerPersistedQqq
+    ? 'Persisted EOD observations + deterministic SEC/TypeDB synthesis (live LLM inference NOT IMPLEMENTED)'
+    : 'Historical research snapshot (live market feed unavailable or unconfigured)';
+  const headingLabel =
+    hasNewerPersistedQqq && !isMarketObservationStale
+      ? `Research as of ${asOfDateIso}`
+      : `Historical Research Snapshot (As of ${asOfDateIso})`;
+
+  const temporalAlignment: ExecutiveBriefingSummary['temporalAlignment'] =
+    hasNewerPersistedQqq && asOfDateIso !== fundamentalCutoffDateIso
+      ? 'hybrid_live_market_with_historical_fundamentals'
+      : 'aligned_historical_snapshot';
+
+  const temporalAlignmentNotice =
+    temporalAlignment === 'hybrid_live_market_with_historical_fundamentals'
+      ? `Market price observations are as of ${asOfDateIso} (persisted EOD close), whereas fundamental SEC/TypeDB relationship tables remain anchored to the ${fundamentalCutoffDateIso} verified filing cut-off${reportGeneratedAtIso ? `; morning briefing record generated ${reportGeneratedAtIso.slice(0, 19).replace('T', ' ')} UTC` : ''}. Cross-cutoff returns are never blended.`
+      : isMarketObservationStale
+        ? `Displaying historical research snapshot as of ${asOfDateIso}; market observations are ${Math.round((marketObservationAgeMs ?? 0) / 86_400_000)} day(s) old relative to evaluation time.`
+        : null;
+
+  const qqqBundled1dPct =
+    qqqBundledLatest && qqqBundledPrev
+      ? (((qqqBundledLatest.close - qqqBundledPrev.close) / qqqBundledPrev.close) * 100).toFixed(2)
+      : null;
+  const qqqAnchorCumulativePct =
+    hasNewerPersistedQqq && qqqBundledLatest
+      ? (((liveQqq!.close! - qqqBundledLatest.close) / qqqBundledLatest.close) * 100).toFixed(2)
       : null;
 
   const nvda = assessments.find((a) => a.ticker === 'NVDA');
   const msft = assessments.find((a) => a.ticker === 'MSFT');
 
+  const marketEnvironmentSentence = hasNewerPersistedQqq
+    ? `Market Environment (Market observation as of ${asOfDateIso}): Nasdaq-100 benchmark QQQ closed at $${liveQqq!.close!.toFixed(2)} USD (${qqqAnchorCumulativePct !== null ? `${Number(qqqAnchorCumulativePct) >= 0 ? '+' : ''}${qqqAnchorCumulativePct}% cumulative since the ${qqqBundledLatest!.dateIso} snapshot anchor of $${qqqBundledLatest!.close.toFixed(2)}, delayed unadjusted EOD close` : 'delayed EOD reference close'}); Case 006 v2 regime classification remains anchored to its ${fundamentalCutoffDateIso} cut-off and is not extrapolated across later sessions.`
+    : `Market Environment (As of ${qqqBundledLatest?.dateIso ?? '2026-11-04'}): Nasdaq-100 benchmark QQQ closed at $${qqqBundledLatest?.close.toFixed(2) ?? '691.95'} USD (${qqqBundled1dPct !== null ? `${Number(qqqBundled1dPct) >= 0 ? '+' : ''}${qqqBundled1dPct}% vs $${qqqBundledPrev?.close.toFixed(2) ?? '685.28'} on ${qqqBundledPrev?.dateIso ?? '2026-11-03'}, delayed unadjusted EOD close` : 'delayed EOD reference close'}), with Case 006 v2 classifying the post-3 November technology move as an unconfirmed single-session rebound inside a five-session consolidation window.`;
+
+  const changesSentence = hasNewerPersistedQqq
+    ? `Changes & Provenance (${fundamentalCutoffDateIso} Snapshot Cut-Off → ${asOfDateIso} Market Observation${reportGeneratedAtIso ? ` · Report Generated ${reportGeneratedAtIso.slice(0, 10)}` : ''}): Persisted EOD market closes are updated through ${asOfDateIso}, all 23/23 TypeDB production relationships remain reconciled at the ${fundamentalCutoffDateIso} snapshot (0ms lag, Loughton v1 cancellation superseded on 2026-10-19 by active v2), and all 7 tracked equities remain locked at INSUFFICIENT DATA with zero directional rating changes.`
+    : `Changes Since Prior Session (${qqqBundledPrev?.dateIso ?? '2026-11-03'} → ${qqqBundledLatest?.dateIso ?? '2026-11-04'}): Across the latest completed session, all 23/23 TypeDB production relationships remain reconciled (0ms lag, Loughton v1 cancellation superseded on 2026-10-19 by active v2), and all 7 tracked equities remain locked at INSUFFICIENT DATA with zero directional rating changes.`;
+
   return {
-    asOfDateIso: qqqLatest?.dateIso ?? '2026-11-05',
+    asOfDateIso,
+    sourceObservationAtMs,
+    sourceObservationDateIso,
+    fundamentalCutoffDateIso,
+    reportGeneratedAtMs,
+    reportGeneratedAtIso,
+    temporalAlignment,
+    temporalAlignmentNotice,
+    provenanceMode,
+    provenanceLabel,
+    headingLabel,
+    isMarketObservationStale,
+    marketObservationAgeMs,
     dataReadinessStatus: 'ready_verified_evidence',
     sentences: {
-      marketEnvironment: `1. Market Environment (As of ${qqqLatest?.dateIso ?? '2026-11-05'}): Nasdaq-100 benchmark QQQ closed at $${qqqLatest?.close.toFixed(2) ?? '647.05'} USD (${qqq1dPct !== null ? `${Number(qqq1dPct) >= 0 ? '+' : ''}${qqq1dPct}% vs $${qqqPrev?.close.toFixed(2) ?? '638.22'} on ${qqqPrev?.dateIso ?? '2026-11-04'}, delayed unadjusted EOD close` : 'delayed EOD reference close'}), with Case 006 v2 classifying the post-3 November technology move as an unconfirmed single-session rebound inside a five-session consolidation window.`,
-      sectorDevelopments: `2. Major Sector Developments (Filings 2026-09-18 to 2026-11-02): Verified SEC Form S-1/A (filed 2026-11-02) and Form 10-Q disclosures in the TypeDB knowledge graph document $895.4B USD of deduplicated multi-year AI compute commitments across Amazon, Alphabet, Microsoft, and Anthropic (preventing $44.6B USD of double-counting on Nscale’s Monarch sub-allocation disclosed 2026-09-18).`,
-      strongestResearchOpportunities: `3. Non-Directional Screening Priorities (Gated — Not Buy/Hold/Sell Recommendations): Zero directional ratings are emitted because licensed valuation multiples (30% weight) and 252-day split-adjusted histories are unconfigured, but NVIDIA (FY27 Q2 ended 2026-07-26: $96,221M revenue, 66.2% GAAP operating margin, $21,341M FCF; screening score ${nvda?.researchPriorityScore ?? 82.3}/100) and Microsoft (FY27 Q1 ended 2026-09-30: $92,279M revenue, +48% YoY Azure growth, 49.8% operating margin, $18,633M derived FCF; screening score ${msft?.researchPriorityScore ?? 73.7}/100) lead verified fundamental coverage.`,
-      highestMaterialRisks: `4. Highest Material Risks (Q3 2026 Ended 2026-09-30): Hyperscaler AI capital expenditure has compressed free cash flow negative—Alphabet’s 2026-Q3 FCF fell to -$9.065B USD after $51.355B Q3 capex (filed 2026-10-28), and Amazon’s TTM-2026-Q3 net capex surged to $210,657M USD (125.2% of $168,300M TTM OCF, pushing TTM FCF to -$42,357M USD vs +$14,788M USD / 88.7% net capex/OCF in TTM-2025-Q3; filed 2026-10-29)—alongside US/Ireland electricity-grid constraints (350 MW AWS Dublin EirGrid dependency and New York EO 62 moratorium) and unsigned Monarch credit-support discussions (reported 2026-10-30).`,
-      changesSincePriorSession: `5. Changes Since Prior Session (${qqqPrev?.dateIso ?? '2026-11-04'} → ${qqqLatest?.dateIso ?? '2026-11-05'}): Across the latest completed session, all 23/23 TypeDB production relationships remain reconciled (0ms lag, Loughton v1 cancellation superseded on 2026-10-19 by active v2), and all 7 tracked equities remain locked at INSUFFICIENT DATA with zero directional rating changes.`,
+      marketEnvironment: marketEnvironmentSentence,
+      sectorDevelopments: `Major Sector Developments (Filings 2026-09-18 to 2026-11-02): Verified SEC Form S-1/A (filed 2026-11-02) and Form 10-Q disclosures in the TypeDB knowledge graph document $895.4B USD of deduplicated multi-year AI compute commitments across Amazon, Alphabet, Microsoft, and Anthropic (preventing $44.6B USD of double-counting on Nscale’s Monarch sub-allocation disclosed 2026-09-18).`,
+      strongestResearchOpportunities: `Non-Directional Screening Priorities (Gated — Not Buy/Hold/Sell Recommendations): Zero directional ratings are emitted because licensed valuation multiples (30% weight) and 252-day split-adjusted histories are unconfigured, but NVIDIA (FY27 Q2 ended 2026-07-26: $96,221M revenue, 66.2% GAAP operating margin, $21,341M FCF; screening score ${nvda?.researchPriorityScore ?? 82.3}/100) and Microsoft (FY27 Q1 ended 2026-09-30: $92,279M revenue, +48% YoY Azure growth, 49.8% operating margin, $18,633M derived FCF; screening score ${msft?.researchPriorityScore ?? 73.7}/100) lead verified fundamental coverage.`,
+      highestMaterialRisks: `Highest Material Risks (Q3 2026 Ended 2026-09-30): Hyperscaler AI capital expenditure has compressed free cash flow negative—Alphabet’s 2026-Q3 FCF fell to -$9.065B USD after $51.355B Q3 capex (filed 2026-10-28), and Amazon’s TTM-2026-Q3 net capex surged to $210,657M USD (125.2% of $168,300M TTM OCF, pushing TTM FCF to -$42,357M USD vs +$14,788M USD / 88.7% net capex/OCF in TTM-2025-Q3; filed 2026-10-29)—alongside US/Ireland electricity-grid constraints (350 MW AWS Dublin EirGrid dependency and New York EO 62 moratorium) and unsigned Monarch credit-support discussions (reported 2026-10-30).`,
+      changesSincePriorSession: changesSentence,
     },
     citedSourceIds: [
       'nvda-fy27-q2',

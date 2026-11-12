@@ -14,9 +14,22 @@ export function MorningBriefPanel({
  briefing,
  fixture,
 }:{
- briefing:MorningBriefingRecord;
+ briefing:MorningBriefingRecord|null;
  fixture?:boolean;
 }){
+ if(!briefing){
+  return (
+   <section className="cc-panel" id="morning-brief" aria-labelledby="morning-brief-title" data-testid="morning-brief-panel">
+    <header className="cc-panel-head">
+     <div>
+      <h2 id="morning-brief-title">Morning intelligence brief</h2>
+      <p>Sign in as an authorised researcher to load the full owner-scoped morning intelligence brief, or refer to Section A above for the public executive market synthesis.</p>
+     </div>
+     <span className="cc-badge cc-public_reference">Execution authority: none</span>
+    </header>
+   </section>
+  );
+ }
  return (
   <section className="cc-panel" id="morning-brief" aria-labelledby="morning-brief-title" data-testid="morning-brief-panel">
    <header className="cc-panel-head">
