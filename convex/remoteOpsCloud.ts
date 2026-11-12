@@ -20,6 +20,10 @@ import {
 import {
  evaluateAiCapexModerationThesis,
 } from '../lib/research-ratings/thesis-monitor';
+import {
+ selectCurrentSecXbrlFact,
+ type SecCompanyFactsPayload,
+} from '../lib/remote-ops/sec-xbrl-fact-selector';
 
 const internalAction:ActionBuilder<DataModel,'internal'>=internalActionGeneric;
 
@@ -73,6 +77,8 @@ type SecSubmissionHeader={
  accession:string;
  form:string;
  filed:string;
+ reportDate?:string|null;
+ acceptanceDateTime?:string|null;
  docUrl:string;
  publishedMs:number;
 };
@@ -96,11 +102,21 @@ async function fetchSecSubmissionHeader(params:{
   return null;
  }
  let filingIdx=-1;
+ // Prefer periodic XBRL financial statement filings (10-Q, 10-K, 10-Q/A, 10-K/A) over 8-K notices
  for(let i=0;i<recent.form.length;i++){
   const f=recent.form[i];
-  if(f==='10-Q'||f==='10-K'||f==='8-K'){
+  if(f==='10-Q'||f==='10-K'||f==='10-Q/A'||f==='10-K/A'){
    filingIdx=i;
    break;
+  }
+ }
+ if(filingIdx<0){
+  for(let i=0;i<recent.form.length;i++){
+   const f=recent.form[i];
+   if(f==='8-K'){
+    filingIdx=i;
+    break;
+   }
   }
  }
  if(filingIdx<0)filingIdx=0;
@@ -108,9 +124,12 @@ async function fetchSecSubmissionHeader(params:{
  const accessionNoHyphens=accession.replace(/-/g,'');
  const form=recent.form[filingIdx]??'10-Q';
  const filed=recent.filingDate[filingIdx]??'2026-01-01';
+ const reportDate=recent.reportDate?.[filingIdx]??null;
+ const acceptanceDateTime=recent.acceptanceDateTime?.[filingIdx]??null;
  const primaryDoc=recent.primaryDocument?.[filingIdx]??`${accession}.txt`;
  const docUrl=`https://www.sec.gov/Archives/edgar/data/${cikNumeric}/${accessionNoHyphens}/${primaryDoc}`;
- const publishedMs=Date.parse(`${filed}T16:00:00Z`);
+ const acceptedMs=acceptanceDateTime?Date.parse(acceptanceDateTime):NaN;
+ const publishedMs=Number.isFinite(acceptedMs)?acceptedMs:Date.parse(`${filed}T16:00:00Z`);
  return {
   ticker:params.ticker,
   cik:params.cik,
@@ -118,6 +137,8 @@ async function fetchSecSubmissionHeader(params:{
   accession,
   form,
   filed,
+  reportDate,
+  acceptanceDateTime,
   docUrl,
   publishedMs,
  };
@@ -133,28 +154,35 @@ async function fetchSecCompanyFactsCandidate(params:{
  const factsUrl=`https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`;
  const factsResp=await fetch(factsUrl,{headers:{'User-Agent':params.userAgent,'Accept':'application/json'}});
  if(!factsResp.ok)throw new Error(`SEC companyfacts HTTP ${factsResp.status} for ${header.ticker}`);
- const facts=(await factsResp.json()) as SecCompanyFactsJson;
+ const facts=(await factsResp.json()) as SecCompanyFactsPayload;
 
- const gaap=facts.facts?.['us-gaap']??{};
- const capexConcept=gaap.PaymentsToAcquirePropertyPlantAndEquipment??gaap.CapitalExpendituresIncurredButNotYetPaid;
- const revConcept=gaap.RevenueFromContractWithCustomerExcludingAssessedTax??gaap.Revenues??gaap.SalesRevenueNet;
+ const selected=selectCurrentSecXbrlFact({
+  factsPayload:facts,
+  header,
+  asOfMs:params.now,
+ });
+ // Do not mark or stage financial values as current unless a valid current reporting period was established
+ if(
+  !selected.eligible||
+  !selected.isCurrentReportingPeriod||
+  selected.valueBillions===null||
+  !selected.periodLabel||
+  !selected.metricKind
+ ){
+  return null;
+ }
 
- const chosenConcept=capexConcept?.units?.USD?.length?capexConcept:revConcept;
- const metricKind=chosenConcept===capexConcept?'capital expenditures':'revenue';
- const units=chosenConcept?.units?.USD??[];
- const tenKOrQ=units.filter(u=>typeof u.val==='number'&&u.val>0&&(u.form==='10-Q'||u.form==='10-K')&&u.filed);
- tenKOrQ.sort((a,b)=>String(b.filed).localeCompare(String(a.filed)));
- const latestFact=tenKOrQ[0];
- if(!latestFact||typeof latestFact.val!=='number')return null;
-
- const valueBillions=Number((latestFact.val/1e9).toFixed(2));
- const fy=latestFact.fy??Number(header.filed.slice(0,4));
- const fp=latestFact.fp&&latestFact.fp!=='FY'?`${latestFact.fp} ${fy}`:`FY${fy}`;
+ const valueBillions=selected.valueBillions;
+ const fp=selected.periodLabel;
+ const metricKind=selected.metricKind;
+ const effectiveForm=selected.form??header.form;
+ const effectiveAccession=selected.accession??header.accession;
+ const effectiveFiled=selected.filed??header.filed;
 
  const candidate:RawArticleCandidate={
   url:header.docUrl,
-  title:`${header.name} (${header.ticker}) SEC Form ${header.form} (${header.accession}) — ${fp} XBRL disclosure`,
-  text:`In SEC Form ${header.form} (accession ${header.accession}, filed ${header.filed}), ${header.name} (${header.ticker}) reported $${valueBillions} billion in ${metricKind} for ${fp}. Primary XBRL filing retrieved from ${header.docUrl}.`,
+  title:`${header.name} (${header.ticker}) SEC Form ${effectiveForm} (${effectiveAccession}) — ${fp} XBRL disclosure`,
+  text:`In SEC Form ${effectiveForm} (accession ${effectiveAccession}, filed ${effectiveFiled}, period ended ${selected.periodEnd}), ${header.name} (${header.ticker}) reported $${valueBillions} billion in ${metricKind} for ${fp}. Primary XBRL filing retrieved from ${header.docUrl}.`,
   publishedAt:Number.isFinite(header.publishedMs)&&header.publishedMs<=params.now?header.publishedMs:params.now-86_400_000,
   receivedAt:params.now,
   primarySourceUrl:header.docUrl,
@@ -163,9 +191,9 @@ async function fetchSecCompanyFactsCandidate(params:{
 
  return {
   candidate,
-  accession:header.accession,
-  form:header.form,
-  filed:header.filed,
+  accession:effectiveAccession,
+  form:effectiveForm,
+  filed:effectiveFiled,
   metricLabel:metricKind,
   valueBillions,
   period:fp,
@@ -479,11 +507,12 @@ export const runScheduledCloudCycle=internalAction({
      const durationMs=Math.max(1,Date.now()-jobStart);
 
      const hasGeminiKey=Boolean(process.env.GEMINI_API_KEY);
+     // Live LLM inference and external news collection in background cloud actions are NOT IMPLEMENTED;
+     // always label 0-token runs as deterministic so they are never mistaken for live AI inference.
      const modelLabel=conditionalSkip
       ?'cursor-change-detector-v2 (0 model calls — no new upstream sources)'
-      :hasGeminiKey
-       ?(process.env.GEMINI_MODEL||'gemini-2.5-flash')
-       :'deterministic-sec-xbrl-extractor-v1 (GEMINI_API_KEY not configured)';
+      :'deterministic-sec-xbrl-extractor-v1 (live LLM inference NOT IMPLEMENTED; 0 model calls)';
+     void hasGeminiKey;
 
      const workflow=runNewsResearchAgentWorkflow({
       runId,
@@ -762,9 +791,8 @@ export const runScheduledCloudCycle=internalAction({
      }));
 
      const hasGeminiKey=Boolean(process.env.GEMINI_API_KEY);
-     const modelLabel=hasGeminiKey
-      ?(process.env.GEMINI_MODEL||'gemini-2.5-flash')
-      :'deterministic-sec-xbrl-extractor-v1 (GEMINI_API_KEY not configured)';
+     // Live LLM narrative synthesis in morning briefings is NOT IMPLEMENTED; record deterministic label and null modelVersion.
+     const modelLabel='deterministic-sec-xbrl-extractor-v1 (live LLM inference NOT IMPLEMENTED; 0 model calls)';
 
      const briefingPayload=JSON.stringify({
       confirmedFacts,
@@ -815,7 +843,7 @@ export const runScheduledCloudCycle=internalAction({
         resolutionHref:'/recovery#participation',
        }]:[]),
       ],
-      modelVersion:hasGeminiKey?modelLabel:null,
+      modelVersion:null,
      });
 
      const durationMs=Math.max(1,Date.now()-jobStart);

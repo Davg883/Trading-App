@@ -20,11 +20,14 @@ import {
   evaluateAiCapexModerationThesis,
 } from '../../lib/research-ratings/thesis-monitor';
 import type { WatchItem } from './holdings-panel';
+import type { MorningBriefingRecord } from '../../lib/remote-ops/contracts';
 
 interface ExecutiveOverviewProps {
   watchlist: WatchItem[];
   ownedTickers: string[];
   now: number;
+  morningBriefing?: MorningBriefingRecord | null;
+  reportGeneratedAtMs?: number | null;
   portfolioSnapshotSlot?: React.ReactNode;
 }
 
@@ -47,6 +50,8 @@ export function ExecutiveOverviewSections({
   watchlist,
   ownedTickers,
   now,
+  morningBriefing,
+  reportGeneratedAtMs,
   portfolioSnapshotSlot,
 }: ExecutiveOverviewProps) {
   const assessments = useMemo(
@@ -59,8 +64,22 @@ export function ExecutiveOverviewSections({
   );
 
   const briefing = useMemo(
-    () => buildExecutiveMarketBriefing(assessments),
-    [assessments],
+    () =>
+      buildExecutiveMarketBriefing(assessments, {
+        liveWatchlist: watchlist,
+        morningBriefing: morningBriefing
+          ? {
+              briefingDate: morningBriefing.briefingDate,
+              generatedAt: morningBriefing.generatedAt,
+              modelVersion: morningBriefing.modelVersion,
+              confirmedFactsCount: morningBriefing.confirmedFacts.length,
+              incompleteEvidenceCount: morningBriefing.incompleteEvidence.length,
+            }
+          : null,
+        nowMs: now || undefined,
+        reportGeneratedAtMs: reportGeneratedAtMs ?? morningBriefing?.generatedAt ?? null,
+      }),
+    [assessments, watchlist, morningBriefing, now, reportGeneratedAtMs],
   );
   const whatChanged = useMemo(
     () => buildWhatChangedSummary(assessments),
@@ -297,17 +316,31 @@ export function ExecutiveOverviewSections({
           <div>
             <div className="g6-eyebrow-row">
               <span className="g6-section-tag">SECTION A · EXECUTIVE BRIEFING</span>
-              <span className="g6-meta-pill">
-                As of {briefing.asOfDateIso} · Primary SEC &amp; TypeDB Evidence Only
+              <span className="g6-meta-pill" data-testid="briefing-observation-asof">
+                Market observation as of {briefing.asOfDateIso} · Fundamental &amp; graph cut-off: {briefing.fundamentalCutoffDateIso}
+              </span>
+              {briefing.reportGeneratedAtIso && (
+                <span className="g6-meta-pill" data-testid="briefing-last-refreshed">
+                  Last refreshed {briefing.reportGeneratedAtIso.slice(0, 16).replace('T', ' ')} UTC
+                </span>
+              )}
+              <span className="g6-meta-pill" data-testid="briefing-provenance-pill">
+                {briefing.provenanceLabel}
               </span>
               <span className="g6-meta-pill">Execution authority: none</span>
             </div>
-            <h2 id="g6-briefing-title">Today&apos;s Market Briefing</h2>
+            <h2 id="g6-briefing-title">{briefing.headingLabel}</h2>
             <p>
               Five-sentence executive synthesis of the researched AI &amp; technology
-              universe. Every figure traces to verified SEC filings, TypeDB Cloud
-              hypergraph relationships, or delayed Nasdaq reference closes.
+              universe. Source observation timestamps are separated from report generation
+              timestamps; every figure traces to verified SEC filings, TypeDB
+              relationships, or delayed EOD reference closes.
             </p>
+            {briefing.temporalAlignmentNotice && (
+              <p className="cc-note" data-testid="briefing-freshness-notice">
+                {briefing.temporalAlignmentNotice}
+              </p>
+            )}
           </div>
           <div className="g6-head-actions">
             <Link className="cc-fix" href="/data-room">
@@ -317,11 +350,11 @@ export function ExecutiveOverviewSections({
         </header>
 
         <ol className="g6-five-sentence-list" data-testid="executive-tldr-sentences">
-          <li>{briefing.sentences.marketEnvironment}</li>
-          <li>{briefing.sentences.sectorDevelopments}</li>
-          <li>{briefing.sentences.strongestResearchOpportunities}</li>
-          <li>{briefing.sentences.highestMaterialRisks}</li>
-          <li>{briefing.sentences.changesSincePriorSession}</li>
+          <li>{briefing.sentences.marketEnvironment.replace(/^\d+\.\s+/, '')}</li>
+          <li>{briefing.sentences.sectorDevelopments.replace(/^\d+\.\s+/, '')}</li>
+          <li>{briefing.sentences.strongestResearchOpportunities.replace(/^\d+\.\s+/, '')}</li>
+          <li>{briefing.sentences.highestMaterialRisks.replace(/^\d+\.\s+/, '')}</li>
+          <li>{briefing.sentences.changesSincePriorSession.replace(/^\d+\.\s+/, '')}</li>
         </ol>
 
         <footer className="g6-briefing-footer">

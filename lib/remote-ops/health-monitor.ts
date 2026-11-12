@@ -217,6 +217,19 @@ export type EvidenceChatOperationsSummary = {
  lastChatAtMs: number | null;
 };
 
+export type AgentAndProviderStageDistinction = {
+ collectorRunning: boolean;
+ deterministicProcessingCompleted: boolean;
+ modelInferenceAttempted: boolean;
+ modelInferenceSucceeded: boolean;
+ providerUnavailable: boolean;
+ researchValidated: boolean;
+ briefingPublished: boolean;
+ liveAgentInferenceStatus: 'NOT IMPLEMENTED';
+ externalNewsFeedCollectionStatus: 'NOT IMPLEMENTED';
+ detail: string;
+};
+
 export type CollectionHealthReport={
  evaluatedAt:number;
  systemEnabled:boolean;
@@ -228,6 +241,7 @@ export type CollectionHealthReport={
  dailyCostGbp:{estimated:number;actual:number;ceiling:number;exceeded:boolean};
  monthlyCostGbp:{estimated:number;actual:number;ceiling:number;exceeded:boolean};
  operationalLayers:OperationalLayerStatus;
+ agentAndProviderStages:AgentAndProviderStageDistinction;
  executionPaths:HostedExecutionPathItem[];
  jobs:JobHealthSummary[];
  providers:ProviderCredentialState[];
@@ -549,10 +563,10 @@ export function evaluateCollectionHealth(input:{
   },
   {
    id:'github_actions_workflow',
-   label:'GitHub Actions Scheduler (.github/workflows/remote-research-operations.yml)',
+   label:'GitHub Actions CI Workflow (.github/workflows/remote-research-operations.yml)',
    deployment:'undeployed_config',
-   status:'unavailable',
-   detail:'Committed in local Git repository; inactive in cloud until a remote GitHub origin and repository secrets are configured.',
+   status:'standby',
+   detail:'Runs least-privilege checks and Python unit tests (test_remote_research.py) on schedule; skips HTTP collector triggers because OPERATIONS_SCHEDULER_SECRET and RESEARCH_APP_ORIGIN are unset, while Convex crons execute collection independently.',
   },
   {
    id:'antigravity_desktop_sidecars',
@@ -569,6 +583,61 @@ export function evaluateCollectionHealth(input:{
    detail:'Unconfigured; market_data_collect uses delayed EOD reference closes and refuses to treat delayed closes as live quotes.',
   },
  ];
+
+ // Explicit 7-state agent & provider distinction (Priority 2):
+ // Never infer model inference or live provider health from historical chat records or 0-token deterministic runs.
+ const recentRuns=input.recentRuns??[];
+ const collectorRunning=
+  schedulerWorking&&
+  jobs.some(j=>j.enabled&&j.lastRunAt!==null&&j.freshness!=='stale'&&j.freshness!=='unavailable');
+ const deterministicProcessingCompleted=
+  jobs.some(j=>j.lastSuccessAt!==null&&!j.lastErrorCode)||
+  recentRuns.some(r=>r.status==='succeeded');
+ const modelInferenceAttempted=recentRuns.some(
+  r=>
+   r.category==='remote_agent'&&
+   (r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)),
+ );
+ const modelInferenceSucceeded=recentRuns.some(
+  r=>
+   r.category==='remote_agent'&&
+   r.status==='succeeded'&&
+   !r.errorCode&&
+   (r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)),
+ );
+ const providerUnavailable=!modelInferenceSucceeded;
+ const researchValidated=
+  promotedTotal>0||recentRuns.some(r=>r.evidencePromoted>0);
+ const briefingPublished=
+  briefingStatus==='generated'&&briefingGeneratedAt!==null;
+
+ const agentAndProviderStages:AgentAndProviderStageDistinction={
+  collectorRunning,
+  deterministicProcessingCompleted,
+  modelInferenceAttempted,
+  modelInferenceSucceeded,
+  providerUnavailable,
+  researchValidated,
+  briefingPublished,
+  liveAgentInferenceStatus:'NOT IMPLEMENTED',
+  externalNewsFeedCollectionStatus:'NOT IMPLEMENTED',
+  detail:modelInferenceSucceeded
+   ?'Authenticated background LLM inference succeeded with non-zero token usage.'
+   :'Deterministic SEC XBRL & EOD market collection completed (0 LLM tokens); live background LLM inference and external news feed ingestion are NOT IMPLEMENTED.',
+ };
+
+ // Prevent historical chat records or 0-token deterministic runs from marking remote_ai_models as 'connected'
+ const sanitizedEnvironmentAudit=input.environmentAudit?.map(svc=>{
+  if(svc.serviceId==='remote_ai_models'&&!modelInferenceSucceeded&&svc.status==='connected'){
+   return {
+    ...svc,
+    status:'unavailable' as const,
+    lastVerifiedAt:null,
+    detail:'Live background LLM inference and external news collection are NOT IMPLEMENTED (0 background LLM calls, £0.00 cost); deterministic SEC XBRL extractor active.',
+   };
+  }
+  return svc;
+ });
 
  return {
   evaluatedAt:now,
@@ -591,11 +660,12 @@ export function evaluateCollectionHealth(input:{
    exceeded:monthlyExceeded,
   },
   operationalLayers,
+  agentAndProviderStages,
   executionPaths,
   jobs,
   providers,
   alerts,
-  ...(input.environmentAudit?{environmentAudit:input.environmentAudit}:{}),
+  ...(sanitizedEnvironmentAudit?{environmentAudit:sanitizedEnvironmentAudit}:{}),
   ...(input.graphProjection?{graphProjection:input.graphProjection}:{}),
   ...(input.recentRuns?{recentRuns:input.recentRuns}:{}),
   ...(input.evidenceChat?{evidenceChat:input.evidenceChat}:{}),

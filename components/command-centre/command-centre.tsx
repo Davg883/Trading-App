@@ -61,6 +61,9 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  const missingPrices=feed.watchlist.filter(w=>w.close===null).map(w=>w.ticker);
  const activeHealth=operations?.health??feed.agentOperations;
  const activeBriefing=operations?.latestBriefing??feed.morningBriefing;
+ const latestWatchlistAt=feed.watchlist.reduce<number|null>((max,w)=>w.closeAt!==null&&(max===null||w.closeAt>max)?w.closeAt:max,feed.marketDataAsOf??null);
+ const marketObsAgeMs=latestWatchlistAt!==null?Math.max(0,now-latestWatchlistAt):null;
+ const marketObsStale=marketObsAgeMs===null||marketObsAgeMs>4*86_400_000;
  const alerts:Alert[]=[
   ...(!configured?[{id:'cfg',tone:'warn' as const,title:'Accounts not configured.',detail:'Clerk, Convex and the broker vault are required to show your account.',href:BROKER,hrefLabel:'Broker setup'}]:!signedIn?[{id:'signin',tone:'info' as const,title:'Signed out.',detail:'Sign in to load your Trading 212 account.'}]:[]),
   ...(signedIn&&!data?.connection?[{id:'noconn',tone:'warn' as const,title:'No broker connection.',detail:`No ${env} Trading 212 connection saved.`,href:BROKER,hrefLabel:'Connect Trading 212'}]:[]),
@@ -69,6 +72,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
   ...(snap&&all&&all.series.length<2?[{id:'history',tone:'info' as const,title:'No performance history yet.',detail:`${all.observations} stored valuation(s); returns need at least two syncs over time.`,href:BROKER,hrefLabel:'Synchronise on Broker Connections'}]:[]),
   ...((count(['reviewed'])??0)>0?[{id:'approvals',tone:'alert' as const,title:'Approvals waiting.',detail:`${count(['reviewed'])} order proposal(s) await review.`,href:'/trading#orders',hrefLabel:'Review'}]:[]),
   ...((count(['unknown','submitting'])??0)>0?[{id:'unknown',tone:'alert' as const,title:'Order outcome unknown.',detail:'It will not be re-sent.',href:'/trading#orders',hrefLabel:'Reconcile against Trading 212'}]:[]),
+  ...(marketObsStale?[{id:'market-stale',tone:'warn' as const,title:'Historical research snapshot active (collector stale or unverified).',detail:`Displayed market observations are as of ${iso(latestWatchlistAt)} (${marketObsAgeMs!==null?age(marketObsAgeMs):'unknown age'}); verify background market-data collector freshness.`,href:'#agent-operations',hrefLabel:'Inspect collector health'}]:[]),
   ...(activeHealth.alerts.map(a=>({id:a.id,tone:a.severity,title:a.title,detail:a.detail,href:a.href,hrefLabel:'Inspect'}))),
   {id:'market',tone:'info',title:'Market data is delayed.',detail:`Watchlist prices are public reference closes as of ${iso(feed.marketDataAsOf)}; no licensed real-time feed is connected${missingPrices.length?`; no price for ${missingPrices.join(', ')}`:''}.`,href:'/policy-risk#sources',hrefLabel:'View price evidence'},
   {id:'exec',tone:flags.live?'alert':'info',title:`Live submission ${flags.live?'ENABLED':'disabled'}.`,detail:`Demo submission ${flags.demo?'enabled':'disabled'}. This page cannot change trading permissions.`,href:'/trading#controls',hrefLabel:'Trading controls'},
@@ -124,7 +128,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
   {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
   <AlertsCentre alerts={alerts} links={LINKS}/>
-  <ExecutiveOverviewSections watchlist={feed.watchlist} ownedTickers={ownedTickers} now={now} portfolioSnapshotSlot={portfolioSnapshotSection}/>
+  <ExecutiveOverviewSections watchlist={feed.watchlist} ownedTickers={ownedTickers} now={now} morningBriefing={activeBriefing} reportGeneratedAtMs={activeBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
   <details className="g6-drawer-details" data-testid="technical-evidence-details">
    <summary className="g6-drawer-summary">
     <span>Technical, Operations &amp; Evidence Audit Details (Agent Operations, Morning Brief, Watchlist &amp; Data Boundaries)</span>
