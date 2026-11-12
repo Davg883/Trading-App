@@ -14,6 +14,11 @@ import { researchFeed } from '../lib/portfolio/research-feed';
 import { evaluateCollectionHealth } from '../lib/remote-ops/health-monitor';
 import { buildWorkspaceConnectionsReport } from '../lib/remote-ops/workspace-connections';
 import { selectCurrentSecXbrlFact } from '../lib/remote-ops/sec-xbrl-fact-selector';
+import {
+  getSecXbrlCompanyRecord,
+  getSecXbrlExpansionPackage,
+} from '../lib/research-ratings/sec-xbrl-expansion';
+import secXbrlExpansionRaw from '../data/sec-xbrl/phase-g7-1-sec-xbrl-expansion.json';
 import { runScheduledCloudCycle } from '../convex/remoteOpsCloud';
 
 describe('Production Freshness Recovery & Research Integrity Regression Suite', () => {
@@ -1126,5 +1131,659 @@ describe('Production Freshness Recovery & Research Integrity Regression Suite', 
     expect(html).toContain('anchored to the 2026-11-04 verified filing cut-off');
     // Includes the morning briefing generation timestamp from `health.operationalLayers.briefing.generatedAt` even when `latestBriefing` is null
     expect(html).toContain('2026-11-12 07:30:16 UTC');
+  });
+
+  it('Phase 4B: Source-backed point-in-time SEC XBRL validation against actual repository-stored primary EDGAR filings (non-calendar fiscal years, comparative rows, 3M vs YTD vs 12M durations, negative losses/cash flows, instant facts, amended 10-K/A vs 8-K/A, and receipt-time cutoffs)', () => {
+    const asOfNov12Ms = Date.parse('2026-11-12T15:00:00Z');
+    const rawCompanies = secXbrlExpansionRaw.companies;
+    const toRawUnits = (
+      rows: Array<{
+        rawVal: number;
+        fy?: number | null;
+        fp?: string | null;
+        form?: string;
+        filed?: string;
+        accn?: string;
+        frame?: string | null;
+        start?: string | null;
+        end?: string;
+      }>,
+    ) =>
+      rows.map((r) => ({
+        val: r.rawVal,
+        fy: r.fy ?? undefined,
+        fp: r.fp ?? undefined,
+        form: r.form,
+        filed: r.filed,
+        accn: r.accn,
+        frame: r.frame ?? undefined,
+        start: r.start ?? undefined,
+        end: r.end,
+      }));
+
+    // 1. Non-calendar fiscal calendars & comparative-period / YTD rejection using actual stored NVDA (FY27 Q2 ended 2026-07-26) & MSFT (FY27 Q1 ended 2026-09-30) EDGAR facts
+    const nvdaStored = rawCompanies.NVDA;
+    const nvdaResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: nvdaStored.cik,
+        entityName: nvdaStored.entityName,
+        facts: {
+          'us-gaap': {
+            Revenues: {
+              units: {
+                USD: [
+                  ...toRawUnits(nvdaStored.rawXbrlFacts.quarterlyRevenues),
+                  ...toRawUnits(nvdaStored.rawXbrlFacts.ytdRevenues),
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: nvdaStored.ticker,
+        cik: nvdaStored.cik,
+        name: nvdaStored.entityName,
+        accession: nvdaStored.latestFiling.accessionNumber, // 0001045810-26-000075
+        form: nvdaStored.latestFiling.form, // 10-Q
+        filed: nvdaStored.latestFiling.filingDate, // 2026-08-26
+        reportDate: nvdaStored.latestFiling.reportDate, // 2026-07-26
+        acceptanceDateTime: nvdaStored.latestFiling.acceptanceDateTime,
+        docUrl: nvdaStored.latestFiling.docUrl,
+        publishedMs: nvdaStored.latestFiling.publishedAtMs,
+        receivedMs: nvdaStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+    });
+
+    // Must select current 3M quarter ($96,221,000,000 for 2026-04-27..2026-07-26, FY2027 Q2 / CY2026Q2)
+    // and reject both comparative prior-year Q2 ($46,743,000,000 ended 2025-07-27) and 6M YTD ($177,837,000,000) in the same filing
+    expect(nvdaResult.eligible).toBe(true);
+    expect(nvdaResult.accession).toBe('0001045810-26-000075');
+    expect(nvdaResult.form).toBe('10-Q');
+    expect(nvdaResult.fiscalYear).toBe(2027);
+    expect(nvdaResult.fiscalPeriod).toBe('Q2');
+    expect(nvdaResult.reportingFrame).toBe('CY2026Q2');
+    expect(nvdaResult.periodStart).toBe('2026-04-27');
+    expect(nvdaResult.periodEnd).toBe('2026-07-26');
+    expect(nvdaResult.periodSpanKind).toBe('three_month');
+    expect(nvdaResult.val).toBe(96_221_000_000);
+    expect(nvdaResult.valueBillions).toBe(96.22);
+
+    const msftStored = rawCompanies.MSFT;
+    const msftResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: msftStored.cik,
+        entityName: msftStored.entityName,
+        facts: {
+          'us-gaap': {
+            RevenueFromContractWithCustomerExcludingAssessedTax: {
+              units: {
+                USD: [
+                  ...toRawUnits(msftStored.rawXbrlFacts.quarterlyRevenues),
+                  ...toRawUnits(msftStored.rawXbrlFacts.ytdRevenues),
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: msftStored.ticker,
+        cik: msftStored.cik,
+        name: msftStored.entityName,
+        accession: msftStored.latestFiling.accessionNumber, // 0001193125-26-436133
+        form: msftStored.latestFiling.form, // 10-Q
+        filed: msftStored.latestFiling.filingDate, // 2026-10-28
+        reportDate: msftStored.latestFiling.reportDate, // 2026-09-30
+        acceptanceDateTime: msftStored.latestFiling.acceptanceDateTime,
+        docUrl: msftStored.latestFiling.docUrl,
+        publishedMs: msftStored.latestFiling.publishedAtMs,
+        receivedMs: msftStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+    });
+    expect(msftResult.eligible).toBe(true);
+    expect(msftResult.accession).toBe('0001193125-26-436133');
+    expect(msftResult.fiscalYear).toBe(2027);
+    expect(msftResult.fiscalPeriod).toBe('Q1');
+    expect(msftResult.reportingFrame).toBe('CY2026Q3');
+    expect(msftResult.periodStart).toBe('2026-07-01');
+    expect(msftResult.periodEnd).toBe('2026-09-30');
+    expect(msftResult.val).toBe(92_279_000_000);
+    expect(msftResult.valueBillions).toBe(92.28);
+
+    // 2. Negative operating loss, negative net loss, and negative cash flows from actual stored CRWV (0001769628-26-000366) & INTC (0000050863-26-000157) filings
+    const crwvStored = rawCompanies.CRWV;
+    const crwvNetLossResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: crwvStored.cik,
+        entityName: crwvStored.entityName,
+        facts: {
+          'us-gaap': {
+            NetIncomeLoss: {
+              units: {
+                USD: toRawUnits(crwvStored.rawXbrlFacts.quarterlyNetIncome),
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: crwvStored.ticker,
+        cik: crwvStored.cik,
+        name: crwvStored.entityName,
+        accession: crwvStored.latestFiling.accessionNumber, // 0001769628-26-000366
+        form: crwvStored.latestFiling.form, // 10-Q
+        filed: crwvStored.latestFiling.filingDate, // 2026-08-12
+        reportDate: crwvStored.latestFiling.reportDate, // 2026-06-30
+        acceptanceDateTime: crwvStored.latestFiling.acceptanceDateTime,
+        docUrl: crwvStored.latestFiling.docUrl,
+        publishedMs: crwvStored.latestFiling.publishedAtMs,
+        receivedMs: crwvStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+      preferredConceptName: 'NetIncomeLoss',
+    });
+    // Selects current Q2 2026 net loss (-$626,000,000 ended 2026-06-30) and rejects comparative Q1 net loss (-$740,000,000 ended 2026-03-31) in the same filing
+    expect(crwvNetLossResult.eligible).toBe(true);
+    expect(crwvNetLossResult.accession).toBe('0001769628-26-000366');
+    expect(crwvNetLossResult.isNegativeValue).toBe(true);
+    expect(crwvNetLossResult.periodStart).toBe('2026-04-01');
+    expect(crwvNetLossResult.periodEnd).toBe('2026-06-30');
+    expect(crwvNetLossResult.val).toBe(-626_000_000);
+    expect(crwvNetLossResult.valueBillions).toBe(-0.63);
+
+    const intcStored = rawCompanies.INTC;
+    const intcQ2Filing = intcStored.filingsHistory.find(
+      (f) => f.accessionNumber === '0000050863-26-000157',
+    )!;
+    const intcNetLossResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: intcStored.cik,
+        entityName: intcStored.entityName,
+        facts: {
+          'us-gaap': {
+            NetIncomeLoss: {
+              units: {
+                USD: toRawUnits(intcStored.rawXbrlFacts.quarterlyNetIncome),
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: intcStored.ticker,
+        cik: intcStored.cik,
+        name: intcStored.entityName,
+        accession: intcQ2Filing.accessionNumber, // 0000050863-26-000157
+        form: intcQ2Filing.form, // 10-Q
+        filed: intcQ2Filing.filingDate, // 2026-07-24
+        reportDate: intcQ2Filing.reportDate, // 2026-06-27
+        acceptanceDateTime: intcQ2Filing.acceptanceDateTime,
+        docUrl: intcQ2Filing.docUrl,
+        publishedMs: intcQ2Filing.publishedAtMs,
+        receivedMs: intcStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+      preferredConceptName: 'NetIncomeLoss',
+    });
+    expect(intcNetLossResult.eligible).toBe(true);
+    expect(intcNetLossResult.accession).toBe('0000050863-26-000157');
+    expect(intcNetLossResult.isNegativeValue).toBe(true);
+    expect(intcNetLossResult.periodEnd).toBe('2026-06-27');
+    expect(intcNetLossResult.val).toBe(-11_033_000_000);
+    expect(intcNetLossResult.valueBillions).toBe(-11.03);
+
+    // Also verify negative Free Cash Flow in the normalised SEC XBRL expansion package for GOOGL (-$9,065M Q3) and AMZN (-$33,456M Q3 / -$42,357M TTM)
+    const expPkg = getSecXbrlExpansionPackage();
+    expect(
+      expPkg.companies.GOOGL.normalisedFinancialValues.quarterlySeries.at(-1)
+        ?.freeCashFlowUsdMillions,
+    ).toBe(-9065);
+    expect(
+      expPkg.companies.AMZN.normalisedFinancialValues.quarterlySeries.at(-1)
+        ?.freeCashFlowUsdMillions,
+    ).toBe(-33456);
+    expect(
+      expPkg.companies.AMZN.normalisedFinancialValues.trailingTwelveMonths
+        .freeCashFlowUsdMillions,
+    ).toBe(-42357);
+
+    // 3. Duration values (3M vs 9M YTD vs 12M FY) from stored GOOGL (0001652044-26-000084) & AMD (0000002488-26-000018)
+    const googlStored = rawCompanies.GOOGL;
+    const googlFactsPayload = {
+      cik: googlStored.cik,
+      entityName: googlStored.entityName,
+      facts: {
+        'us-gaap': {
+          Revenues: {
+            units: {
+              USD: [
+                ...toRawUnits(googlStored.rawXbrlFacts.quarterlyRevenues),
+                ...toRawUnits(googlStored.rawXbrlFacts.ytdRevenues),
+              ],
+            },
+          },
+        },
+      },
+    };
+    const googlHeader = {
+      ticker: googlStored.ticker,
+      cik: googlStored.cik,
+      name: googlStored.entityName,
+      accession: googlStored.latestFiling.accessionNumber, // 0001652044-26-000084
+      form: googlStored.latestFiling.form, // 10-Q
+      filed: googlStored.latestFiling.filingDate, // 2026-10-29
+      reportDate: googlStored.latestFiling.reportDate, // 2026-09-30
+      acceptanceDateTime: googlStored.latestFiling.acceptanceDateTime,
+      docUrl: googlStored.latestFiling.docUrl,
+      publishedMs: googlStored.latestFiling.publishedAtMs,
+      receivedMs: googlStored.receivedAtMs,
+    };
+
+    const googl3M = selectCurrentSecXbrlFact({
+      factsPayload: googlFactsPayload,
+      header: googlHeader,
+      asOfMs: asOfNov12Ms,
+    });
+    expect(googl3M.eligible).toBe(true);
+    expect(googl3M.periodSpanKind).toBe('three_month');
+    expect(googl3M.periodStart).toBe('2026-07-01');
+    expect(googl3M.periodEnd).toBe('2026-09-30');
+    expect(googl3M.val).toBe(127_577_000_000);
+    expect(googl3M.valueBillions).toBe(127.58);
+
+    const googl9MYtd = selectCurrentSecXbrlFact({
+      factsPayload: googlFactsPayload,
+      header: googlHeader,
+      asOfMs: asOfNov12Ms,
+      preferredSpan: 'cumulative_ytd',
+    });
+    expect(googl9MYtd.eligible).toBe(true);
+    expect(googl9MYtd.periodSpanKind).toBe('cumulative_ytd');
+    expect(googl9MYtd.periodStart).toBe('2026-01-01');
+    expect(googl9MYtd.periodEnd).toBe('2026-09-30');
+    expect(googl9MYtd.val).toBe(357_269_000_000);
+    expect(googl9MYtd.valueBillions).toBe(357.27);
+
+    const amdStored = rawCompanies.AMD;
+    const amd10kFiling = amdStored.filingsHistory.find(
+      (f) => f.accessionNumber === '0000002488-26-000018',
+    )!;
+    const amd12M = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: amdStored.cik,
+        entityName: amdStored.entityName,
+        facts: {
+          'us-gaap': {
+            RevenueFromContractWithCustomerExcludingAssessedTax: {
+              units: {
+                USD: toRawUnits(amdStored.rawXbrlFacts.annualRevenues),
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: amdStored.ticker,
+        cik: amdStored.cik,
+        name: amdStored.entityName,
+        accession: amd10kFiling.accessionNumber, // 0000002488-26-000018
+        form: amd10kFiling.form, // 10-K
+        filed: amd10kFiling.filingDate, // 2026-02-04
+        reportDate: amd10kFiling.reportDate, // 2025-12-27
+        acceptanceDateTime: amd10kFiling.acceptanceDateTime,
+        docUrl: amd10kFiling.docUrl,
+        publishedMs: amd10kFiling.publishedAtMs,
+        receivedMs: amdStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+    });
+    // Selects FY2025 ($34,639,000,000 ended 2025-12-27) and rejects comparative FY2024 ($25,785,000,000 ended 2024-12-28) in the same 10-K
+    expect(amd12M.eligible).toBe(true);
+    expect(amd12M.periodSpanKind).toBe('full_year');
+    expect(amd12M.periodStart).toBe('2024-12-29');
+    expect(amd12M.periodEnd).toBe('2025-12-27');
+    expect(amd12M.val).toBe(34_639_000_000);
+    expect(amd12M.valueBillions).toBe(34.64);
+
+    // 4. Amended filings: AMD stored 10-K/A (0000002488-26-000021) vs 10-K (0000002488-26-000018) and MSFT stored 8-K/A (0001193125-24-062997) rejection
+    const amd10kAmendment = amdStored.restatementsAndAmendments.find(
+      (r) => r.accessionNumber === '0000002488-26-000021',
+    )!;
+    const amdAmendedFact = {
+      ...amdStored.rawXbrlFacts.annualRevenues[0]!,
+      accn: amd10kAmendment.accessionNumber,
+      form: amd10kAmendment.form,
+      filed: amd10kAmendment.filingDate,
+    };
+    const amdAmendmentResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: amdStored.cik,
+        entityName: amdStored.entityName,
+        facts: {
+          'us-gaap': {
+            RevenueFromContractWithCustomerExcludingAssessedTax: {
+              units: {
+                USD: toRawUnits([
+                  amdStored.rawXbrlFacts.annualRevenues[0]!,
+                  amdAmendedFact,
+                ]),
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: amdStored.ticker,
+        cik: amdStored.cik,
+        name: amdStored.entityName,
+        accession: amd10kAmendment.accessionNumber, // 0000002488-26-000021
+        form: amd10kAmendment.form, // 10-K/A
+        filed: amd10kAmendment.filingDate, // 2026-02-04
+        reportDate: amd10kAmendment.reportDate, // 2025-12-27
+        acceptanceDateTime: amd10kAmendment.acceptanceDateTime,
+        docUrl: amd10kAmendment.docUrl,
+        publishedMs: amd10kAmendment.publishedAtMs,
+        receivedMs: amdStored.receivedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+    });
+    expect(amdAmendmentResult.eligible).toBe(true);
+    expect(amdAmendmentResult.isAmendment).toBe(true);
+    expect(amdAmendmentResult.form).toBe('10-K/A');
+    expect(amdAmendmentResult.accession).toBe('0000002488-26-000021');
+
+    const msft8kAmendment = msftStored.restatementsAndAmendments[0]!; // 8-K/A 0001193125-24-062997
+    const msft8kRejected = selectCurrentSecXbrlFact({
+      factsPayload: {},
+      header: {
+        ticker: msftStored.ticker,
+        cik: msftStored.cik,
+        name: msftStored.entityName,
+        accession: msft8kAmendment.accessionNumber,
+        form: msft8kAmendment.form, // 8-K/A
+        filed: msft8kAmendment.filingDate,
+        reportDate: msft8kAmendment.reportDate,
+        acceptanceDateTime: msft8kAmendment.acceptanceDateTime,
+        docUrl: msft8kAmendment.docUrl,
+        publishedMs: msft8kAmendment.publishedAtMs,
+      },
+      asOfMs: asOfNov12Ms,
+    });
+    expect(msft8kRejected.eligible).toBe(false);
+    expect(msft8kRejected.rejectionReason).toBe('unsupported_non_periodic_form:8-K/A');
+
+    // 5. Instant values (balance sheet cash and common shares outstanding) from stored AMZN (0001018724-26-000040)
+    const amznStored = rawCompanies.AMZN;
+    const amznHeader = {
+      ticker: amznStored.ticker,
+      cik: amznStored.cik,
+      name: amznStored.entityName,
+      accession: amznStored.latestFiling.accessionNumber, // 0001018724-26-000040
+      form: amznStored.latestFiling.form, // 10-Q
+      filed: amznStored.latestFiling.filingDate, // 2026-10-30
+      reportDate: amznStored.latestFiling.reportDate, // 2026-09-30
+      acceptanceDateTime: amznStored.latestFiling.acceptanceDateTime,
+      docUrl: amznStored.latestFiling.docUrl,
+      publishedMs: amznStored.latestFiling.publishedAtMs,
+      receivedMs: amznStored.receivedAtMs,
+    };
+    const amznCashInstant = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: amznStored.cik,
+        entityName: amznStored.entityName,
+        facts: {
+          'us-gaap': {
+            CashAndCashEquivalentsAtCarryingValue: {
+              units: {
+                USD: toRawUnits(amznStored.rawXbrlFacts.cashInstant),
+              },
+            },
+          },
+        },
+      },
+      header: amznHeader,
+      asOfMs: asOfNov12Ms,
+      preferredConceptName: 'CashAndCashEquivalentsAtCarryingValue',
+    });
+    expect(amznCashInstant.eligible).toBe(true);
+    expect(amznCashInstant.conceptTiming).toBe('instant');
+    expect(amznCashInstant.periodSpanKind).toBe('instant');
+    expect(amznCashInstant.unit).toBe('USD');
+    expect(amznCashInstant.periodEnd).toBe('2026-09-30');
+    expect(amznCashInstant.val).toBe(55_783_000_000);
+    expect(amznCashInstant.valueBillions).toBe(55.78);
+
+    const amznSharesInstant = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: amznStored.cik,
+        entityName: amznStored.entityName,
+        facts: {
+          'us-gaap': {
+            CommonStockSharesOutstanding: {
+              units: {
+                shares: toRawUnits(
+                  amznStored.rawXbrlFacts.commonSharesOutstandingInstant,
+                ),
+              },
+            },
+          },
+        },
+      },
+      header: amznHeader,
+      asOfMs: asOfNov12Ms,
+      preferredConceptName: 'CommonStockSharesOutstanding',
+    });
+    expect(amznSharesInstant.eligible).toBe(true);
+    expect(amznSharesInstant.conceptTiming).toBe('instant');
+    expect(amznSharesInstant.periodSpanKind).toBe('instant');
+    expect(amznSharesInstant.unit).toBe('shares');
+    expect(amznSharesInstant.periodEnd).toBe('2026-09-30');
+    expect(amznSharesInstant.val).toBe(10_811_000_000);
+
+    // 6. Point-in-time publication (`publishedAtMs`) and server receipt (`receivedAtMs`) cutoff consistency using AMD Q3 10-Q (accepted 2026-11-03T23:00:17.000Z, received 2026-11-09T19:48:35.472Z)
+    const beforeAmdQ3PublicationMs = Date.parse('2026-11-01T12:00:00Z');
+    const amdPointInTimeBeforeQ3 = getSecXbrlCompanyRecord('AMD', {
+      asOfMs: beforeAmdQ3PublicationMs,
+    });
+    expect(amdPointInTimeBeforeQ3.latestFilingEligibleAtCutoff).toBe(false);
+    expect(amdPointInTimeBeforeQ3.eligibleQuarters.at(-1)?.accessionNumber).toBe(
+      '0000002488-26-000123', // Q2 2026 10-Q accepted 2026-08-04T21:40:01.000Z
+    );
+
+    const betweenPublicationAndReceiptMs = Date.parse('2026-11-05T12:00:00Z');
+    const amdReceiptGated = selectCurrentSecXbrlFact({
+      factsPayload: {
+        cik: amdStored.cik,
+        entityName: amdStored.entityName,
+        facts: {
+          'us-gaap': {
+            RevenueFromContractWithCustomerExcludingAssessedTax: {
+              units: {
+                USD: toRawUnits(amdStored.rawXbrlFacts.quarterlyRevenues),
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ticker: amdStored.ticker,
+        cik: amdStored.cik,
+        name: amdStored.entityName,
+        accession: amdStored.latestFiling.accessionNumber, // 0000002488-26-000191
+        form: amdStored.latestFiling.form,
+        filed: amdStored.latestFiling.filingDate, // 2026-11-04
+        reportDate: amdStored.latestFiling.reportDate, // 2026-09-26
+        acceptanceDateTime: amdStored.latestFiling.acceptanceDateTime, // 2026-11-03T23:00:17.000Z
+        docUrl: amdStored.latestFiling.docUrl,
+        publishedMs: amdStored.latestFiling.publishedAtMs, // 1793746817000
+        receivedMs: amdStored.receivedAtMs, // 1794253715476 (2026-11-09T19:48:35.472Z)
+      },
+      asOfMs: betweenPublicationAndReceiptMs,
+    });
+    expect(amdReceiptGated.eligible).toBe(false);
+    expect(amdReceiptGated.pointInTimeEligible).toBe(false);
+    expect(amdReceiptGated.rejectionReason).toContain(
+      'receipt_after_point_in_time_cutoff',
+    );
+  });
+
+  it('Phase 5B: Combined application verification — enforces all 8 release-gate invariants across public telemetry, stale/discontinuous market observations, deterministic vs Gemini labelling, and NOT IMPLEMENTED capabilities', () => {
+    const now = Date.parse('2026-11-12T15:00:00Z');
+    const baseFeed = researchFeed();
+
+    // Watchlist with 2026-11-11 persisted prices (discontinuous vs 2026-11-04 historical fundamental series)
+    const discontinuousWatchlist = baseFeed.watchlist.map((w) =>
+      w.ticker === 'QQQ'
+        ? {
+            ...w,
+            close: 690.38,
+            closeGbp: 534.7,
+            usdToGbp: 0.7745,
+            closeAt: Date.parse('2026-11-11T21:00:00Z'),
+            change1d: null,
+          }
+        : w.ticker === 'NVDA'
+          ? {
+              ...w,
+              close: 195.88,
+              closeGbp: 151.71,
+              usdToGbp: 0.7745,
+              closeAt: Date.parse('2026-11-11T21:00:00Z'),
+              change1d: null,
+            }
+          : w,
+    );
+
+    const assessments = evaluateUniverseResearchAssessments({
+      asOfMs: now,
+      liveWatchlist: discontinuousWatchlist,
+    });
+    const nvdaAssessment = assessments.find((a) => a.ticker === 'NVDA')!;
+
+    // Invariant 5: No unsupported 1-day return is derived from non-consecutive price observations (2026-11-11 vs 2026-11-04)
+    expect(nvdaAssessment.latestPrice.close).toBe(195.88);
+    expect(nvdaAssessment.latestPrice.timestampIso?.slice(0, 10)).toBe('2026-11-11');
+    expect(nvdaAssessment.latestPrice.sessionChangePct).toBeNull();
+
+    // Invariant 7: Deterministic processing (`deterministic-sec-xbrl-extractor-v1`, 0 model calls) is never labelled as successful Gemini inference
+    const deterministicRunHealth = evaluateCollectionHealth({
+      now,
+      systemEnabled: true,
+      activeEnvironment: 'remote',
+      dailyCostCeilingGbp: 0,
+      monthlyCostCeilingGbp: 0,
+      dailyEstimatedCostGbp: 0,
+      dailyActualCostGbp: 0,
+      monthlyEstimatedCostGbp: 0,
+      monthlyActualCostGbp: 0,
+      pendingVerificationCount: 0,
+      latestBriefingDate: '2026-11-12',
+      latestBriefingGeneratedAt: Date.parse('2026-11-12T07:30:16.435Z'),
+      jobs: [],
+      recentRuns: [
+        {
+          runId: 'run-det-sec-1',
+          jobKey: 'sec_filings_collector',
+          category: 'collector',
+          environment: 'remote',
+          status: 'succeeded',
+          startedAt: now - 60_000,
+          finishedAt: now - 55_000,
+          cursorBefore: null,
+          cursorAfter: '0001045810-26-000075',
+          sourcesDiscovered: 1,
+          evidenceStaged: 1,
+          evidencePromoted: 1,
+          duplicatesSkipped: 0,
+          pendingVerification: 0,
+          modelVersion: 'deterministic-sec-xbrl-extractor-v1',
+          estimatedCostGbp: 0,
+          actualCostGbp: 0,
+          providerRequestsCount: 0,
+          processingDurationMs: 5000,
+          conditionalSkip: false,
+          errorCode: null,
+          summary: 'Deterministic SEC XBRL fact extracted',
+        },
+      ],
+    });
+    expect(deterministicRunHealth.agentAndProviderStages.modelInferenceAttempted).toBe(
+      false,
+    );
+    expect(deterministicRunHealth.agentAndProviderStages.modelInferenceSucceeded).toBe(
+      false,
+    );
+
+    // Invariant 8: Background inference and external news collection remain explicitly NOT IMPLEMENTED
+    expect(deterministicRunHealth.agentAndProviderStages.liveAgentInferenceStatus).toBe(
+      'NOT IMPLEMENTED',
+    );
+    expect(
+      deterministicRunHealth.agentAndProviderStages.externalNewsFeedCollectionStatus,
+    ).toBe('NOT IMPLEMENTED');
+    const connectionsReport = buildWorkspaceConnectionsReport({
+      liveOps: { health: deterministicRunHealth, latestBriefing: null },
+      convexUrlConfigured: true,
+      convexIsProduction: true,
+      modelProviderConfigured: false,
+      now,
+    });
+    const modelSvc = connectionsReport.services.find((s) => s.id === 'model_providers')!;
+    expect(modelSvc.detail).toContain('NOT IMPLEMENTED');
+
+    // Invariants 1, 3, 4: Public telemetry redacted (`latestBriefing: null`), current market observation (`2026-11-11`) displayed, and historical fundamental analysis (`2026-11-04`) clearly identified as historical
+    const freshCommandCentreHtml = renderToStaticMarkup(
+      React.createElement(CommandCentre, {
+        portfolio: null,
+        trading: null,
+        operations: {
+          health: deterministicRunHealth,
+          latestBriefing: null,
+        },
+        feed: {
+          ...baseFeed,
+          watchlist: discontinuousWatchlist,
+          marketDataAsOf: Date.parse('2026-11-11T21:00:00Z'),
+          agentOperations: deterministicRunHealth,
+        },
+        flags: { demo: false, live: false },
+        now,
+        signedIn: false,
+        configured: true,
+      }),
+    );
+    expect(freshCommandCentreHtml).toContain('Research as of 2026-11-11');
+    expect(freshCommandCentreHtml).toContain('Fundamental &amp; graph cut-off: 2026-11-04');
+    expect(freshCommandCentreHtml).toContain(
+      'Cross-cutoff returns are never blended.',
+    );
+    expect(freshCommandCentreHtml).not.toContain('vs $685.28 on 2026-11-03');
+
+    // Invariant 6: Status banner (`AlertsCentre`) correctly identifies degraded or stale research when fallback snapshot is older than 4 days
+    const staleCommandCentreHtml = renderToStaticMarkup(
+      React.createElement(CommandCentre, {
+        portfolio: null,
+        trading: null,
+        operations: {
+          health: deterministicRunHealth,
+          latestBriefing: null,
+        },
+        feed: {
+          ...baseFeed,
+          marketDataAsOf: Date.parse('2026-11-04T21:00:00Z'),
+          agentOperations: deterministicRunHealth,
+        },
+        flags: { demo: false, live: false },
+        now,
+        signedIn: false,
+        configured: true,
+      }),
+    );
+    expect(staleCommandCentreHtml).toContain(
+      'Historical research snapshot active (collector stale or unverified)',
+    );
   });
 });
