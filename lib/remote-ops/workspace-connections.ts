@@ -345,19 +345,35 @@ export function buildWorkspaceConnectionsReport(
   let modelDetail =
     'No external LLM API key configured in Production; live background LLM inference and external news collection are NOT IMPLEMENTED (news_discovery_agent & morning briefing run deterministic SEC XBRL extraction only).';
 
-  if (modelEnvEntry?.status === 'connected' && liveAgentInferenceSucceeded) {
+  if (modelEnvEntry?.status === 'intentionally_disabled' || health?.agentAndProviderStages?.providerState === 'disabled') {
+    modelStatus = 'Intentionally disabled';
+    modelEnv = 'Disabled';
+    modelVerifiedAt = null;
+    modelDetail =
+      modelEnvEntry?.detail ??
+      'Background AI research agent is intentionally disabled; deterministic SEC XBRL and EOD market collection remain isolated.';
+  } else if (health?.agentAndProviderStages?.providerState === 'failed') {
+    modelStatus = 'Failed';
+    modelEnv = 'Production';
+    modelVerifiedAt = null;
+    modelDetail =
+      health.agentAndProviderStages.detail ??
+      'Background LLM provider invocation failed or reported an upstream credential/quota error.';
+  } else if (modelEnvEntry?.status === 'connected' && liveAgentInferenceSucceeded) {
     modelStatus = 'Connected and healthy';
     modelEnv = 'Production';
     modelVerifiedAt = modelEnvEntry.lastVerifiedAt;
     modelDetail = modelEnvEntry.detail;
   } else if (
     modelEnvEntry?.status === 'degraded' ||
-    modelEnvEntry?.status === 'configured_not_tested'
+    modelEnvEntry?.status === 'configured_not_tested' ||
+    health?.agentAndProviderStages?.providerState === 'attempted' ||
+    health?.agentAndProviderStages?.providerState === 'not_tested'
   ) {
     modelStatus = 'Configured, not yet verified';
     modelEnv = 'Production';
     modelVerifiedAt = null;
-    modelDetail = `${modelEnvEntry.detail} Live background LLM inference and external news collection remain NOT IMPLEMENTED.`;
+    modelDetail = `${modelEnvEntry?.detail ?? health?.agentAndProviderStages?.detail ?? 'Model provider configured.'} Live background LLM inference and external news collection remain NOT IMPLEMENTED.`;
   } else if (options.modelProviderConfigured) {
     modelStatus = 'Configured, not yet verified';
     modelEnv = 'Production';

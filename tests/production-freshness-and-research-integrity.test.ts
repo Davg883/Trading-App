@@ -216,7 +216,7 @@ describe('Production Freshness Recovery & Research Integrity Regression Suite', 
         dailyCeilingGbp: 2,
         unsupportedRate: 0.8485,
         modelId: 'gemini-3.5-flash',
-        geminiConfigured: true, // Previously polluted by historical latestGeminiLiveTurn from 2026-11-09
+        geminiConfigured: false, // Historical chat turns from 2026-11-09 must not set current geminiConfigured=true when env key is absent
         geminiEnabled: true,
         lastChatAtMs: Date.parse('2026-11-09T21:37:50.531Z'),
       },
@@ -414,7 +414,11 @@ describe('Production Freshness Recovery & Research Integrity Regression Suite', 
       }),
     };
 
-    const handler = (runScheduledCloudCycle as unknown as { _handler: Function })._handler;
+    const handler = (
+      runScheduledCloudCycle as unknown as {
+        _handler: (ctx: unknown, args: Record<string, unknown>) => Promise<unknown>;
+      }
+    )._handler;
     await handler(mockCtx, {
       environment: 'remote',
       forceOnDemand: true,
@@ -620,5 +624,507 @@ describe('Production Freshness Recovery & Research Integrity Regression Suite', 
     });
     expect(futureCutoff.eligible).toBe(false);
     expect(futureCutoff.pointInTimeEligible).toBe(false);
+  });
+
+  it('Phase 3: evaluateCollectionHealth and buildWorkspaceConnectionsReport distinguish unconfigured, disabled, not_tested, attempted, failed, and successful states without relying solely on non-zero cost', () => {
+    const now = Date.parse('2026-11-12T15:00:00Z');
+    const baseInput = {
+      now,
+      systemEnabled: true,
+      activeEnvironment: 'remote' as const,
+      dailyCostCeilingGbp: 2,
+      monthlyCostCeilingGbp: 20,
+      dailyEstimatedCostGbp: 0,
+      dailyActualCostGbp: 0,
+      monthlyEstimatedCostGbp: 0,
+      monthlyActualCostGbp: 0,
+      pendingVerificationCount: 0,
+      jobs: [
+        {
+          jobKey: 'news_discovery_agent',
+          intervalMinutes: 15,
+          enabled: true,
+          pausedReason: null,
+          lastSuccessAt: now - 300_000,
+          lastRunAt: now - 300_000,
+          nextRunAt: now + 600_000,
+          sourcesAddedTotal: 4,
+          evidenceAddedTotal: 4,
+          estimatedCostGbpTotal: 0,
+          actualCostGbpTotal: 0,
+          lastOutcome: 'succeeded',
+          lastErrorCode: null,
+        },
+      ],
+    };
+
+    // 1. Unconfigured: no key, only deterministic runs
+    const unconfiguredHealth = evaluateCollectionHealth({
+      ...baseInput,
+      environmentAudit: [
+        {
+          serviceId: 'remote_ai_models',
+          name: 'Remote AI Model Providers',
+          environmentTarget: 'GEMINI_API_KEY',
+          status: 'unavailable',
+          lastVerifiedAt: null,
+          detail: 'Unconfigured',
+        },
+      ],
+    });
+    expect(unconfiguredHealth.agentAndProviderStages.providerState).toBe('unconfigured');
+    expect(unconfiguredHealth.agentAndProviderStages.providerUnavailable).toBe(true);
+
+    // 2. Disabled: intentionally disabled by owner -> NOT automatically classified as providerUnavailable
+    const disabledHealth = evaluateCollectionHealth({
+      ...baseInput,
+      jobs: [{ ...baseInput.jobs[0]!, enabled: false, pausedReason: 'disabled_by_owner' }],
+      environmentAudit: [
+        {
+          serviceId: 'remote_ai_models',
+          name: 'Remote AI Model Providers',
+          environmentTarget: 'GEMINI_API_KEY',
+          status: 'intentionally_disabled',
+          lastVerifiedAt: null,
+          detail: 'Intentionally disabled',
+        },
+      ],
+    });
+    expect(disabledHealth.agentAndProviderStages.providerState).toBe('disabled');
+    expect(disabledHealth.agentAndProviderStages.providerUnavailable).toBe(false);
+    expect(disabledHealth.agentAndProviderStages.modelInferenceSucceeded).toBe(false);
+
+    // 3. Configured, not tested: key present, 0 model runs -> NOT automatically classified as providerUnavailable
+    const notTestedHealth = evaluateCollectionHealth({
+      ...baseInput,
+      environmentAudit: [
+        {
+          serviceId: 'remote_ai_models',
+          name: 'Remote AI Model Providers',
+          environmentTarget: 'GEMINI_API_KEY',
+          status: 'configured_not_tested',
+          lastVerifiedAt: null,
+          detail: 'Key present, 0 background calls',
+        },
+      ],
+    });
+    expect(notTestedHealth.agentAndProviderStages.providerState).toBe('not_tested');
+    expect(notTestedHealth.agentAndProviderStages.providerUnavailable).toBe(false);
+    expect(notTestedHealth.agentAndProviderStages.modelInferenceAttempted).toBe(false);
+
+    // 4. Attempted: real model run in progress (even with £0.00 cost so far)
+    const attemptedHealth = evaluateCollectionHealth({
+      ...baseInput,
+      recentRuns: [
+        {
+          runId: 'run-attempt-1',
+          jobKey: 'news_discovery_agent',
+          category: 'remote_agent',
+          environment: 'remote',
+          status: 'running',
+          startedAt: now - 5_000,
+          finishedAt: null,
+          cursorBefore: null,
+          cursorAfter: null,
+          sourcesDiscovered: 1,
+          evidenceStaged: 0,
+          evidencePromoted: 0,
+          duplicatesSkipped: 0,
+          pendingVerification: 0,
+          modelVersion: 'gemini-2.5-flash',
+          estimatedCostGbp: 0,
+          actualCostGbp: null,
+          providerRequestsCount: 1,
+          processingDurationMs: null,
+          conditionalSkip: false,
+          errorCode: null,
+          summary: 'Invoking Gemini 2.5 Flash...',
+        },
+      ],
+    });
+    expect(attemptedHealth.agentAndProviderStages.providerState).toBe('attempted');
+    expect(attemptedHealth.agentAndProviderStages.modelInferenceAttempted).toBe(true);
+    expect(attemptedHealth.agentAndProviderStages.modelInferenceSucceeded).toBe(false);
+    expect(attemptedHealth.agentAndProviderStages.providerUnavailable).toBe(false);
+
+    // 5. Failed: real model invocation attempted and failed with quota/402 error (with £0.00 cost)
+    const failedHealth = evaluateCollectionHealth({
+      ...baseInput,
+      recentRuns: [
+        {
+          runId: 'run-failed-1',
+          jobKey: 'news_discovery_agent',
+          category: 'remote_agent',
+          environment: 'remote',
+          status: 'failed',
+          startedAt: now - 10_000,
+          finishedAt: now - 9_000,
+          cursorBefore: null,
+          cursorAfter: null,
+          sourcesDiscovered: 0,
+          evidenceStaged: 0,
+          evidencePromoted: 0,
+          duplicatesSkipped: 0,
+          pendingVerification: 0,
+          modelVersion: 'gemini-2.5-flash',
+          estimatedCostGbp: 0,
+          actualCostGbp: 0,
+          providerRequestsCount: 1,
+          processingDurationMs: 1000,
+          conditionalSkip: false,
+          errorCode: 'http_402_quota_exceeded',
+          summary: 'Gemini API returned 402 quota exceeded',
+        },
+      ],
+    });
+    expect(failedHealth.agentAndProviderStages.providerState).toBe('failed');
+    expect(failedHealth.agentAndProviderStages.modelInferenceAttempted).toBe(true);
+    expect(failedHealth.agentAndProviderStages.modelInferenceSucceeded).toBe(false);
+    expect(failedHealth.agentAndProviderStages.providerUnavailable).toBe(true);
+
+    // 6. Successful: real model invocation succeeded on free tier (£0.00 cost, real modelVersion + providerRequestsCount > 0)
+    const successfulZeroCostHealth = evaluateCollectionHealth({
+      ...baseInput,
+      recentRuns: [
+        {
+          runId: 'run-success-free-tier',
+          jobKey: 'news_discovery_agent',
+          category: 'remote_agent',
+          environment: 'remote',
+          status: 'succeeded',
+          startedAt: now - 10_000,
+          finishedAt: now - 8_000,
+          cursorBefore: 'c1',
+          cursorAfter: 'c2',
+          sourcesDiscovered: 2,
+          evidenceStaged: 2,
+          evidencePromoted: 2,
+          duplicatesSkipped: 0,
+          pendingVerification: 0,
+          modelVersion: 'gemini-2.5-flash',
+          estimatedCostGbp: 0,
+          actualCostGbp: 0,
+          providerRequestsCount: 2,
+          processingDurationMs: 2000,
+          conditionalSkip: false,
+          errorCode: null,
+          summary: 'Gemini 2.5 Flash extracted 2 disclosures',
+        },
+      ],
+    });
+    expect(successfulZeroCostHealth.agentAndProviderStages.providerState).toBe('successful');
+    expect(successfulZeroCostHealth.agentAndProviderStages.modelInferenceAttempted).toBe(true);
+    expect(successfulZeroCostHealth.agentAndProviderStages.modelInferenceSucceeded).toBe(true);
+    expect(successfulZeroCostHealth.agentAndProviderStages.providerUnavailable).toBe(false);
+  });
+
+  it('Phase 4: selectCurrentSecXbrlFact supports negative losses/cash flows, zero-value facts, instant vs duration concepts, 3M/YTD/FY spans, non-calendar fiscal years, publication & receipt cutoffs, and duplicate/conflict detection', () => {
+    const asOfMs = Date.parse('2026-11-12T15:00:00Z');
+    const baseHeader = {
+      ticker: 'GOOGL',
+      cik: '1652044',
+      name: 'ALPHABET INC.',
+      accession: '0001652044-26-000050',
+      form: '10-Q',
+      filed: '2026-10-28',
+      reportDate: '2026-09-30',
+      docUrl: 'https://www.sec.gov/Archives/edgar/data/1652044/goog-20260930.htm',
+      publishedMs: Date.parse('2026-10-28T20:00:00Z'),
+      receivedMs: Date.parse('2026-10-28T20:05:00Z'),
+    };
+
+    // 1. Negative operating loss / negative cash flow fact is accepted when concept allows negative values
+    const negativeLossResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            OperatingIncomeLoss: {
+              units: {
+                USD: [
+                  {
+                    val: -3450000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: baseHeader,
+      asOfMs,
+      preferredConceptName: 'OperatingIncomeLoss',
+    });
+    expect(negativeLossResult.eligible).toBe(true);
+    expect(negativeLossResult.isNegativeValue).toBe(true);
+    expect(negativeLossResult.val).toBe(-3450000000);
+    expect(negativeLossResult.valueBillions).toBe(-3.45);
+    expect(negativeLossResult.periodSpanKind).toBe('three_month');
+
+    // 2. Zero-value fact (`val === 0`) is accepted as a valid reported numerical fact
+    const zeroValueResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            CapitalExpendituresIncurredButNotYetPaid: {
+              units: {
+                USD: [
+                  {
+                    val: 0,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: baseHeader,
+      asOfMs,
+    });
+    expect(zeroValueResult.eligible).toBe(true);
+    expect(zeroValueResult.isZeroValue).toBe(true);
+    expect(zeroValueResult.val).toBe(0);
+    expect(zeroValueResult.valueBillions).toBe(0);
+
+    // 3. Instant concept (balance sheet cash or shares outstanding with `end` only and no `start`)
+    const instantBalanceResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            CashAndCashEquivalentsAtCarryingValue: {
+              units: {
+                USD: [
+                  {
+                    val: 93200000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3I',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: baseHeader,
+      asOfMs,
+      preferredConceptName: 'CashAndCashEquivalentsAtCarryingValue',
+    });
+    expect(instantBalanceResult.eligible).toBe(true);
+    expect(instantBalanceResult.conceptTiming).toBe('instant');
+    expect(instantBalanceResult.periodSpanKind).toBe('instant');
+    expect(instantBalanceResult.valueBillions).toBe(93.2);
+
+    // 4. Receipt timestamp cutoff: rejects if `receivedMs > asOfMs` even when `publishedMs <= asOfMs`
+    const receiptAfterAsOf = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            Revenues: {
+              units: {
+                USD: [
+                  {
+                    val: 88000000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: {
+        ...baseHeader,
+        receivedMs: asOfMs + 60_000,
+      },
+      asOfMs,
+    });
+    expect(receiptAfterAsOf.eligible).toBe(false);
+    expect(receiptAfterAsOf.pointInTimeEligible).toBe(false);
+    expect(receiptAfterAsOf.rejectionReason).toContain('receipt_after_point_in_time_cutoff');
+
+    // 5. Exact duplicates are deduplicated cleanly; conflicting values for the same period/frame/accession are rejected
+    const exactDuplicateResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            Revenues: {
+              units: {
+                USD: [
+                  {
+                    val: 88268000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                  {
+                    val: 88268000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: baseHeader,
+      asOfMs,
+    });
+    expect(exactDuplicateResult.eligible).toBe(true);
+    expect(exactDuplicateResult.deduplicatedExactDuplicatesCount).toBe(1);
+    expect(exactDuplicateResult.hasConflictingDuplicate).toBe(false);
+
+    const conflictingDuplicateResult = selectCurrentSecXbrlFact({
+      factsPayload: {
+        facts: {
+          'us-gaap': {
+            Revenues: {
+              units: {
+                USD: [
+                  {
+                    val: 88268000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                  {
+                    val: 91500000000,
+                    fy: 2026,
+                    fp: 'Q3',
+                    form: '10-Q',
+                    filed: '2026-10-28',
+                    accn: '0001652044-26-000050',
+                    start: '2026-07-01',
+                    end: '2026-09-30',
+                    frame: 'CY2026Q3',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      header: baseHeader,
+      asOfMs,
+    });
+    expect(conflictingDuplicateResult.eligible).toBe(false);
+    expect(conflictingDuplicateResult.hasConflictingDuplicate).toBe(true);
+    expect(conflictingDuplicateResult.rejectionReason).toContain(
+      'conflicting_duplicate_facts_for_same_period',
+    );
+  });
+
+  it('Phase 5: Homepage / CommandCentre renders recent 2026-11-11 market observation with PR #1 reduced public telemetry payload (latestBriefing: null) without implying 2026-11-04 fundamentals are equally current', () => {
+    const now = Date.parse('2026-11-12T15:00:00Z');
+    const baseFeed = researchFeed();
+    const updatedWatchlist = baseFeed.watchlist.map((w) =>
+      w.ticker === 'QQQ'
+        ? {
+            ...w,
+            close: 690.38,
+            closeGbp: 534.7,
+            usdToGbp: 0.7745,
+            closeAt: Date.parse('2026-11-11T21:00:00Z'),
+          }
+        : w.ticker === 'NVDA'
+          ? {
+              ...w,
+              close: 195.88,
+              closeGbp: 151.71,
+              usdToGbp: 0.7745,
+              closeAt: Date.parse('2026-11-11T21:00:00Z'),
+            }
+          : w,
+    );
+
+    // Simulate PR #1's `toPublicOperationsStatus` where `latestBriefing` is `null` and `briefing.generatedAt` lives in `health.operationalLayers.briefing.generatedAt`
+    const publicHealth = evaluateCollectionHealth({
+      now,
+      systemEnabled: true,
+      activeEnvironment: 'remote',
+      dailyCostCeilingGbp: 0,
+      monthlyCostCeilingGbp: 0,
+      dailyEstimatedCostGbp: 0,
+      dailyActualCostGbp: 0,
+      monthlyEstimatedCostGbp: 0,
+      monthlyActualCostGbp: 0,
+      pendingVerificationCount: 0,
+      latestBriefingDate: '2026-11-12',
+      latestBriefingGeneratedAt: Date.parse('2026-11-12T07:30:16.435Z'),
+      jobs: [],
+    });
+
+    const html = renderToStaticMarkup(
+      React.createElement(CommandCentre, {
+        portfolio: null,
+        trading: null,
+        operations: {
+          health: publicHealth,
+          latestBriefing: null, // PR #1 publicOperationsOverview returns null here
+        },
+        feed: {
+          ...baseFeed,
+          watchlist: updatedWatchlist,
+          marketDataAsOf: Date.parse('2026-11-11T21:00:00Z'),
+          agentOperations: publicHealth,
+        },
+        flags: { demo: false, live: false },
+        now,
+        signedIn: false,
+        configured: true,
+      }),
+    );
+
+    // Renders the recent 2026-11-11 market observation ($690.38)
+    expect(html).toContain('Research as of 2026-11-11');
+    expect(html).toContain('$690.38');
+    // Explicitly discloses that fundamental SEC/TypeDB tables remain anchored to 2026-11-04
+    expect(html).toContain('Market price observations are as of 2026-11-11');
+    expect(html).toContain('anchored to the 2026-11-04 verified filing cut-off');
+    // Includes the morning briefing generation timestamp from `health.operationalLayers.briefing.generatedAt` even when `latestBriefing` is null
+    expect(html).toContain('2026-11-12 07:30:16 UTC');
   });
 });

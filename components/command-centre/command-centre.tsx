@@ -60,7 +60,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  const accountKind=fixture?'synthetic' as const:env;
  const missingPrices=feed.watchlist.filter(w=>w.close===null).map(w=>w.ticker);
  const activeHealth=operations?.health??feed.agentOperations;
- const activeBriefing=operations?.latestBriefing??feed.morningBriefing;
+ const activeBriefing=operations!==undefined&&operations!==null?operations.latestBriefing:(feed.morningBriefing??null);
  const latestWatchlistAt=feed.watchlist.reduce<number|null>((max,w)=>w.closeAt!==null&&(max===null||w.closeAt>max)?w.closeAt:max,feed.marketDataAsOf??null);
  const marketObsAgeMs=latestWatchlistAt!==null?Math.max(0,now-latestWatchlistAt):null;
  const marketObsStale=marketObsAgeMs===null||marketObsAgeMs>4*86_400_000;

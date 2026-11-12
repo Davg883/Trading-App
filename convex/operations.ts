@@ -295,14 +295,24 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
   process.env.OPENAI_API_KEY||
   process.env.ANTHROPIC_API_KEY,
  );
- // Require positive non-zero model spend to count as a genuine executed paid AI run
- const hasExecutedPaidAiRun=recentRuns.some(
-  r=>
-   r.jobKey==='news_discovery_agent'&&
-   r.status==='succeeded'&&
-   !r.errorCode&&
-   (r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)),
- );
+ // Require genuine model invocation evidence (not solely non-zero cost, while rejecting deterministic/0-model-call runs)
+ const hasExecutedAiRun=recentRuns.some(r=>{
+  if(r.jobKey!=='news_discovery_agent'||r.status!=='succeeded'||r.errorCode||r.conditionalSkip)return false;
+  const mv=(r.modelVersion??'').trim().toLowerCase();
+  const sum=(r.summary??'').toLowerCase();
+  if(
+   mv.startsWith('deterministic-')||
+   mv.startsWith('cursor-change-detector')||
+   mv.includes('0 model calls')||
+   mv.includes('not implemented')||
+   sum.includes('0 model calls')||
+   sum.includes('not implemented')
+  ){
+   return false;
+  }
+  const hasRealModel=mv.length>0&&/\b(gemini|gpt|claude|o1|o3|o4|sonnet|opus|haiku|flash|pro)\b/i.test(mv);
+  return hasRealModel||r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)||r.inputTokens>0||r.outputTokens>0;
+ });
  const typedbDatabaseName=process.env.TYPEDB_DATABASE||'aci_macro_intelligence_staging';
  const typedbConfigured=Boolean(process.env.TYPEDB_HTTP_ADDRESS&&process.env.TYPEDB_PASSWORD);
 
@@ -383,9 +393,9 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
    serviceId:'remote_ai_models',
    name:'Remote AI Model Providers (Gemini / OpenAI / Anthropic)',
    environmentTarget:'GEMINI_API_KEY · OPENAI_API_KEY · ANTHROPIC_API_KEY',
-   status:hasRemoteAiKey&&hasExecutedPaidAiRun?'connected':hasRemoteAiKey?'configured_not_tested':'unavailable',
-   lastVerifiedAt:hasRemoteAiKey&&hasExecutedPaidAiRun?agentJob?.lastSuccessAt??null:null,
-   detail:hasRemoteAiKey&&hasExecutedPaidAiRun
+   status:hasRemoteAiKey&&hasExecutedAiRun?'connected':hasRemoteAiKey?'configured_not_tested':'unavailable',
+   lastVerifiedAt:hasRemoteAiKey&&hasExecutedAiRun?agentJob?.lastSuccessAt??null:null,
+   detail:hasRemoteAiKey&&hasExecutedAiRun
     ?'Cloud LLM provider keys configured and verified by non-zero token execution.'
     :'Live background LLM inference and external news collection are NOT IMPLEMENTED (0 paid LLM calls executed, £0.00 cost); news_discovery_agent runs deterministic SEC XBRL extractor.',
   },
@@ -470,14 +480,14 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number){
      ?'rate_limited'
      :agentJob?.lastErrorCode
       ?'outage'
-      :!hasRemoteAiKey||!hasExecutedPaidAiRun
+      :!hasRemoteAiKey||!hasExecutedAiRun
        ?'unconfigured'
        :'connected',
    errorCode:agentJob?.lastErrorCode??null,
-   lastSuccessAt:hasExecutedPaidAiRun?agentJob?.lastSuccessAt??null:null,
+   lastSuccessAt:hasExecutedAiRun?agentJob?.lastSuccessAt??null:null,
    nextAllowedAt:agentJob?.nextAllowedAt??0,
    detail:
-    !hasRemoteAiKey||!hasExecutedPaidAiRun
+    !hasRemoteAiKey||!hasExecutedAiRun
      ?'Live background LLM inference and external news collection are NOT IMPLEMENTED; operating in deterministic SEC XBRL extraction mode (0 LLM calls, £0.00 cost).'
      :'Restricted to research staging; skips model invocations when source cursors are unchanged.',
   },

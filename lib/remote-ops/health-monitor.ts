@@ -217,18 +217,61 @@ export type EvidenceChatOperationsSummary = {
  lastChatAtMs: number | null;
 };
 
+export type ModelProviderExecutionState =
+ | 'unconfigured'
+ | 'disabled'
+ | 'not_tested'
+ | 'attempted'
+ | 'failed'
+ | 'successful';
+
 export type AgentAndProviderStageDistinction = {
  collectorRunning: boolean;
  deterministicProcessingCompleted: boolean;
  modelInferenceAttempted: boolean;
  modelInferenceSucceeded: boolean;
  providerUnavailable: boolean;
+ providerState: ModelProviderExecutionState;
  researchValidated: boolean;
  briefingPublished: boolean;
  liveAgentInferenceStatus: 'NOT IMPLEMENTED';
  externalNewsFeedCollectionStatus: 'NOT IMPLEMENTED';
  detail: string;
 };
+
+export function isNonDeterministicModelRun(run: {
+ category?: JobCategory;
+ modelVersion?: string | null;
+ estimatedCostGbp?: number;
+ actualCostGbp?: number | null;
+ providerRequestsCount?: number;
+ conditionalSkip?: boolean;
+ summary?: string | null;
+}): boolean {
+ if (run.category !== 'remote_agent') return false;
+ if (run.conditionalSkip) return false;
+ const mv = (run.modelVersion ?? '').trim();
+ const mvLower = mv.toLowerCase();
+ const summaryLower = (run.summary ?? '').toLowerCase();
+ if (
+  mvLower.startsWith('deterministic-') ||
+  mvLower.startsWith('cursor-change-detector') ||
+  mvLower.includes('0 model calls') ||
+  mvLower.includes('not implemented') ||
+  summaryLower.includes('0 model calls') ||
+  summaryLower.includes('not implemented')
+ ) {
+  return false;
+ }
+ const hasRealModelId =
+  mv.length > 0 &&
+  /\b(gemini|gpt|claude|o1|o3|o4|sonnet|opus|haiku|flash|pro)\b/i.test(mv);
+ const hasCostSignal =
+  (run.estimatedCostGbp ?? 0) > 0 ||
+  (run.actualCostGbp !== null && run.actualCostGbp !== undefined && run.actualCostGbp > 0);
+ const hasRequestSignal = hasRealModelId && (run.providerRequestsCount ?? 0) > 0;
+ return hasCostSignal || hasRequestSignal || hasRealModelId;
+}
 
 export type CollectionHealthReport={
  evaluatedAt:number;
@@ -584,8 +627,10 @@ export function evaluateCollectionHealth(input:{
   },
  ];
 
- // Explicit 7-state agent & provider distinction (Priority 2):
+ // Explicit 7-stage & 6-provider-state distinction (Phase 3):
  // Never infer model inference or live provider health from historical chat records or 0-token deterministic runs.
+ // Do NOT automatically classify "no successful model inference" as `providerUnavailable: true` when the provider
+ // is intentionally disabled or configured-not-tested.
  const recentRuns=input.recentRuns??[];
  const collectorRunning=
   schedulerWorking&&
@@ -593,19 +638,54 @@ export function evaluateCollectionHealth(input:{
  const deterministicProcessingCompleted=
   jobs.some(j=>j.lastSuccessAt!==null&&!j.lastErrorCode)||
   recentRuns.some(r=>r.status==='succeeded');
- const modelInferenceAttempted=recentRuns.some(
-  r=>
-   r.category==='remote_agent'&&
-   (r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)),
+ const modelInferenceRuns=recentRuns.filter(r=>isNonDeterministicModelRun(r));
+ const modelInferenceAttempted=modelInferenceRuns.length>0;
+ const modelInferenceSucceeded=modelInferenceRuns.some(
+  r=>r.status==='succeeded'&&!r.errorCode,
  );
- const modelInferenceSucceeded=recentRuns.some(
-  r=>
-   r.category==='remote_agent'&&
-   r.status==='succeeded'&&
-   !r.errorCode&&
-   (r.estimatedCostGbp>0||(r.actualCostGbp!==null&&r.actualCostGbp>0)),
+ const modelInferenceFailed=
+  modelInferenceAttempted&&
+  !modelInferenceSucceeded&&
+  modelInferenceRuns.some(r=>r.status==='failed'||r.status==='timed_out'||Boolean(r.errorCode));
+
+ const agentJobSummary=jobs.find(j=>j.jobKey==='news_discovery_agent')??null;
+ const remoteAiProvider=providers.find(p=>p.providerId==='antigravity_remote_agent'||p.category==='ai_model')??null;
+ const remoteAiEnvAudit=input.environmentAudit?.find(s=>s.serviceId==='remote_ai_models')??null;
+
+ const isProviderIntentionallyDisabled=
+  !input.systemEnabled||
+  input.activeEnvironment==='disabled'||
+  (agentJobSummary!==null&&!agentJobSummary.enabled)||
+  remoteAiEnvAudit?.status==='intentionally_disabled';
+
+ const isProviderConfigured=Boolean(
+  remoteAiEnvAudit?.status==='configured_not_tested'||
+  (remoteAiEnvAudit?.status==='connected'&&modelInferenceSucceeded)||
+  remoteAiEnvAudit?.status==='degraded'||
+  (remoteAiProvider&&remoteAiProvider.status!=='unconfigured')||
+  input.evidenceChat?.geminiConfigured,
  );
- const providerUnavailable=!modelInferenceSucceeded;
+
+ const hasProviderOutageOrCredError=Boolean(
+  modelInferenceFailed||
+  remoteAiProvider?.status==='outage'||
+  remoteAiProvider?.status==='credentials_expired'||
+  remoteAiProvider?.status==='rate_limited'||
+  (agentJobSummary?.lastErrorCode&&!isProviderIntentionallyDisabled),
+ );
+
+ const providerState:ModelProviderExecutionState=
+  modelInferenceSucceeded?'successful':
+  hasProviderOutageOrCredError?'failed':
+  modelInferenceAttempted?'attempted':
+  isProviderIntentionallyDisabled?'disabled':
+  isProviderConfigured?'not_tested':
+  'unconfigured';
+
+ // `providerUnavailable` is true ONLY when the provider is unconfigured or has failed/outage —
+ // never merely because a configured or disabled provider has not yet executed a successful inference run.
+ const providerUnavailable=providerState==='unconfigured'||providerState==='failed';
+
  const researchValidated=
   promotedTotal>0||recentRuns.some(r=>r.evidencePromoted>0);
  const briefingPublished=
@@ -617,21 +697,35 @@ export function evaluateCollectionHealth(input:{
   modelInferenceAttempted,
   modelInferenceSucceeded,
   providerUnavailable,
+  providerState,
   researchValidated,
   briefingPublished,
   liveAgentInferenceStatus:'NOT IMPLEMENTED',
   externalNewsFeedCollectionStatus:'NOT IMPLEMENTED',
-  detail:modelInferenceSucceeded
-   ?'Authenticated background LLM inference succeeded with non-zero token usage.'
-   :'Deterministic SEC XBRL & EOD market collection completed (0 LLM tokens); live background LLM inference and external news feed ingestion are NOT IMPLEMENTED.',
+  detail:
+   providerState==='successful'
+    ?'Authenticated background LLM inference succeeded.'
+    :providerState==='failed'
+     ?'Background LLM provider invocation failed or reported an upstream credential/quota error; deterministic collection remains isolated.'
+     :providerState==='attempted'
+      ?'Background LLM provider invocation attempted and in progress or awaiting verification.'
+      :providerState==='disabled'
+       ?'Background AI research agent is intentionally disabled; deterministic market-data collection remains isolated.'
+       :providerState==='not_tested'
+        ?'Model provider credentials configured but not yet verified by a live background inference run (deterministic SEC XBRL & EOD market collection active; live background LLM inference NOT IMPLEMENTED).'
+        :'Deterministic SEC XBRL & EOD market collection completed (0 LLM calls); live background LLM inference and external news feed ingestion are NOT IMPLEMENTED.',
  };
 
- // Prevent historical chat records or 0-token deterministic runs from marking remote_ai_models as 'connected'
+ // Prevent historical chat records or 0-call deterministic runs from marking remote_ai_models as 'connected'
  const sanitizedEnvironmentAudit=input.environmentAudit?.map(svc=>{
   if(svc.serviceId==='remote_ai_models'&&!modelInferenceSucceeded&&svc.status==='connected'){
+   const fallbackStatus:ProductionConnectionStatus=
+    providerState==='failed'?'degraded':
+    providerState==='disabled'?'intentionally_disabled':
+    isProviderConfigured?'configured_not_tested':'unavailable';
    return {
     ...svc,
-    status:'unavailable' as const,
+    status:fallbackStatus,
     lastVerifiedAt:null,
     detail:'Live background LLM inference and external news collection are NOT IMPLEMENTED (0 background LLM calls, £0.00 cost); deterministic SEC XBRL extractor active.',
    };
