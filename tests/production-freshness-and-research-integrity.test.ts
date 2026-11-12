@@ -1687,7 +1687,7 @@ describe('Production Freshness Recovery & Research Integrity Regression Suite', 
         {
           runId: 'run-det-sec-1',
           jobKey: 'sec_filings_collector',
-          category: 'collector',
+          category: 'deterministic_collector',
           environment: 'remote',
           status: 'succeeded',
           startedAt: now - 60_000,

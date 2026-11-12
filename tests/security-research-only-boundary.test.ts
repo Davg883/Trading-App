@@ -129,7 +129,7 @@ describe('WP3 — Convex refuses execution-enabling state changes',()=>{
 });
 
 describe('WP3 — reachability of order execution code',()=>{
- function sources(dir:string,out:string[]=[]):string[]{for(const name of readdirSync(dir)){if(name==='node_modules'||name==='_generated'||name.startsWith('.'))continue;const p=join(dir,name);if(statSync(p).isDirectory())sources(p,out);else if(/\.(ts|tsx|mjs|py)$/.test(name))out.push(p);}return out;}
+ function sources(dir:string,out:string[]=[]):string[]{for(const name of readdirSync(dir)){if(name==='node_modules'||name==='_generated'||name.startsWith('.'))continue;const p=join(dir,name).replaceAll('\\','/');if(statSync(p).isDirectory())sources(p,out);else if(/\.(ts|tsx|mjs|py)$/.test(name))out.push(p);}return out;}
  it('only the guarded trading server imports the order client; research agents and Convex cannot reach it',()=>{
   const importers=['app','components','integrations','lib','convex','worker','scripts'].flatMap(d=>sources(d)).filter(f=>/trading212-orders/.test(readFileSync(f,'utf8'))&&!f.endsWith('trading212-orders.ts'));
   expect(importers.sort()).toEqual(['lib/trading/server.ts']);
