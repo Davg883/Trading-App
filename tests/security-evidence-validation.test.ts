@@ -70,13 +70,15 @@ describe('Correction 4 — digest and identity consistency',()=>{
 
 describe('Correction 4 — enforced on every write path; legacy rows are labelled, not modified',()=>{
  const modules={'./_generated/server.ts':async()=>({}),'./evidenceChat.ts':()=>import('../convex/evidenceChat'),'./acceptanceNonces.ts':()=>import('../convex/acceptanceNonces'),'./chatBudget.ts':()=>import('../convex/chatBudget'),'./operations.ts':()=>import('../convex/operations')};
- it('the signed-in mutation rejects an inconsistent record and accepts a consistent one, marked strict',async()=>{
+ it('the signed-in legacy mutation rejects an inconsistent record and marks a consistent client-recorded turn as client_asserted_v1, never strict_v1 (R4)',async()=>{
   vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);
   const t=convexTest(schema,modules),asA=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS});
   const ref=makeFunctionReference<'mutation'>('evidenceChat:recordEvidenceChatTurn');
   await expect(asA.mutation(ref,rec({bundleJson:'{}'}))).rejects.toThrow(/bundleJson/);
   await asA.mutation(ref,rec());
-  expect(await t.run(ctx=>ctx.db.query('evidenceChatAudit').collect())).toMatchObject([{evidenceIntegrity:'strict_v1'}]);
+  expect(await t.run(ctx=>ctx.db.query('evidenceChatAudit').collect())).toMatchObject([{recordedVia:'client_jwt_legacy',evidenceIntegrity:'client_asserted_v1'}]);
+  const history=await asA.query(makeFunctionReference<'query'>('evidenceChat:listChatHistory'),{}) as Array<{evidenceIntegrity:string}>;
+  expect(history).toMatchObject([{evidenceIntegrity:'client_asserted_v1'}]);
  });
  it('a historical row without the strict marker is returned unmodified and labelled legacy_unvalidated',async()=>{
   vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);

@@ -12,7 +12,11 @@ import {
 import type { DataModel } from './server';
 import type { GenericId } from 'convex/values';
 import { sha256HexSync } from '../lib/crypto/sha256';
-import { EVIDENCE_INTEGRITY_VERSION } from '../lib/graph/chat-turn-evidence-validation';
+import {
+  CLIENT_ASSERTED_INTEGRITY_VERSION,
+  EVIDENCE_INTEGRITY_VERSION,
+} from '../lib/graph/chat-turn-evidence-validation';
+import { isResearchChatMaintenanceActive } from '../lib/graph/gemini-provider-adapter';
 import {
   abandonReservation,
   canSettle,
@@ -196,7 +200,8 @@ export type NonceRejection =
   | 'not_consumed'
   | 'invalid_reservation'
   | 'record_window_elapsed'
-  | 'invalid_audit_record';
+  | 'invalid_audit_record'
+  | 'maintenance_active';
 
 async function loadVerifiedNonce(
   ctx: GenericMutationCtx<DataModel>,
@@ -286,6 +291,7 @@ export const consumeNonceInternal = internalMutation({
     if (row.status === 'failed') return reject('already_failed');
     if (now > row.expiresAtMs) return reject('expired');
     if (!constantTimeEqual(row.questionSha256, args.questionSha256)) return reject('question_mismatch');
+    if (isResearchChatMaintenanceActive()) return reject('maintenance_active');
 
     const recordDeadlineMs = now + RECORD_WINDOW_MS;
     // Reserve paid-inference budget in the same transaction (pre-merge risk H2). If it cannot be reserved the
@@ -389,11 +395,15 @@ export async function insertValidatedChatTurn(
 ) {
   const violations = chatTurnAuditViolations(turn, now, { owner });
   if (violations.length > 0) return { ok: false as const, violations };
+  const integrityVersion =
+    recordedVia === 'client_jwt_legacy'
+      ? CLIENT_ASSERTED_INTEGRITY_VERSION
+      : EVIDENCE_INTEGRITY_VERSION;
   const auditId = await ctx.db.insert('evidenceChatAudit', {
     owner,
     ...turn,
     recordedVia,
-    evidenceIntegrity: EVIDENCE_INTEGRITY_VERSION,
+    evidenceIntegrity: integrityVersion,
     executionAuthority: 'none',
   });
   await ctx.db.insert('audit', {

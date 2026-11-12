@@ -42,12 +42,19 @@ export type ChatRecordedVia = (typeof CHAT_RECORDED_VIA)[number];
 export const ATTESTED_RECORDED_VIA: readonly ChatRecordedVia[] = ['convex_action', 'server_gateway', 'server_gateway_acceptance'];
 
 /** True only for a successful live provider turn recorded by trusted server code. Rows without provenance are not attested. */
-export function isAttestedLiveTurn(row: { generationMode: string; providerStatus: string; recordedVia?: string | null }): boolean {
+export function isAttestedLiveTurn(row: {
+  generationMode: string;
+  providerStatus: string;
+  recordedVia?: string | null;
+  evidenceIntegrity?: string | null;
+}): boolean {
   return (
     row.generationMode === 'gemini_live' &&
     row.providerStatus === 'succeeded' &&
     typeof row.recordedVia === 'string' &&
-    (ATTESTED_RECORDED_VIA as readonly string[]).includes(row.recordedVia)
+    (ATTESTED_RECORDED_VIA as readonly string[]).includes(row.recordedVia) &&
+    row.evidenceIntegrity !== 'client_asserted_v1' &&
+    row.evidenceIntegrity !== 'legacy_unvalidated'
   );
 }
 
@@ -169,14 +176,24 @@ export function chatTurnAuditViolations(
     reasons.push('createdAtMs is not within 15 minutes of the server clock');
 
   // Cross-field integrity: a turn may be labelled live inference only when the provider call succeeded,
-  // and a turn that did not use the live provider cannot carry provider cost.
+  // and a turn that did not use the live provider cannot carry provider cost unless a failed provider call
+  // returned billed usage before failing validation/parsing (R1).
   if (input.generationMode === 'gemini_live' && input.providerStatus !== 'succeeded')
     reasons.push('generationMode gemini_live requires providerStatus succeeded');
   if (input.generationMode !== 'gemini_live' && input.providerStatus === 'succeeded')
     reasons.push('providerStatus succeeded requires generationMode gemini_live');
+  const canCarryFailedProviderUsage =
+    input.providerStatus === 'provider_error' && input.providerFailureKind !== 'simulated';
   if (
     input.generationMode !== 'gemini_live' &&
+    !canCarryFailedProviderUsage &&
     (input.estimatedCostGbp > 0 || (input.actualCostGbp ?? 0) > 0)
+  )
+    reasons.push('a turn without live provider inference cannot carry provider cost');
+  if (
+    input.generationMode !== 'gemini_live' &&
+    canCarryFailedProviderUsage &&
+    (input.actualCostGbp ?? 0) > 0
   )
     reasons.push('a turn without live provider inference cannot carry provider cost');
 

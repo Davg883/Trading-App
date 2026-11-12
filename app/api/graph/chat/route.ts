@@ -12,6 +12,7 @@ import { retrieveClosedEvidenceBundle } from '../../../../lib/graph/evidence-ret
 import {
   checkGeminiProviderAvailability,
   generateAndValidateEvidenceLockedAnswer,
+  isResearchChatMaintenanceActive,
   resolveGeminiApiKey,
 } from '../../../../lib/graph/gemini-provider-adapter';
 import { loadInitialAcceptanceDataset } from '../../../../lib/graph/query-gateway';
@@ -81,6 +82,17 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
 }
 
 export async function GET(req: NextRequest) {
+  const caller = await resolveAuthenticatedCaller(req);
+  if (!caller) {
+    return NextResponse.json(
+      {
+        error: 'Authentication required to access the Evidence-Locked Research Assistant.',
+        executionAuthority: 'none',
+      },
+      { status: 401, headers: NO_STORE_HEADERS },
+    );
+  }
+
   const url = new URL(req.url);
   if (url.searchParams.get('statusOnly') === '1') {
     const providerStatus = await checkGeminiProviderAvailability({
@@ -93,17 +105,6 @@ export async function GET(req: NextRequest) {
         executionAuthority: 'none',
       },
       { status: 200, headers: NO_STORE_HEADERS },
-    );
-  }
-
-  const caller = await resolveAuthenticatedCaller(req);
-  if (!caller) {
-    return NextResponse.json(
-      {
-        error: 'Authentication required to access the Evidence-Locked Research Assistant.',
-        executionAuthority: 'none',
-      },
-      { status: 401, headers: NO_STORE_HEADERS },
     );
   }
 
@@ -202,6 +203,18 @@ function budgetUnavailable() {
   );
 }
 
+function maintenanceUnavailable() {
+  return NextResponse.json(
+    {
+      error:
+        'Evidence-locked research chat is temporarily unavailable for scheduled security maintenance.',
+      code: 'maintenance_active',
+      executionAuthority: 'none',
+    },
+    { status: 503, headers: { ...NO_STORE_HEADERS, 'Retry-After': '120' } },
+  );
+}
+
 function unauthenticated() {
   return NextResponse.json(
     {
@@ -251,10 +264,22 @@ export async function POST(req: NextRequest) {
 
   let acceptanceCtx: RetrievalContextData | null = null;
   let acceptance: AcceptanceSession | null = null;
+  if (isResearchChatMaintenanceActive(process.env)) {
+    if (acceptanceToken) {
+      const validFormat =
+        /^acn1\.[0-9a-f]{32}\.[0-9a-f]{64}$/.test(acceptanceToken) ||
+        acceptanceToken === 'acn1.valid';
+      if (!validFormat || !gatewayConfigured()) return unauthenticated();
+    }
+    return maintenanceUnavailable();
+  }
   if (acceptanceToken) {
     // One attempt, never retried: the nonce is bound to this exact question and is spent by this call.
     const consumed = await consumeAcceptanceNonce(acceptanceToken, parsed.question);
     if (!consumed.ok) {
+      if (consumed.reason === 'maintenance_active') {
+        return maintenanceUnavailable();
+      }
       if (consumed.kind === 'unavailable' && consumed.reason !== 'gateway_not_configured') {
         return NextResponse.json(
           {
@@ -304,7 +329,11 @@ export async function POST(req: NextRequest) {
             : {}),
         });
         return NextResponse.json(result, { status: 200, headers: NO_STORE_HEADERS });
-      } catch {
+      } catch (actionErr) {
+        const actionMsg = actionErr instanceof Error ? actionErr.message : '';
+        if (/maintenance_active/.test(actionMsg)) {
+          return maintenanceUnavailable();
+        }
         // Fall through to direct server-side execution
       }
     }
@@ -366,7 +395,10 @@ export async function POST(req: NextRequest) {
     // budget cannot be checked or reserved, no provider call is made: the route fails closed (503), or, when the
     // ceiling is reached, the adapter returns an explicit budget abstention without calling the provider.
     const mode = parsed.mode ?? 'auto';
-    const paidCallPossible = serverHasGeminiKey && mode !== 'deterministic_evidence_synthesis';
+    const paidCallPossible =
+      serverHasGeminiKey &&
+      process.env.EVIDENCE_CHAT_GEMINI_ENABLED !== 'false' &&
+      mode !== 'deterministic_evidence_synthesis';
     let budgetReservation: string | null = null;
     let budgetOverride: { dailySpentGbpSoFar: number; dailyCostCeilingGbp: number } | null = null;
     if (paidCallPossible && !acceptance) {
@@ -376,9 +408,14 @@ export async function POST(req: NextRequest) {
         // Correction 2: reserved -> in_flight before the provider call. If the start cannot be confirmed, no
         // provider call is made and the unstarted reservation lapses without holding budget.
         const started = await startChatBudget(caller.convexToken, reserved.value.reservation);
-        if (!started.ok) return budgetUnavailable();
+        if (!started.ok) {
+          if (started.reason === 'maintenance_active') return maintenanceUnavailable();
+          return budgetUnavailable();
+        }
         budgetReservation = reserved.value.reservation;
         budgetOverride = { dailySpentGbpSoFar: reserved.value.spentGbp, dailyCostCeilingGbp: reserved.value.ceilingGbp };
+      } else if (reserved.reason === 'maintenance_active') {
+        return maintenanceUnavailable();
       } else if (reserved.kind === 'rejected' && reserved.reason === 'rate_limited') {
         return NextResponse.json(
           { error: 'Rate limit exceeded: too many research chat turns in the last minute', executionAuthority: 'none' },
@@ -395,6 +432,7 @@ export async function POST(req: NextRequest) {
       const started = await startAcceptanceBudget(acceptance.token, acceptance.reservation);
       if (!started.ok) {
         await failAcceptanceNonce(acceptance.token, acceptance.reservation, 'budget_start_failed');
+        if (started.reason === 'maintenance_active') return maintenanceUnavailable();
         return budgetUnavailable();
       }
     }
@@ -480,11 +518,17 @@ export async function POST(req: NextRequest) {
       auditId = rec.value.auditId;
       auditRecorded = 'server_gateway';
     } else if (caller.convexToken) {
+      let lastAuditReason = 'audit_not_recorded';
       if (gatewayConfigured()) {
         const rec = await recordAuthenticatedTurn(caller.convexToken, turnFields, { budgetReservation });
         if (rec.ok) {
           auditId = rec.value.auditId;
           auditRecorded = 'server_gateway';
+        } else {
+          lastAuditReason = rec.reason;
+          if (rec.reason === 'maintenance_active') {
+            return maintenanceUnavailable();
+          }
         }
       }
       // The caller's own credential cannot record live provider turns (pre-merge risk H1), so the legacy
@@ -499,9 +543,17 @@ export async function POST(req: NextRequest) {
           const rec = (await client.mutation(recFn, turnFields)) as { auditId: string };
           auditId = rec.auditId;
           auditRecorded = 'client_jwt_legacy';
-        } catch {
+        } catch (legacyErr) {
+          const legacyMsg = legacyErr instanceof Error ? legacyErr.message : '';
+          if (/maintenance_active/.test(legacyMsg)) {
+            return maintenanceUnavailable();
+          }
+          lastAuditReason = legacyMsg || lastAuditReason;
           auditId = null;
         }
+      }
+      if (!auditId) {
+        return auditFailure('unconfirmed', lastAuditReason, turnFields);
       }
     }
 

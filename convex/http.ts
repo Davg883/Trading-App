@@ -221,7 +221,8 @@ async function gatewayJson(request:Request):Promise<{ok:true;body:Record<string,
  }
 }
 const str=(value:unknown,max:number)=>typeof value==='string'&&value.length>0&&value.length<=max?value:null;
-const nonceRejected=(reason:string,violations?:string[])=>Response.json({error:{code:'nonce_rejected',reason,...(violations?{violations}:{})}},{status:reason==='invalid_audit_record'?400:409,headers});
+const maintenanceResponse=()=>Response.json({error:{code:'maintenance_active',reason:'maintenance_active',message:'Evidence-locked research chat is temporarily unavailable for scheduled security maintenance.'},executionAuthority:'none'},{status:503,headers:{...headers,'Retry-After':'120'}});
+const nonceRejected=(reason:string,violations?:string[])=>reason==='maintenance_active'?maintenanceResponse():Response.json({error:{code:'nonce_rejected',reason,...(violations?{violations}:{})}},{status:reason==='invalid_audit_record'?400:409,headers});
 
 http.route({
  path:'/api/evidence-chat/acceptance/consume',
@@ -319,7 +320,7 @@ http.route({
   const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
   const reservation=randomHex(32);
   const result=await ctx.runMutation(budgetM('reserveChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(reservation),source:'gateway'}) as {ok:true;spentGbp:number;ceilingGbp:number;expiresAtMs:number}|{ok:false;reason:string;spentGbp:number;ceilingGbp:number};
-  if(!result.ok)return Response.json({error:{code:result.reason,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp}},{status:result.reason==='rate_limited'?429:409,headers});
+  if(!result.ok)return result.reason==='maintenance_active'?maintenanceResponse():Response.json({error:{code:result.reason,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp}},{status:result.reason==='rate_limited'?429:409,headers});
   return Response.json({reservation,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp,expiresAtMs:result.expiresAtMs,executionAuthority:'none'},{status:200,headers});
  }),
 });
@@ -338,7 +339,7 @@ http.route({
   const budgetReservation=parsed.body.budgetReservation;
   if(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))return Response.json({error:{code:'invalid_request',message:'budgetReservation is required.'}},{status:400,headers});
   const result=await ctx.runMutation(budgetM('startChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(budgetReservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
-  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  if(!result.ok)return result.reason==='maintenance_active'?maintenanceResponse():Response.json({error:{code:result.reason}},{status:409,headers});
   return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
  }),
 });
@@ -354,7 +355,7 @@ http.route({
   const tokenParts=token?parseAcceptanceToken(token):null;
   if(!tokenParts||!reservation||!/^[0-9a-f]{64}$/.test(reservation))return Response.json({error:{code:'invalid_request',message:'token and reservation are required.'}},{status:400,headers});
   const result=await ctx.runMutation(nonceM('startAcceptanceBudgetInternal'),{nonceId:tokenParts.nonceId,secretSha256:await sha256Hex(tokenParts.secret),reservationSha256:await sha256Hex(reservation)}) as {ok:true;inFlightDeadlineMs:number}|{ok:false;reason:string};
-  if(!result.ok)return Response.json({error:{code:result.reason}},{status:409,headers});
+  if(!result.ok)return result.reason==='maintenance_active'?maintenanceResponse():Response.json({error:{code:result.reason}},{status:409,headers});
   return Response.json({started:true,inFlightDeadlineMs:result.inFlightDeadlineMs,executionAuthority:'none'},{status:200,headers});
  }),
 });
@@ -387,7 +388,9 @@ http.route({
     ...(typeof budgetReservation==='string'?{budgetReservationSha256:await sha256Hex(budgetReservation)}:{}),
    }) as {auditId:string;duplicate:boolean};
    return Response.json({auditId:result.auditId,duplicate:result.duplicate,executionAuthority:'none'},{status:200,headers});
-  }catch{
+  }catch(err){
+   const msg=err instanceof Error?err.message:'';
+   if(/maintenance_active/.test(msg))return maintenanceResponse();
    return Response.json({error:{code:'invalid_request',message:'Turn record failed validation.'}},{status:400,headers});
   }
  }),

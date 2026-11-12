@@ -14,6 +14,12 @@ import { computeCanonicalSha256 } from './evidence-retrieval-gateway';
  * re-validated or modified; they are reported as `legacy_unvalidated` when read.
  */
 export const EVIDENCE_INTEGRITY_VERSION = 'strict_v1' as const;
+export const CLIENT_ASSERTED_INTEGRITY_VERSION = 'client_asserted_v1' as const;
+export const LEGACY_UNVALIDATED_INTEGRITY_VERSION = 'legacy_unvalidated' as const;
+export type EvidenceIntegrityLevel =
+  | typeof EVIDENCE_INTEGRITY_VERSION
+  | typeof CLIENT_ASSERTED_INTEGRITY_VERSION
+  | typeof LEGACY_UNVALIDATED_INTEGRITY_VERSION;
 
 /** Fields excluded from the canonical digest by `retrieveClosedEvidenceBundle`. */
 const DIGEST_EXCLUDED_FIELDS = ['bundleId', 'estimatedBundleTokens', 'bundleSha256', 'executionAuthority'] as const;

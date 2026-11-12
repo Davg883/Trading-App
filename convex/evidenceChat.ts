@@ -20,6 +20,7 @@ import { retrieveClosedEvidenceBundle } from '../lib/graph/evidence-retrieval-ga
 import {
   checkGeminiProviderAvailability,
   generateAndValidateEvidenceLockedAnswer,
+  isResearchChatMaintenanceActive,
   resolveGeminiApiKey,
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
@@ -27,6 +28,11 @@ import { insertValidatedChatTurn, recordTurnWithReservation, turnAuditArgs } fro
 import { loadReservation } from './chatBudget';
 import { sha256HexSync } from '../lib/crypto/sha256';
 import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
+import {
+  CLIENT_ASSERTED_INTEGRITY_VERSION,
+  LEGACY_UNVALIDATED_INTEGRITY_VERSION,
+  type EvidenceIntegrityLevel,
+} from '../lib/graph/chat-turn-evidence-validation';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalQuery: QueryBuilder<DataModel, 'internal'> = internalQueryGeneric;
@@ -40,6 +46,15 @@ export const SHARED_CHAT_TURNS_PER_MINUTE = 10;
 
 function validOwner(owner: string) {
   if (!owner.trim() || owner.length > 1000) throw new Error('Owner required');
+}
+
+function resolveRowEvidenceIntegrity(
+  row: Pick<DataModel['evidenceChatAudit']['document'], 'recordedVia' | 'evidenceIntegrity'>,
+): EvidenceIntegrityLevel {
+  if (row.recordedVia === 'client_jwt_legacy') return CLIENT_ASSERTED_INTEGRITY_VERSION;
+  if (row.evidenceIntegrity === 'strict_v1') return 'strict_v1';
+  if (row.evidenceIntegrity === 'client_asserted_v1') return CLIENT_ASSERTED_INTEGRITY_VERSION;
+  return LEGACY_UNVALIDATED_INTEGRITY_VERSION;
 }
 
 /**
@@ -137,6 +152,18 @@ export const recordEvidenceChatTurnInternal = internalMutation({
     if (budgetReservationSha256 && !reservation) {
       throw new Error('Invalid evidence chat audit record: invalid_budget_reservation');
     }
+    if (isResearchChatMaintenanceActive()) {
+      const existingTurn = await ctx.db
+        .query('evidenceChatAudit')
+        .withIndex('by_turn', (q) => q.eq('owner', owner).eq('turnId', turn.turnId))
+        .first();
+      const canSettleInFlight =
+        existingTurn !== null ||
+        (reservation !== null && reservation.status !== 'reserved');
+      if (!canSettleInFlight) {
+        throw new Error('maintenance_active');
+      }
+    }
     const inserted = await recordTurnWithReservation(ctx, owner, turn, recordedVia, reservation, now);
     if (!inserted.ok) throw new Error(`Invalid evidence chat audit record: ${inserted.violations.join('; ')}`);
     return { auditId: inserted.auditId, duplicate: inserted.duplicate };
@@ -187,7 +214,8 @@ export const listChatHistory = query({
       validation: JSON.parse(r.validationJson),
       createdAtMs: r.createdAtMs,
       // Rows written before Correction 4 are returned as stored, unmodified, and labelled as not validated.
-      evidenceIntegrity: r.evidenceIntegrity ?? ('legacy_unvalidated' as const),
+      // Client-asserted legacy rows are labelled `client_asserted_v1` and never `strict_v1` (R4).
+      evidenceIntegrity: resolveRowEvidenceIntegrity(r),
       executionAuthority: 'none' as const,
     }));
   },
@@ -216,7 +244,7 @@ export const getEvidenceBundleById = query({
       answer: JSON.parse(row.answerJson),
       validation: JSON.parse(row.validationJson),
       createdAtMs: row.createdAtMs,
-      evidenceIntegrity: row.evidenceIntegrity ?? ('legacy_unvalidated' as const),
+      evidenceIntegrity: resolveRowEvidenceIntegrity(row),
       executionAuthority: 'none' as const,
     };
   },
@@ -250,6 +278,11 @@ export const askEvidenceLockedQuestion = action({
     const identity = verifyIdentityClaims(rawIdentity);
     if (identity.actorType !== undefined && identity.actorType !== 'human') {
       throw new Error('Automated actors cannot invoke interactive research chat');
+    }
+    if (isResearchChatMaintenanceActive()) {
+      throw new Error(
+        'maintenance_active: Evidence-locked research chat is temporarily unavailable for scheduled security maintenance',
+      );
     }
     const owner = identity.tokenIdentifier;
 
@@ -300,7 +333,10 @@ export const askEvidenceLockedQuestion = action({
     // Pre-merge risk H2: reserve paid-inference budget atomically before any possible provider call. If it
     // cannot be reserved, the adapter is told the ceiling is reached, so it abstains without calling the provider.
     const mode = args.mode ?? 'auto';
-    const paidCallPossible = mode !== 'deterministic_evidence_synthesis' && Boolean(resolveGeminiApiKey(process.env).apiKey);
+    const paidCallPossible =
+      mode !== 'deterministic_evidence_synthesis' &&
+      process.env.EVIDENCE_CHAT_GEMINI_ENABLED !== 'false' &&
+      Boolean(resolveGeminiApiKey(process.env).apiKey);
     let budgetReservationSha256: string | undefined;
     let dailySpent = retrievalCtx.dailyChatSpendGbp;
     let dailyCeiling = retrievalCtx.dailyCostCeilingGbp;
@@ -541,6 +577,11 @@ export const recordEvidenceChatTurn = mutation({
   args: turnAuditArgs,
   handler: async (ctx, args) => {
     const user = await researcher(ctx);
+    if (isResearchChatMaintenanceActive()) {
+      throw new Error(
+        'maintenance_active: Evidence-locked research chat is temporarily unavailable for scheduled security maintenance',
+      );
+    }
     // Pre-merge risk H1: the caller's own credential cannot evidence live provider inference or provider cost.
     const clientViolations = clientRecordedTurnViolations(args);
     if (clientViolations.length > 0) {

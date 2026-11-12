@@ -91,6 +91,18 @@ export function resetGeminiChatRateLimitsForTests(): void {
   callerChatRateWindow.clear();
 }
 
+/**
+ * Server-enforced maintenance gate for evidence-chat inference (Work Package B).
+ * Returns true when `RESEARCH_CHAT_MAINTENANCE` is enabled (`on`, `true`, `1`, `yes`, `enabled`).
+ */
+export function isResearchChatMaintenanceActive(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const raw = env.RESEARCH_CHAT_MAINTENANCE?.trim().toLowerCase();
+  if (!raw) return false;
+  return !['off', 'false', '0', 'no', 'disabled'].includes(raw);
+}
+
 export function computeGeminiCostGbp(inputTokens: number, outputTokens: number): number {
   const raw =
     Math.max(0, inputTokens) * INPUT_COST_GBP_PER_TOKEN +
@@ -876,6 +888,16 @@ export function synthesizeDeterministicEvidenceAnswer(
   });
 }
 
+export interface GenerateEvidenceLockedAnswerRetryContext {
+  attemptNumber: number;
+  modelId: string;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedCostGbp: number;
+  estimatedNextAttemptCostGbp: number;
+  lastFailureKind: 'error_response' | 'timeout_or_transport' | 'unknown';
+}
+
 export interface GenerateEvidenceLockedAnswerOptions {
   bundle: EvidenceBundleV1;
   callerId: string;
@@ -886,6 +908,19 @@ export interface GenerateEvidenceLockedAnswerOptions {
   timeoutMs?: number;
   env?: Record<string, string | undefined>;
   nowMs?: number;
+  /**
+   * Maximum provider attempts permitted within this call. Defaults to 1 so a single budget reservation
+   * can never fan out into multiple unreserved provider requests (R1).
+   * If set above 1, `authorizeRetryAttempt` MUST be provided and return true before each retry attempt.
+   */
+  maxProviderAttempts?: number;
+  /**
+   * Required callback to authorise each retry attempt (attempt >= 2) against a distinct budget reservation
+   * and aggregate ceiling check (R1).
+   */
+  authorizeRetryAttempt?: (
+    context: GenerateEvidenceLockedAnswerRetryContext,
+  ) => Promise<boolean> | boolean;
 }
 
 export async function generateAndValidateEvidenceLockedAnswer(
@@ -1099,8 +1134,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
     };
   }
 
-  // 6. If live Gemini mode is required (`gemini_live_required`) and key/flag is absent, return explicit unavailable/abstention
-  if (!apiKey || (!liveEnabled && options.mode === 'gemini_live_required')) {
+  // 6. If live Gemini mode is disabled or key is absent, return explicit abstention (when required) or deterministic synthesis (in auto mode)
+  if (!apiKey || !liveEnabled) {
     const statusCode = !apiKey ? 'api_key_not_configured' : 'disabled_by_default';
     if (options.mode === 'gemini_live_required') {
       const reason = !apiKey
@@ -1138,7 +1173,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
       };
     }
 
-    // In 'auto' mode when GEMINI_API_KEY is not yet configured in environment, run deterministic closed-evidence synthesis
+    // In 'auto' mode when GEMINI_API_KEY is not configured or EVIDENCE_CHAT_GEMINI_ENABLED=false, run deterministic closed-evidence synthesis
     // clearly labelled as `deterministic_evidence_synthesis` with £0.0000 cost.
     const candidate = synthesizeDeterministicEvidenceAnswer(bundle);
     const { validatedAnswer, report } = validateEvidenceLockedAnswer(
@@ -1146,6 +1181,9 @@ export async function generateAndValidateEvidenceLockedAnswer(
       bundle,
       nowMs,
     );
+    const fallbackLabel = !apiKey
+      ? 'GEMINI_API_KEY unconfigured'
+      : 'EVIDENCE_CHAT_GEMINI_ENABLED=false';
     return {
       turnId,
       question: bundle.question,
@@ -1155,7 +1193,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
       validation: report,
       telemetry: {
         provider: 'google_genai_sdk',
-        modelId: `${modelId} (closed-evidence deterministic fallback; GEMINI_API_KEY unconfigured)`,
+        modelId: `${modelId} (closed-evidence deterministic fallback; ${fallbackLabel})`,
         modelVerifiedViaEndpoint: false,
         generationMode: 'deterministic_evidence_synthesis',
         providerStatus: statusCode,
@@ -1173,7 +1211,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
     };
   }
 
-  // 7. Live Gemini (`@google/genai`) call with bounded retry, timeout, cached models endpoint check, and strict JSON schema
+  // 7. Live Gemini (`@google/genai`) call with strict single-attempt default (R1), bounded timeout, and strict JSON schema
   const timeoutMs = options.timeoutMs ?? 15_000;
   const ai = new GoogleGenAI({
     apiKey,
@@ -1184,30 +1222,15 @@ export async function generateAndValidateEvidenceLockedAnswer(
       },
     },
   });
-  const baseCandidates = env.GEMINI_MODEL_ID?.trim()
-    ? [
-        modelId,
-        'gemini-3.5-flash',
-        'gemini-3.6-flash',
-        'gemini-3.8-flash',
-        'gemini-3.7-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-omni-flash-preview',
-        'gemini-4-argon',
-      ]
-    : [
-        'gemini-3.5-flash',
-        'gemini-3.6-flash',
-        'gemini-3.8-flash',
-        'gemini-3.7-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-omni-flash-preview',
-        'gemini-4-argon',
-      ];
+  const baseCandidates: string[] = [
+    modelId,
+    ...ALLOWLISTED_GEMINI_MODELS.filter((m) => m !== modelId),
+  ];
   const hasFreshCache =
     options.env === undefined &&
     cachedVerifiedModelEndpoint !== null &&
-    Date.now() - cachedVerifiedModelEndpoint.verifiedAtMs < MODEL_ENDPOINT_CACHE_TTL_MS;
+    Date.now() - cachedVerifiedModelEndpoint.verifiedAtMs < MODEL_ENDPOINT_CACHE_TTL_MS &&
+    (ALLOWLISTED_GEMINI_MODELS as readonly string[]).includes(cachedVerifiedModelEndpoint.modelId);
   const candidateModels =
     hasFreshCache && cachedVerifiedModelEndpoint
       ? [
@@ -1215,6 +1238,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
           ...baseCandidates.filter((m) => m !== cachedVerifiedModelEndpoint!.modelId),
         ]
       : baseCandidates;
+  const maxAttempts = Math.max(
+    1,
+    Math.min(candidateModels.length, options.maxProviderAttempts ?? 1),
+  );
   let activeModelId: string = candidateModels[0]!;
   let endpointVerified = hasFreshCache;
 
@@ -1322,9 +1349,18 @@ export async function generateAndValidateEvidenceLockedAnswer(
   ].join('\n');
 
   let lastError: unknown = null;
-  let useThinkingConfig = true;
-  let fallbackIdx = 0;
-  for (let attempt = 0; attempt < candidateModels.length; attempt += 1) {
+  const useThinkingConfig = true;
+  let accumulatedInputTokens = 0;
+  let accumulatedOutputTokens = 0;
+  let accumulatedThinkingTokens = 0;
+  let accumulatedTotalTokens = 0;
+  let accumulatedCachedTokens = 0;
+  let accumulatedCostGbp = 0;
+  let responseUsageObserved = false;
+  let parseFailureOccurred = false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    activeModelId = candidateModels[attempt] ?? activeModelId;
     try {
       const thinkingConfig = useThinkingConfig
         ? activeModelId.startsWith('gemini-3')
@@ -1360,6 +1396,35 @@ export async function generateAndValidateEvidenceLockedAnswer(
         typeof (response as { responseId?: unknown }).responseId === 'string'
           ? (response as { responseId: string }).responseId
           : null;
+
+      // Record returned token usage immediately upon receiving the provider response (R1).
+      // Even if JSON parsing subsequently fails, the provider has already generated and billed these tokens.
+      const attemptInputTokens =
+        response.usageMetadata?.promptTokenCount ?? bundle.estimatedBundleTokens;
+      const attemptOutputTokens =
+        response.usageMetadata?.candidatesTokenCount ??
+        Math.ceil(rawText.length / 4);
+      const attemptThinkingTokens =
+        (response.usageMetadata as { thoughtsTokenCount?: number } | undefined)
+          ?.thoughtsTokenCount ?? 0;
+      const attemptTotalTokens =
+        response.usageMetadata?.totalTokenCount ??
+        attemptInputTokens + attemptOutputTokens + attemptThinkingTokens;
+      const attemptCachedTokens =
+        response.usageMetadata?.cachedContentTokenCount ?? 0;
+      const attemptCostGbp = computeGeminiCostGbp(
+        attemptInputTokens,
+        attemptOutputTokens + attemptThinkingTokens,
+      );
+
+      accumulatedInputTokens += attemptInputTokens;
+      accumulatedOutputTokens += attemptOutputTokens;
+      accumulatedThinkingTokens += attemptThinkingTokens;
+      accumulatedTotalTokens += attemptTotalTokens;
+      accumulatedCachedTokens += attemptCachedTokens;
+      accumulatedCostGbp = Number((accumulatedCostGbp + attemptCostGbp).toFixed(6));
+      responseUsageObserved = true;
+
       let parsedModelJson: Record<string, unknown>;
       try {
         parsedModelJson = JSON.parse(rawText) as Record<string, unknown>;
@@ -1396,7 +1461,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
           }
           if (repaired) break;
         }
-        if (!repaired) throw parseErr;
+        if (!repaired) {
+          parseFailureOccurred = true;
+          throw parseErr;
+        }
         parsedModelJson = repaired;
       }
       const fallbackFollowUps = [...SUGGESTED_STARTER_QUESTIONS.slice(0, 3)];
@@ -1550,20 +1618,6 @@ export async function generateAndValidateEvidenceLockedAnswer(
         nowMs,
       );
 
-      const inputTokens =
-        response.usageMetadata?.promptTokenCount ?? bundle.estimatedBundleTokens;
-      const outputTokens =
-        response.usageMetadata?.candidatesTokenCount ??
-        Math.ceil(rawText.length / 4);
-      const thinkingTokens =
-        (response.usageMetadata as { thoughtsTokenCount?: number } | undefined)
-          ?.thoughtsTokenCount ?? 0;
-      const totalTokens =
-        response.usageMetadata?.totalTokenCount ??
-        inputTokens + outputTokens + thinkingTokens;
-      const cachedTokens = response.usageMetadata?.cachedContentTokenCount ?? 0;
-      const costGbp = computeGeminiCostGbp(inputTokens, outputTokens + thinkingTokens);
-
       return {
         turnId,
         question: bundle.question,
@@ -1578,14 +1632,14 @@ export async function generateAndValidateEvidenceLockedAnswer(
           generationMode: 'gemini_live',
           providerStatus: 'succeeded',
           requestId: responseId,
-          thinkingTokens,
-          totalTokens,
+          thinkingTokens: accumulatedThinkingTokens,
+          totalTokens: accumulatedTotalTokens,
           latencyMs: Math.max(1, Date.now() - startMs),
-          inputTokens,
-          outputTokens,
-          cachedTokens,
-          estimatedCostGbp: costGbp,
-          actualCostGbp: costGbp,
+          inputTokens: accumulatedInputTokens,
+          outputTokens: accumulatedOutputTokens,
+          cachedTokens: accumulatedCachedTokens,
+          estimatedCostGbp: accumulatedCostGbp,
+          actualCostGbp: accumulatedCostGbp,
           errorCode: null,
           sanitisedError: null,
         },
@@ -1593,37 +1647,49 @@ export async function generateAndValidateEvidenceLockedAnswer(
       };
     } catch (err) {
       lastError = err;
+      // R1 invariant: NEVER retry after a response that already returned billed token usage (e.g. JSON parse failure).
+      if (parseFailureOccurred || responseUsageObserved) {
+        break;
+      }
+      if (attempt + 1 >= maxAttempts || Date.now() - startMs > 50_000) {
+        break;
+      }
       const msg = err instanceof Error ? err.message : '';
-      // Handle Google AI Studio model retirement redirect (e.g. gemini-2.5-flash -> gemini-3.8-flash)
-      const recommendedMatch = msg.match(/models\/(gemini-[0-9.]+-flash(?:-lite|-preview)?)/i);
-      if (recommendedMatch && recommendedMatch[1] && recommendedMatch[1] !== activeModelId) {
-        activeModelId = recommendedMatch[1];
-        useThinkingConfig = true;
-        continue;
-      }
-      if (/thinking|budget|INVALID_ARGUMENT/i.test(msg) && useThinkingConfig) {
-        useThinkingConfig = false;
-        attempt -= 1;
-        continue;
-      }
       const isTransientOrRetired =
-        /503|UNAVAILABLE|504|DEADLINE_EXCEEDED|429|timeout|ABORT|Unterminated|SyntaxError|no longer available|NOT_FOUND/i.test(
+        /503|UNAVAILABLE|504|DEADLINE_EXCEEDED|429|timeout|ABORT|no longer available|NOT_FOUND/i.test(
           msg,
         );
+      if (!isTransientOrRetired) {
+        break;
+      }
+      // R1 invariant: Any retry attempt (attempt >= 1) requires:
+      // 1. Aggregate budget ceiling check (dailySpent + accumulatedCostGbp + next attempt cost <= dailyCeiling & maxRequestCostGbp)
+      // 2. Explicit per-attempt reservation authorisation via options.authorizeRetryAttempt
+      const nextModelId = candidateModels[attempt + 1] ?? activeModelId;
+      const lastFailureKind = classifyProviderFailure(err);
       if (
-        !isTransientOrRetired ||
-        attempt === candidateModels.length - 1 ||
-        Date.now() - startMs > 50_000
+        accumulatedCostGbp + estRequestCostGbp > EVIDENCE_RETRIEVAL_LIMITS.maxRequestCostGbp ||
+        dailySpent + accumulatedCostGbp + estRequestCostGbp > dailyCeiling
       ) {
+        break;
+      }
+      if (!options.authorizeRetryAttempt) {
+        break;
+      }
+      const retryAuthorized = await options.authorizeRetryAttempt({
+        attemptNumber: attempt + 2,
+        modelId: nextModelId,
+        accumulatedInputTokens,
+        accumulatedOutputTokens,
+        accumulatedCostGbp,
+        estimatedNextAttemptCostGbp: estRequestCostGbp,
+        lastFailureKind,
+      });
+      if (!retryAuthorized) {
         break;
       }
       if (options.env === undefined) {
         await new Promise((r) => setTimeout(r, 250));
-      }
-      fallbackIdx += 1;
-      if (fallbackIdx < candidateModels.length) {
-        activeModelId = candidateModels[fallbackIdx]!;
-        useThinkingConfig = true;
       }
     }
   }
@@ -1639,6 +1705,10 @@ export async function generateAndValidateEvidenceLockedAnswer(
     bundle,
     nowMs,
   );
+  const failureKind =
+    parseFailureOccurred || responseUsageObserved
+      ? 'unknown'
+      : classifyProviderFailure(lastError);
 
   return {
     turnId,
@@ -1653,12 +1723,12 @@ export async function generateAndValidateEvidenceLockedAnswer(
       modelVerifiedViaEndpoint: endpointVerified,
       generationMode: 'abstention_only',
       providerStatus: 'provider_error',
-      providerFailureKind: classifyProviderFailure(lastError),
+      providerFailureKind: failureKind,
       latencyMs: Math.max(1, Date.now() - startMs),
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
-      estimatedCostGbp: 0,
+      inputTokens: accumulatedInputTokens,
+      outputTokens: accumulatedOutputTokens,
+      cachedTokens: accumulatedCachedTokens,
+      estimatedCostGbp: accumulatedCostGbp,
       actualCostGbp: null,
       errorCode: 'gemini_inference_failed',
       sanitisedError: sanitised,

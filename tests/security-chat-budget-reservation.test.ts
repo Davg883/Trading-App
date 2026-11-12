@@ -74,10 +74,13 @@ describe('Correction 2 — expiry never erases possible provider liability',()=>
   expect(res.status).toBe(409);expect(((await res.json()) as {error:{code:string}}).error.code).toBe('budget_reservation_expired');
   expect((await postTurn(asA,{turn:turn(live),budgetReservation:reservation})).status).toBe(400);
  });
- it('unresolved liability ages out with the 24-hour window, so it cannot lock the budget permanently',async()=>{
+ it('unresolved in-flight liability persists across the 24-hour boundary until settled or operator-reconciled (R3)',async()=>{
   const {asA,t}=setup();await setCeiling(t,A,0.06);
-  await reserveStarted(asA);
+  const r=await reserveStarted(asA);
   vi.setSystemTime(NOW+24*60*MIN+1);
+  expect((await reserve(asA)).status).toBe(409);
+  expect(await t.query(unresolved,{owner:A})).toMatchObject([{reservationSha256:sha(r),effectiveStatus:'unknown',liabilityGbp:0.05}]);
+  await t.mutation(reconcile,{reservationSha256:sha(r),resolution:'provider_failed',chargeGbp:0,chargeBasis:'none',operator:'ops',note:'Confirmed no upstream charge after 24h'});
   expect((await reserve(asA)).status).toBe(200);
  });
 });

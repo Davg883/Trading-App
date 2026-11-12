@@ -9,6 +9,7 @@ import {
 import type { DataModel } from './server';
 import type { GenericId } from 'convex/values';
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../lib/graph/evidence-chat-contracts';
+import { isResearchChatMaintenanceActive } from '../lib/graph/gemini-provider-adapter';
 
 /**
  * Paid-inference budget reservations (pre-merge risk H2; durable accounting, Correction 2).
@@ -64,17 +65,38 @@ export function effectiveStatus(r: Pick<Reservation, 'status' | 'startExpiresAtM
   return r.status;
 }
 
-/** Amount this reservation holds against the ceiling, excluding settled turns already counted by their audit row. */
-export function reservationLiabilityGbp(r: Reservation, now: number): number {
+/**
+ * Amount this reservation holds against the ceiling on top of any cost already counted via its linked audit row.
+ * - Unresolved (`reserved`, `in_flight`, `unknown`) reservations hold `maxCostGbp` minus any cost already counted on `auditId`.
+ * - Reconciled/settled reservations hold `chargeGbp` minus any cost already counted on `auditId` (preventing both lost charges and double charging, R2).
+ */
+export function reservationLiabilityGbp(
+  r: Reservation,
+  now: number,
+  auditCostGbp?: number,
+): number {
   const s = effectiveStatus(r, now);
-  if (s === 'reserved' || s === 'in_flight' || s === 'unknown') return r.maxCostGbp;
-  if (s === 'settled' && r.auditId === null) return r.chargeGbp ?? r.maxCostGbp;
+  const alreadyCountedOnAudit = r.auditId !== null ? (auditCostGbp ?? 0) : 0;
+  if (s === 'reserved' || s === 'in_flight' || s === 'unknown') {
+    return Math.max(0, Number((r.maxCostGbp - alreadyCountedOnAudit).toFixed(6)));
+  }
+  if (s === 'settled') {
+    const settledCharge = r.chargeGbp ?? r.maxCostGbp;
+    if (r.auditId === null) return settledCharge;
+    if (!r.resolution?.startsWith('reconciled:')) return 0;
+    return Math.max(0, Number((settledCharge - (auditCostGbp ?? 0)).toFixed(6)));
+  }
   return 0;
 }
 
 export type ReservationResult =
   | { ok: true; spentGbp: number; ceilingGbp: number; startExpiresAtMs: number }
-  | { ok: false; reason: 'budget_exceeded' | 'rate_limited'; spentGbp: number; ceilingGbp: number };
+  | {
+      ok: false;
+      reason: 'budget_exceeded' | 'rate_limited' | 'maintenance_active';
+      spentGbp: number;
+      ceilingGbp: number;
+    };
 
 /** Reads spend and liabilities and inserts a reservation, all within the caller's transaction. */
 export async function reserveChatBudget(
@@ -88,17 +110,40 @@ export async function reserveChatBudget(
   if (!owner.trim() || owner.length > 1000) throw new Error('Owner required');
   const settings = await ctx.db.query('operationsSettings').withIndex('by_owner', (q) => q.eq('owner', owner)).first();
   const ceilingGbp = settings?.dailyCostCeilingGbp ?? DEFAULT_DAILY_CEILING_GBP;
+  if (isResearchChatMaintenanceActive()) {
+    return { ok: false, reason: 'maintenance_active', spentGbp: 0, ceilingGbp };
+  }
   const windowStart = now - LIABILITY_WINDOW_MS;
   const turns = await ctx.db
     .query('evidenceChatAudit')
     .withIndex('by_owner', (q) => q.eq('owner', owner).gte('createdAtMs', windowStart))
     .collect();
-  const reservations = await ctx.db
+  // R3 invariant: Unresolved (`in_flight` or `unknown`) reservations must never disappear from financial
+  // liability merely because they crossed a 24-hour boundary. Settled spend rolls over with the 24-hour window,
+  // while unresolved reservations remain active liabilities until settled or operator-reconciled.
+  const allOwnerReservations = await ctx.db
     .query('chatBudgetReservations')
-    .withIndex('by_owner', (q) => q.eq('owner', owner).gte('createdAtMs', windowStart))
+    .withIndex('by_owner', (q) => q.eq('owner', owner))
     .collect();
-  const recordedSpend = turns.reduce((s, t) => s + Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0), 0);
-  const liability = reservations.reduce((s, r) => s + reservationLiabilityGbp(r, now), 0);
+  const reservations = allOwnerReservations.filter((r) => {
+    const s = effectiveStatus(r, now);
+    if (s === 'in_flight' || s === 'unknown') return true;
+    if (r.createdAtMs >= windowStart) return true;
+    if (r.settledAtMs !== null && r.settledAtMs >= windowStart) return true;
+    return false;
+  });
+  const turnSpend = (t: DataModel['evidenceChatAudit']['document']): number =>
+    t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp;
+  const auditCostInWindowById = new Map<GenericId<'evidenceChatAudit'>, number>();
+  for (const t of turns) {
+    auditCostInWindowById.set(t._id, turnSpend(t));
+  }
+  const recordedSpend = turns.reduce((s, t) => s + turnSpend(t), 0);
+  const liability = reservations.reduce((s, r) => {
+    const auditCost =
+      r.auditId !== null ? (auditCostInWindowById.get(r.auditId) ?? 0) : undefined;
+    return s + reservationLiabilityGbp(r, now, auditCost);
+  }, 0);
   const spentGbp = Number((recordedSpend + liability).toFixed(6));
 
   const recentTurns = turns.filter((t) => t.createdAtMs >= now - 60_000).length;
@@ -153,6 +198,10 @@ export async function startReservation(ctx: Ctx, owner: string, reservationSha25
   const s = effectiveStatus(row, now);
   if (s === 'in_flight') return { ok: true, inFlightDeadlineMs: row.inFlightDeadlineMs! };
   if (s !== 'reserved') return { ok: false, reason: s === 'expired_unused' ? 'budget_reservation_expired' : `budget_reservation_${s}` };
+  if (isResearchChatMaintenanceActive()) {
+    await abandonReservation(ctx, row, 'aborted before start: maintenance_active', now);
+    return { ok: false, reason: 'maintenance_active' };
+  }
   const inFlightDeadlineMs = now + IN_FLIGHT_DEADLINE_MS;
   await ctx.db.patch(row._id, { status: 'in_flight', startedAtMs: now, inFlightDeadlineMs });
   return { ok: true, inFlightDeadlineMs };
@@ -179,13 +228,22 @@ const NO_PROVIDER_CALL_STATUSES = new Set([
 export function classifyOutcome(t: TurnOutcome):
   | { status: 'settled'; chargeGbp: number; chargeBasis: 'estimated' | 'none'; providerCall: boolean }
   | { status: 'provider_failed'; chargeGbp: 0; chargeBasis: 'estimated'; providerCall: true }
-  | { status: 'unknown'; chargeGbp: null; chargeBasis: 'unknown'; providerCall: true } {
+  | { status: 'unknown'; chargeGbp: number | null; chargeBasis: 'estimated' | 'unknown'; providerCall: true } {
+  const observedCost = t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp;
   if (t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded')
     return { status: 'settled', chargeGbp: Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0), chargeBasis: 'estimated', providerCall: true };
   if (t.providerStatus === 'provider_error') {
-    if (t.providerFailureKind === 'error_response' || t.providerFailureKind === 'simulated')
+    if (
+      (t.providerFailureKind === 'error_response' || t.providerFailureKind === 'simulated') &&
+      observedCost <= 0
+    )
       return { status: 'provider_failed', chargeGbp: 0, chargeBasis: 'estimated', providerCall: true };
-    return { status: 'unknown', chargeGbp: null, chargeBasis: 'unknown', providerCall: true };
+    return {
+      status: 'unknown',
+      chargeGbp: observedCost > 0 ? observedCost : null,
+      chargeBasis: observedCost > 0 ? 'estimated' : 'unknown',
+      providerCall: true,
+    };
   }
   if (NO_PROVIDER_CALL_STATUSES.has(t.providerStatus)) return { status: 'settled', chargeGbp: 0, chargeBasis: 'none', providerCall: false };
   // Anything unrecognised is treated as a possible provider call with unknown cost.
@@ -295,6 +353,14 @@ export const reconcileReservationInternal = internalMutation({
       chargeBasis: args.chargeBasis,
       resolution: `reconciled: ${args.note.trim().slice(0, 180)}`,
     });
+    if (row.auditId !== null && (args.resolution === 'settled' || args.resolution === 'provider_failed')) {
+      const auditRow = await ctx.db.get(row.auditId);
+      if (auditRow) {
+        await ctx.db.patch(row.auditId, {
+          actualCostGbp: args.resolution === 'settled' ? args.chargeGbp : 0,
+        });
+      }
+    }
     await ctx.db.insert('audit', {
       owner: row.owner,
       action: 'graph.evidence_chat.budget.reconciled',
@@ -311,12 +377,42 @@ export const listUnresolvedReservationsInternal = internalQuery({
   args: { owner: v.string() },
   handler: async (ctx, args) => {
     const now = Date.now();
+    // R3 invariant: Query all reservations for this owner regardless of age so unresolved (`in_flight` / `unknown`)
+    // reservations never vanish from operator inspection or liability accounting after 24 hours.
     const rows = await ctx.db
       .query('chatBudgetReservations')
-      .withIndex('by_owner', (q) => q.eq('owner', args.owner).gte('createdAtMs', now - LIABILITY_WINDOW_MS))
+      .withIndex('by_owner', (q) => q.eq('owner', args.owner))
       .collect();
-    return rows
-      .map((r) => ({ id: r._id, reservationSha256: r.reservationSha256, source: r.source, storedStatus: r.status, effectiveStatus: effectiveStatus(r, now), liabilityGbp: reservationLiabilityGbp(r, now), createdAtMs: r.createdAtMs, startedAtMs: r.startedAtMs, turnId: r.turnId, resolution: r.resolution }))
-      .filter((r) => r.effectiveStatus === 'unknown' || r.effectiveStatus === 'in_flight');
+    const unresolved = rows.filter((r) => {
+      const s = effectiveStatus(r, now);
+      return s === 'unknown' || s === 'in_flight';
+    });
+    const result = [];
+    for (const r of unresolved) {
+      let auditCostGbp: number | undefined;
+      if (r.auditId !== null) {
+        const auditRow = await ctx.db.get(r.auditId);
+        if (auditRow) {
+          auditCostGbp =
+            auditRow.actualCostGbp !== null
+              ? auditRow.actualCostGbp
+              : auditRow.estimatedCostGbp;
+        }
+      }
+      const s = effectiveStatus(r, now);
+      result.push({
+        id: r._id,
+        reservationSha256: r.reservationSha256,
+        source: r.source,
+        storedStatus: r.status,
+        effectiveStatus: s,
+        liabilityGbp: reservationLiabilityGbp(r, now, auditCostGbp),
+        createdAtMs: r.createdAtMs,
+        startedAtMs: r.startedAtMs,
+        turnId: r.turnId,
+        resolution: r.resolution,
+      });
+    }
+    return result;
   },
 });
