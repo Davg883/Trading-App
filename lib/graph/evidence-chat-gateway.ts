@@ -34,14 +34,76 @@ export type GatewayResult<T> =
 
 const GATEWAY_TIMEOUT_MS = 10_000;
 
-/** Convex serves HTTP actions from `<deployment>.convex.site`; `CONVEX_HTTP_ACTIONS_URL` overrides the derivation. */
+const CONVEX_DNS_LABEL_SOURCE = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const CONVEX_HOST_RE = new RegExp(
+  `^(${CONVEX_DNS_LABEL_SOURCE}(?:\\.${CONVEX_DNS_LABEL_SOURCE})?)\\.convex\\.(cloud|site)$`,
+);
+const LOCAL_GATEWAY_ORIGIN_RE =
+  /^https?:\/\/(127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?\/?$/;
+
+function parseConvexGatewaySiteOrigin(
+  rawUrl: string,
+  options: { allowCloudHostname: boolean },
+): string | null {
+  const trimmed = rawUrl.trim();
+  if (!/^https:\/\/[a-z0-9.-]+\/?$/.test(trimmed)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.port !== '' ||
+    parsed.pathname !== '/' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    return null;
+  }
+  const match = CONVEX_HOST_RE.exec(parsed.hostname);
+  if (!match) return null;
+  const [, deploymentAndRegion, tld] = match;
+  if (tld === 'cloud' && !options.allowCloudHostname) return null;
+  return `https://${deploymentAndRegion}.convex.site`;
+}
+
+function parseExplicitGatewayOverride(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  const localMatch = LOCAL_GATEWAY_ORIGIN_RE.exec(trimmed);
+  if (localMatch) {
+    const port = localMatch[2] ? Number(localMatch[2]) : null;
+    if (port !== null && (port < 1 || port > 65535)) return null;
+    return trimmed.replace(/\/+$/, '');
+  }
+  return parseConvexGatewaySiteOrigin(trimmed, { allowCloudHostname: true });
+}
+
+/**
+ * Convex serves HTTP actions from `<deployment>.convex.site` (or `<deployment>.<region>.convex.site`);
+ * `CONVEX_HTTP_ACTIONS_URL` overrides the derivation and fails closed if invalid.
+ */
 export function resolveGatewayBaseUrl(env: GatewayEnv = process.env): string | null {
-  const explicit = env.CONVEX_HTTP_ACTIONS_URL?.trim().replace(/\/+$/, '');
-  if (explicit) return /^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(explicit) ? explicit : null;
-  const cloud = env.NEXT_PUBLIC_CONVEX_URL?.trim().replace(/\/+$/, '');
-  if (!cloud) return null;
-  const m = /^https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.convex\.cloud$/.exec(cloud);
-  return m ? `https://${m[1]}.convex.site` : null;
+  const explicitRaw = env.CONVEX_HTTP_ACTIONS_URL?.trim();
+  if (explicitRaw) {
+    return parseExplicitGatewayOverride(explicitRaw);
+  }
+  const siteRaw = env.NEXT_PUBLIC_CONVEX_SITE_URL?.trim();
+  const cloudRaw = env.NEXT_PUBLIC_CONVEX_URL?.trim();
+  if (siteRaw) {
+    const siteOrigin = parseConvexGatewaySiteOrigin(siteRaw, { allowCloudHostname: false });
+    if (!siteOrigin) return null;
+    if (cloudRaw) {
+      const cloudOrigin = parseConvexGatewaySiteOrigin(cloudRaw, { allowCloudHostname: true });
+      if (!cloudOrigin || cloudOrigin !== siteOrigin) return null;
+    }
+    return siteOrigin;
+  }
+  if (!cloudRaw) return null;
+  return parseConvexGatewaySiteOrigin(cloudRaw, { allowCloudHostname: true });
 }
 
 export function gatewayConfigured(env: GatewayEnv = process.env): boolean {
