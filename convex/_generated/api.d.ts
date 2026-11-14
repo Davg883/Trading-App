@@ -8,9 +8,11 @@
  * @module
  */
 
+import type * as acceptanceNonces from "../acceptanceNonces.js";
 import type * as authz from "../authz.js";
 import type * as brokerValidators from "../brokerValidators.js";
 import type * as brokers from "../brokers.js";
+import type * as chatBudget from "../chatBudget.js";
 import type * as consensus from "../consensus.js";
 import type * as crons from "../crons.js";
 import type * as defence from "../defence.js";
@@ -44,9 +46,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  acceptanceNonces: typeof acceptanceNonces;
   authz: typeof authz;
   brokerValidators: typeof brokerValidators;
   brokers: typeof brokers;
+  chatBudget: typeof chatBudget;
   consensus: typeof consensus;
   crons: typeof crons;
   defence: typeof defence;
