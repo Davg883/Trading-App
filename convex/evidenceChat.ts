@@ -25,7 +25,11 @@ import {
 } from '../lib/graph/gemini-provider-adapter';
 import type { TemporalBasis } from '../lib/graph/evidence-chat-contracts';
 import { insertValidatedChatTurn, recordTurnWithReservation, turnAuditArgs } from './acceptanceNonces';
-import { loadReservation } from './chatBudget';
+import {
+  costToAccountingUnits,
+  fromAccountingUnits,
+  loadReservation,
+} from './chatBudget';
 import { sha256HexSync } from '../lib/crypto/sha256';
 import { clientRecordedTurnViolations, isAttestedLiveTurn } from '../lib/graph/chat-turn-audit-validation';
 import {
@@ -101,12 +105,16 @@ export const getChatRetrievalContextInternal = internalQuery({
       .order('desc')
       .take(100);
 
-    let dailyChatSpendGbp = 0;
+    let dailyChatSpendUnits = 0;
     for (const t of recentChatTurns) {
       if (t.createdAtMs >= dayStartMs) {
-        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+        dailyChatSpendUnits += Math.max(
+          costToAccountingUnits(t.estimatedCostGbp),
+          costToAccountingUnits(t.actualCostGbp ?? 0),
+        );
       }
     }
+    const dailyChatSpendGbp = fromAccountingUnits(dailyChatSpendUnits);
 
     return {
       checkpoint: checkpoint
@@ -437,7 +445,7 @@ export const getChatOperationsTelemetry = query({
     const dayStartMs = Date.now() - 86_400_000;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    let dailySpendGbp = 0;
+    let dailySpendUnits = 0;
     let abstentionCount = 0;
     let validationRejectedCount = 0;
 
@@ -445,11 +453,15 @@ export const getChatOperationsTelemetry = query({
       totalInputTokens += t.inputTokens;
       totalOutputTokens += t.outputTokens;
       if (t.createdAtMs >= dayStartMs) {
-        dailySpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+        dailySpendUnits += Math.max(
+          costToAccountingUnits(t.estimatedCostGbp),
+          costToAccountingUnits(t.actualCostGbp ?? 0),
+        );
       }
       if (t.supportStatus === 'unsupported') abstentionCount += 1;
       if (!t.validationValid) validationRejectedCount += 1;
     }
+    const dailySpendGbp = fromAccountingUnits(dailySpendUnits);
 
     // Only server-attested rows evidence live provider inference (pre-merge risk H1).
     const attestedLiveTurns = recentTurns.filter(isAttestedLiveTurn);
@@ -534,12 +546,16 @@ export const getChatRetrievalContext = query({
       .order('desc')
       .take(100);
 
-    let dailyChatSpendGbp = 0;
+    let dailyChatSpendUnits = 0;
     for (const t of recentChatTurns) {
       if (t.createdAtMs >= dayStartMs) {
-        dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+        dailyChatSpendUnits += Math.max(
+          costToAccountingUnits(t.estimatedCostGbp),
+          costToAccountingUnits(t.actualCostGbp ?? 0),
+        );
       }
     }
+    const dailyChatSpendGbp = fromAccountingUnits(dailyChatSpendUnits);
 
     return {
       owner,

@@ -21,6 +21,8 @@ import {
   abandonReservation,
   canSettle,
   classifyOutcome,
+  costToAccountingUnits,
+  fromAccountingUnits,
   loadReservation,
   reserveChatBudget,
   settleReservationForTurn,
@@ -245,11 +247,16 @@ async function loadRetrievalContext(ctx: GenericMutationCtx<DataModel>, owner: s
     .withIndex('by_owner', (q) => q.eq('owner', owner))
     .order('desc')
     .take(100);
-  let dailyChatSpendGbp = 0;
+  let dailyChatSpendUnits = 0;
   for (const t of recentChatTurns) {
-    if (t.createdAtMs >= now - 86_400_000)
-      dailyChatSpendGbp += Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0);
+    if (t.createdAtMs >= now - 86_400_000) {
+      dailyChatSpendUnits += Math.max(
+        costToAccountingUnits(t.estimatedCostGbp),
+        costToAccountingUnits(t.actualCostGbp ?? 0),
+      );
+    }
   }
+  const dailyChatSpendGbp = fromAccountingUnits(dailyChatSpendUnits);
   return {
     checkpoint: checkpoint
       ? {

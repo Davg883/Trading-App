@@ -8,8 +8,23 @@ import {
 } from 'convex/server';
 import type { DataModel } from './server';
 import type { GenericId } from 'convex/values';
-import { EVIDENCE_RETRIEVAL_LIMITS } from '../lib/graph/evidence-chat-contracts';
+import {
+  ACCOUNTING_UNIT_GBP,
+  ACCOUNTING_UNITS_PER_GBP,
+  ceilingToAccountingUnits,
+  costToAccountingUnits,
+  EVIDENCE_RETRIEVAL_LIMITS,
+  fromAccountingUnits,
+} from '../lib/graph/evidence-chat-contracts';
 import { isResearchChatMaintenanceActive } from '../lib/graph/gemini-provider-adapter';
+
+export {
+  ACCOUNTING_UNIT_GBP,
+  ACCOUNTING_UNITS_PER_GBP,
+  ceilingToAccountingUnits,
+  costToAccountingUnits,
+  fromAccountingUnits,
+};
 
 /**
  * Paid-inference budget reservations (pre-merge risk H2; durable accounting, Correction 2).
@@ -66,27 +81,38 @@ export function effectiveStatus(r: Pick<Reservation, 'status' | 'startExpiresAtM
 }
 
 /**
- * Amount this reservation holds against the ceiling on top of any cost already counted via its linked audit row.
+ * Amount this reservation holds against the ceiling in integer accounting units (micro-GBP) on top of any cost
+ * already counted via its linked audit row.
  * - Unresolved (`reserved`, `in_flight`, `unknown`) reservations hold `maxCostGbp` minus any cost already counted on `auditId`.
  * - Reconciled/settled reservations hold `chargeGbp` minus any cost already counted on `auditId` (preventing both lost charges and double charging, R2).
  */
+export function reservationLiabilityUnits(
+  r: Reservation,
+  now: number,
+  auditCostUnits?: number,
+): number {
+  const s = effectiveStatus(r, now);
+  const alreadyCountedUnits = r.auditId !== null ? Math.max(0, auditCostUnits ?? 0) : 0;
+  if (s === 'reserved' || s === 'in_flight' || s === 'unknown') {
+    return Math.max(0, costToAccountingUnits(r.maxCostGbp) - alreadyCountedUnits);
+  }
+  if (s === 'settled') {
+    const settledChargeUnits = costToAccountingUnits(r.chargeGbp ?? r.maxCostGbp);
+    if (r.auditId === null) return settledChargeUnits;
+    if (!r.resolution?.startsWith('reconciled:')) return 0;
+    return Math.max(0, settledChargeUnits - Math.max(0, auditCostUnits ?? 0));
+  }
+  return 0;
+}
+
 export function reservationLiabilityGbp(
   r: Reservation,
   now: number,
   auditCostGbp?: number,
 ): number {
-  const s = effectiveStatus(r, now);
-  const alreadyCountedOnAudit = r.auditId !== null ? (auditCostGbp ?? 0) : 0;
-  if (s === 'reserved' || s === 'in_flight' || s === 'unknown') {
-    return Math.max(0, Number((r.maxCostGbp - alreadyCountedOnAudit).toFixed(6)));
-  }
-  if (s === 'settled') {
-    const settledCharge = r.chargeGbp ?? r.maxCostGbp;
-    if (r.auditId === null) return settledCharge;
-    if (!r.resolution?.startsWith('reconciled:')) return 0;
-    return Math.max(0, Number((settledCharge - (auditCostGbp ?? 0)).toFixed(6)));
-  }
-  return 0;
+  const auditCostUnits =
+    auditCostGbp !== undefined ? costToAccountingUnits(auditCostGbp) : undefined;
+  return fromAccountingUnits(reservationLiabilityUnits(r, now, auditCostUnits));
 }
 
 export type ReservationResult =
@@ -132,24 +158,27 @@ export async function reserveChatBudget(
     if (r.settledAtMs !== null && r.settledAtMs >= windowStart) return true;
     return false;
   });
-  const turnSpend = (t: DataModel['evidenceChatAudit']['document']): number =>
-    t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp;
-  const auditCostInWindowById = new Map<GenericId<'evidenceChatAudit'>, number>();
+  const turnSpendUnits = (t: DataModel['evidenceChatAudit']['document']): number =>
+    costToAccountingUnits(t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp);
+  const auditCostUnitsInWindowById = new Map<GenericId<'evidenceChatAudit'>, number>();
   for (const t of turns) {
-    auditCostInWindowById.set(t._id, turnSpend(t));
+    auditCostUnitsInWindowById.set(t._id, turnSpendUnits(t));
   }
-  const recordedSpend = turns.reduce((s, t) => s + turnSpend(t), 0);
-  const liability = reservations.reduce((s, r) => {
-    const auditCost =
-      r.auditId !== null ? (auditCostInWindowById.get(r.auditId) ?? 0) : undefined;
-    return s + reservationLiabilityGbp(r, now, auditCost);
+  const recordedSpendUnits = turns.reduce((s, t) => s + turnSpendUnits(t), 0);
+  const liabilityUnits = reservations.reduce((s, r) => {
+    const auditUnits =
+      r.auditId !== null ? (auditCostUnitsInWindowById.get(r.auditId) ?? 0) : undefined;
+    return s + reservationLiabilityUnits(r, now, auditUnits);
   }, 0);
-  const spentGbp = Number((recordedSpend + liability).toFixed(6));
+  const spentUnits = recordedSpendUnits + liabilityUnits;
+  const spentGbp = fromAccountingUnits(spentUnits);
+  const ceilingUnits = ceilingToAccountingUnits(ceilingGbp);
+  const maxReservationUnits = costToAccountingUnits(MAX_RESERVATION_COST_GBP);
 
   const recentTurns = turns.filter((t) => t.createdAtMs >= now - 60_000).length;
   const recentOpen = reservations.filter((r) => r.createdAtMs >= now - 60_000 && r.auditId === null).length;
   if (recentTurns + recentOpen >= SHARED_CHAT_TURNS_PER_MINUTE) return { ok: false, reason: 'rate_limited', spentGbp, ceilingGbp };
-  if (spentGbp + MAX_RESERVATION_COST_GBP > ceilingGbp) return { ok: false, reason: 'budget_exceeded', spentGbp, ceilingGbp };
+  if (spentUnits + maxReservationUnits > ceilingUnits) return { ok: false, reason: 'budget_exceeded', spentGbp, ceilingGbp };
 
   const existing = await ctx.db
     .query('chatBudgetReservations')
@@ -229,19 +258,31 @@ export function classifyOutcome(t: TurnOutcome):
   | { status: 'settled'; chargeGbp: number; chargeBasis: 'estimated' | 'none'; providerCall: boolean }
   | { status: 'provider_failed'; chargeGbp: 0; chargeBasis: 'estimated'; providerCall: true }
   | { status: 'unknown'; chargeGbp: number | null; chargeBasis: 'estimated' | 'unknown'; providerCall: true } {
-  const observedCost = t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp;
-  if (t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded')
-    return { status: 'settled', chargeGbp: Math.max(t.estimatedCostGbp, t.actualCostGbp ?? 0), chargeBasis: 'estimated', providerCall: true };
+  const observedUnits = costToAccountingUnits(
+    t.actualCostGbp !== null ? t.actualCostGbp : t.estimatedCostGbp,
+  );
+  if (t.generationMode === 'gemini_live' && t.providerStatus === 'succeeded') {
+    const chargeUnits = Math.max(
+      costToAccountingUnits(t.estimatedCostGbp),
+      costToAccountingUnits(t.actualCostGbp ?? 0),
+    );
+    return {
+      status: 'settled',
+      chargeGbp: fromAccountingUnits(chargeUnits),
+      chargeBasis: 'estimated',
+      providerCall: true,
+    };
+  }
   if (t.providerStatus === 'provider_error') {
     if (
       (t.providerFailureKind === 'error_response' || t.providerFailureKind === 'simulated') &&
-      observedCost <= 0
+      observedUnits <= 0
     )
       return { status: 'provider_failed', chargeGbp: 0, chargeBasis: 'estimated', providerCall: true };
     return {
       status: 'unknown',
-      chargeGbp: observedCost > 0 ? observedCost : null,
-      chargeBasis: observedCost > 0 ? 'estimated' : 'unknown',
+      chargeGbp: observedUnits > 0 ? fromAccountingUnits(observedUnits) : null,
+      chargeBasis: observedUnits > 0 ? 'estimated' : 'unknown',
       providerCall: true,
     };
   }
@@ -331,7 +372,9 @@ export const reconcileReservationInternal = internalMutation({
     if (!args.operator.trim() || args.operator.length > 200) throw new Error('Operator name required');
     if (!args.note.trim() || args.note.length > 1000) throw new Error('A reconciliation note is required');
     if (!Number.isFinite(args.chargeGbp) || args.chargeGbp < 0 || args.chargeGbp > 100) throw new Error('Charge out of range');
-    if (args.resolution !== 'settled' && args.chargeGbp !== 0) throw new Error('Only a settled reservation can carry a charge');
+    const normalizedChargeUnits = costToAccountingUnits(args.chargeGbp);
+    const normalizedChargeGbp = fromAccountingUnits(normalizedChargeUnits);
+    if (args.resolution !== 'settled' && normalizedChargeUnits !== 0) throw new Error('Only a settled reservation can carry a charge');
     const row = await ctx.db
       .query('chatBudgetReservations')
       .withIndex('by_reservation', (q) => q.eq('reservationSha256', args.reservationSha256))
@@ -339,7 +382,12 @@ export const reconcileReservationInternal = internalMutation({
     if (!row) throw new Error('Unknown reservation');
     const now = Date.now();
     const s = effectiveStatus(row, now);
-    if (row.status === args.resolution && row.resolution?.startsWith('reconciled:') && row.chargeGbp === args.chargeGbp) {
+    if (
+      row.status === args.resolution &&
+      row.resolution?.startsWith('reconciled:') &&
+      row.chargeGbp !== null &&
+      costToAccountingUnits(row.chargeGbp) === normalizedChargeUnits
+    ) {
       return { ok: true as const, duplicate: true };
     }
     const allowed =
@@ -349,7 +397,7 @@ export const reconcileReservationInternal = internalMutation({
     await ctx.db.patch(row._id, {
       status: args.resolution,
       settledAtMs: now,
-      chargeGbp: args.chargeGbp,
+      chargeGbp: normalizedChargeGbp,
       chargeBasis: args.chargeBasis,
       resolution: `reconciled: ${args.note.trim().slice(0, 180)}`,
     });
@@ -357,7 +405,7 @@ export const reconcileReservationInternal = internalMutation({
       const auditRow = await ctx.db.get(row.auditId);
       if (auditRow) {
         await ctx.db.patch(row.auditId, {
-          actualCostGbp: args.resolution === 'settled' ? args.chargeGbp : 0,
+          actualCostGbp: args.resolution === 'settled' ? normalizedChargeGbp : 0,
         });
       }
     }
@@ -365,7 +413,7 @@ export const reconcileReservationInternal = internalMutation({
       owner: row.owner,
       action: 'graph.evidence_chat.budget.reconciled',
       recordId: row._id,
-      detail: `by deployment-admin:${args.operator.trim()}; ${s} -> ${args.resolution}; charge £${args.chargeGbp.toFixed(6)} (${args.chargeBasis}); ${args.note.trim().slice(0, 300)}`,
+      detail: `by deployment-admin:${args.operator.trim()}; ${s} -> ${args.resolution}; charge £${normalizedChargeGbp.toFixed(6)} (${args.chargeBasis}); ${args.note.trim().slice(0, 300)}`,
       at: now,
     });
     return { ok: true as const, duplicate: false };

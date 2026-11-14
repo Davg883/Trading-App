@@ -1,7 +1,10 @@
 import { GoogleGenAI, ThinkingLevel, Type, type Schema } from '@google/genai';
 import {
+  ceilingToAccountingUnits,
+  costToAccountingUnits,
   EVIDENCE_LOCKED_ANSWER_VERSION,
   EVIDENCE_RETRIEVAL_LIMITS,
+  fromAccountingUnits,
   SUGGESTED_STARTER_QUESTIONS,
   evidenceLockedAnswerSchema,
   type EvidenceBundleV1,
@@ -1045,17 +1048,21 @@ export async function generateAndValidateEvidenceLockedAnswer(
     };
   }
 
-  // 4. Budget ceiling check
+  // 4. Budget ceiling check (deterministic integer micro-GBP accounting units, Task A)
   const dailyCeiling =
     options.dailyCostCeilingGbp ?? EVIDENCE_RETRIEVAL_LIMITS.defaultDailyBudgetCeilingGbp;
   const dailySpent = options.dailySpentGbpSoFar ?? 0;
   const estInputTokens = bundle.estimatedBundleTokens + 600;
   const estOutputTokens = 750;
   const estRequestCostGbp = computeGeminiCostGbp(estInputTokens, estOutputTokens);
+  const dailyCeilingUnits = ceilingToAccountingUnits(dailyCeiling);
+  const maxRequestUnits = ceilingToAccountingUnits(EVIDENCE_RETRIEVAL_LIMITS.maxRequestCostGbp);
+  const dailySpentUnits = costToAccountingUnits(dailySpent);
+  const estRequestUnits = costToAccountingUnits(estRequestCostGbp);
 
   if (
-    estRequestCostGbp > EVIDENCE_RETRIEVAL_LIMITS.maxRequestCostGbp ||
-    dailySpent + estRequestCostGbp > dailyCeiling
+    estRequestUnits > maxRequestUnits ||
+    dailySpentUnits + estRequestUnits > dailyCeilingUnits
   ) {
     const reason = `Model cost ceiling reached (spent £${dailySpent.toFixed(4)} / £${dailyCeiling.toFixed(2)} daily ceiling). Explicit abstention returned while deterministic collectors continue unaffected.`;
     const abstention = buildEvidenceLimitedAbstentionAnswer(bundle, reason);
@@ -1355,6 +1362,7 @@ export async function generateAndValidateEvidenceLockedAnswer(
   let accumulatedThinkingTokens = 0;
   let accumulatedTotalTokens = 0;
   let accumulatedCachedTokens = 0;
+  let accumulatedCostUnits = 0;
   let accumulatedCostGbp = 0;
   let responseUsageObserved = false;
   let parseFailureOccurred = false;
@@ -1422,7 +1430,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
       accumulatedThinkingTokens += attemptThinkingTokens;
       accumulatedTotalTokens += attemptTotalTokens;
       accumulatedCachedTokens += attemptCachedTokens;
-      accumulatedCostGbp = Number((accumulatedCostGbp + attemptCostGbp).toFixed(6));
+      accumulatedCostUnits += costToAccountingUnits(attemptCostGbp);
+      accumulatedCostGbp = fromAccountingUnits(accumulatedCostUnits);
       responseUsageObserved = true;
 
       let parsedModelJson: Record<string, unknown>;
@@ -1668,8 +1677,8 @@ export async function generateAndValidateEvidenceLockedAnswer(
       const nextModelId = candidateModels[attempt + 1] ?? activeModelId;
       const lastFailureKind = classifyProviderFailure(err);
       if (
-        accumulatedCostGbp + estRequestCostGbp > EVIDENCE_RETRIEVAL_LIMITS.maxRequestCostGbp ||
-        dailySpent + accumulatedCostGbp + estRequestCostGbp > dailyCeiling
+        accumulatedCostUnits + estRequestUnits > maxRequestUnits ||
+        dailySpentUnits + accumulatedCostUnits + estRequestUnits > dailyCeilingUnits
       ) {
         break;
       }

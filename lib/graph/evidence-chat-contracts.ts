@@ -36,6 +36,40 @@ export const EVIDENCE_RETRIEVAL_LIMITS = {
   defaultDailyBudgetCeilingGbp: 2.0,
 } as const;
 
+/**
+ * Deterministic integer-based financial accounting units (Task A — Financial Precision).
+ *
+ * 1 accounting unit = £0.000001 (1 micro-GBP; 1,000,000 units = £1.00).
+ * All budget reservations, recorded turn costs, reconciled charges, and spending ceilings
+ * are converted to integer micro-GBP units before summation, subtraction, or boundary
+ * comparison so IEEE-754 floating-point drift (e.g. `0.1 + 0.05 === 0.15000000000000002`)
+ * can never cause false boundary rejections or ceiling breaches.
+ *
+ * Fail-closed rounding rules:
+ * - Costs, charges, and reservations round UP (`Math.ceil`) on any positive sub-unit remainder
+ *   beyond IEEE-754 representation noise (`.toFixed(4)` in micro-GBP = 1e-10 GBP precision),
+ *   so a non-zero cost is never undercounted.
+ * - Budget ceilings round DOWN (`Math.floor`) on any sub-unit remainder, so a ceiling is
+ *   never inflated.
+ */
+export const ACCOUNTING_UNITS_PER_GBP = 1_000_000 as const;
+export const ACCOUNTING_UNIT_GBP = 0.000001 as const;
+
+export function costToAccountingUnits(gbp: number): number {
+  if (!Number.isFinite(gbp) || gbp <= 0) return 0;
+  return Math.ceil(Number((gbp * ACCOUNTING_UNITS_PER_GBP).toFixed(4)));
+}
+
+export function ceilingToAccountingUnits(gbp: number): number {
+  if (!Number.isFinite(gbp) || gbp <= 0) return 0;
+  return Math.floor(Number((gbp * ACCOUNTING_UNITS_PER_GBP).toFixed(4)));
+}
+
+export function fromAccountingUnits(units: number): number {
+  if (!Number.isFinite(units) || units <= 0) return 0;
+  return Number((Math.round(units) / ACCOUNTING_UNITS_PER_GBP).toFixed(6));
+}
+
 export const SUGGESTED_STARTER_QUESTIONS = [
   'Which AI infrastructure investments share documented financial counterparties?',
   'What are the documented financing and infrastructure relationships relevant to Ireland?',

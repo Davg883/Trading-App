@@ -50,6 +50,13 @@ import { convexTest, type TestConvex } from 'convex-test';
 import { makeFunctionReference } from 'convex/server';
 import schema from '../convex/schema';
 import { GET as chatGet, POST as chatPost } from '../app/api/graph/chat/route';
+import {
+  ACCOUNTING_UNIT_GBP,
+  ACCOUNTING_UNITS_PER_GBP,
+  ceilingToAccountingUnits,
+  costToAccountingUnits,
+  fromAccountingUnits,
+} from '../lib/graph/evidence-chat-contracts';
 import { retrieveClosedEvidenceBundle } from '../lib/graph/evidence-retrieval-gateway';
 import {
   computeGeminiCostGbp,
@@ -359,6 +366,91 @@ describe('Work Package A — R1: Provider retry, fallback, and token usage accou
     expect(turn.telemetry.providerStatus).toBe('succeeded');
     expect(turn.telemetry.inputTokens).toBe(1200);
     expect(turn.telemetry.outputTokens).toBe(300);
+  });
+
+  it('R1.4 (Task A): Multi-attempt provider boundary uses integer accounting units — exact ceiling equality permits retry while 1 accounting unit (£0.000001) above blocks retry and sub-unit positive cost rounds up fail-closed', async () => {
+    expect(ACCOUNTING_UNITS_PER_GBP).toBe(1_000_000);
+    expect(ACCOUNTING_UNIT_GBP).toBe(0.000001);
+    expect(costToAccountingUnits(0.05) + costToAccountingUnits(0.1)).toBe(
+      ceilingToAccountingUnits(0.15),
+    );
+    // Fail-closed sub-unit rounding: positive sub-micro-GBP cost rounds UP to 1 unit; sub-micro-GBP ceiling fraction rounds DOWN
+    expect(costToAccountingUnits(0.0000001)).toBe(1);
+    expect(ceilingToAccountingUnits(0.1500009)).toBe(150_000);
+    expect(fromAccountingUnits(150_000)).toBe(0.15);
+
+    const bundle = await retrieveClosedEvidenceBundle({
+      question: QUESTION,
+      requesterId: OWNER_A,
+      preferLiveTypeDb: false,
+    });
+    const estCost = computeGeminiCostGbp(bundle.estimatedBundleTokens + 600, 750);
+    const estUnits = costToAccountingUnits(estCost);
+    const priorSpentUnits = 150_000 - estUnits;
+    const priorSpentGbp = fromAccountingUnits(priorSpentUnits);
+
+    // 1. Exact ceiling equality (`priorSpentUnits + estUnits === 150_000 === ceilingToAccountingUnits(0.15)`):
+    // Attempt 1 fails with transient 503 (0 tokens billed), so `accumulatedCostUnits = 0`, and `priorSpentUnits + 0 + estUnits === 150_000 <= 150_000` -> retry is allowed!
+    h.generate
+      .mockRejectedValueOnce(new Error('HTTP 503 UNAVAILABLE'))
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          shortAnswer: 'Not covered by approved evidence.',
+          supportStatus: 'unsupported',
+          executiveTldr: [],
+          supportingClaims: [],
+          missingInformation: ['None'],
+          abstentionReason: 'Insufficient approved evidence.',
+          suggestedFollowUpQuestions: [],
+        }),
+        responseId: 'resp-exact-boundary-ok',
+        usageMetadata: {
+          promptTokenCount: 1000,
+          candidatesTokenCount: 200,
+          totalTokenCount: 1200,
+        },
+      });
+
+    let retryCallsExact = 0;
+    const exactTurn = await generateAndValidateEvidenceLockedAnswer({
+      bundle,
+      callerId: OWNER_A,
+      mode: 'gemini_live_required',
+      dailyCostCeilingGbp: 0.15,
+      dailySpentGbpSoFar: priorSpentGbp,
+      maxProviderAttempts: 2,
+      authorizeRetryAttempt: () => {
+        retryCallsExact += 1;
+        return true;
+      },
+      env: {
+        GEMINI_API_KEY: 'AIzaSyTestKey12345678901234567890',
+        EVIDENCE_CHAT_GEMINI_ENABLED: 'true',
+      },
+      nowMs: NOW,
+    });
+    expect(retryCallsExact).toBe(1);
+    expect(h.generate).toHaveBeenCalledTimes(2);
+    expect(exactTurn.telemetry.providerStatus).toBe('succeeded');
+
+    // 2. One accounting unit (£0.000001) above the £0.15 ceiling (`priorSpentUnits + 1 + estUnits === 150_001 > 150_000`):
+    // Refused before any provider attempt (`budget_exceeded`).
+    h.generate.mockReset();
+    const oneUnitOverTurn = await generateAndValidateEvidenceLockedAnswer({
+      bundle,
+      callerId: OWNER_A,
+      mode: 'gemini_live_required',
+      dailyCostCeilingGbp: 0.15,
+      dailySpentGbpSoFar: fromAccountingUnits(priorSpentUnits + 1),
+      maxProviderAttempts: 2,
+      env: {
+        GEMINI_API_KEY: 'AIzaSyTestKey12345678901234567890',
+        EVIDENCE_CHAT_GEMINI_ENABLED: 'true',
+      },
+      nowMs: NOW,
+    });
+    expect(h.generate).not.toHaveBeenCalled();
+    expect(oneUnitOverTurn.telemetry.providerStatus).toBe('budget_exceeded');
   });
 });
 
@@ -826,5 +918,169 @@ describe('Work Package B — Server-Enforced Safe Maintenance Gate (RESEARCH_CHA
     );
     expect(postRes.status).toBe(503);
     expect(await postRes.json()).toMatchObject({ code: 'audit_record_unconfirmed' });
+  });
+
+  it('Task B & Task C Complete Gateway & Maintenance Lifecycle: positive/negative gateway secret, Clerk identity, cross-owner rejection, nonce replay, reconciliation, and maintenance entry -> in-flight settlement -> normal resumption', async () => {
+    const { t, asA } = setupConvex();
+    const OWNER_B = `${ISS}|user_b`;
+    const asB = t.withIdentity({ subject: 'user_b', tokenIdentifier: OWNER_B, issuer: ISS });
+    await setCeiling(t, OWNER_A, 0.15);
+
+    const all7GatewayPaths = [
+      '/api/evidence-chat/acceptance/consume',
+      '/api/evidence-chat/acceptance/start',
+      '/api/evidence-chat/acceptance/record',
+      '/api/evidence-chat/acceptance/fail',
+      '/api/evidence-chat/budget/reserve',
+      '/api/evidence-chat/budget/start',
+      '/api/evidence-chat/turn',
+    ];
+
+    // 1. Missing or invalid gateway secret rejected with 401 across all 7 routes when EVIDENCE_CHAT_GATEWAY_SECRET is configured
+    for (const p of all7GatewayPaths) {
+      const missingRes = await asA.fetch(p, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(missingRes.status).toBe(401);
+
+      const invalidRes = await asA.fetch(p, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-aci-gateway-authorization': 'Bearer wrong-gateway-secret-0000000000000000',
+        },
+        body: '{}',
+      });
+      expect(invalidRes.status).toBe(401);
+    }
+
+    // 2. Correct gateway secret + valid Clerk identity accepted for authorised routes (/budget/reserve & /budget/start)
+    const r1 = await reserveAndStart(asA);
+    const r2 = await reserveAndStart(asA);
+
+    // 3. Cross-owner request rejected (Owner B cannot start or settle Owner A's reservation)
+    const crossStart = await startGateway(asB, r1);
+    expect(crossStart.status).toBe(409);
+    expect(await crossStart.json()).toMatchObject({
+      error: { code: 'invalid_budget_reservation' },
+    });
+    const crossTurn = await turnGateway(asB, {
+      turn: makeTurnPayload({
+        generationMode: 'deterministic_evidence_synthesis',
+        providerStatus: 'not_invoked',
+      }),
+      budgetReservation: r1,
+    });
+    expect(crossTurn.status).toBe(400);
+
+    // 4. Single-use acceptance nonce accepted once and rejected on replay
+    const mintRef = makeFunctionReference<'action'>('acceptanceNonces:mintAcceptanceNonce');
+    const { token: nonce1 } = (await t.action(mintRef, {
+      owner: OWNER_A,
+      question: QUESTION,
+      operator: 'ops-task-b',
+    })) as { token: string };
+    const consume1 = await postGateway(t, '/api/evidence-chat/acceptance/consume', {
+      token: nonce1,
+      question: QUESTION,
+    });
+    expect(consume1.status).toBe(200);
+    const consumedBody = (await consume1.json()) as {
+      reservation: string;
+      budget: { reserved: boolean };
+    };
+    expect(consumedBody.budget.reserved).toBe(true);
+
+    const replayConsume = await postGateway(t, '/api/evidence-chat/acceptance/consume', {
+      token: nonce1,
+      question: QUESTION,
+    });
+    expect(replayConsume.status).toBe(409);
+    expect(await replayConsume.json()).toMatchObject({
+      error: { reason: 'already_consumed' },
+    });
+
+    expect(
+      (
+        await postGateway(t, '/api/evidence-chat/acceptance/start', {
+          token: nonce1,
+          reservation: consumedBody.reservation,
+        })
+      ).status,
+    ).toBe(200);
+
+    const { token: nonce2 } = (await t.action(mintRef, {
+      owner: OWNER_A,
+      question: QUESTION,
+      operator: 'ops-task-c',
+      ttlSeconds: 600,
+    })) as { token: string };
+
+    // 5. Task C — Maintenance mode entry: new inference entry points return 503 while in-flight r1 & nonce1 settle with 200
+    vi.stubEnv('RESEARCH_CHAT_MAINTENANCE', 'on');
+    expect((await reserveGateway(asA)).status).toBe(503);
+    expect(
+      (
+        await postGateway(t, '/api/evidence-chat/acceptance/consume', {
+          token: nonce2,
+          question: QUESTION,
+        })
+      ).status,
+    ).toBe(503);
+
+    // Previously authorised in-flight reservation r1 settles during maintenance
+    const settleR1 = await turnGateway(asA, {
+      turn: makeTurnPayload({
+        turnId: 'turn-maint-settle-r1',
+        generationMode: 'deterministic_evidence_synthesis',
+        providerStatus: 'not_invoked',
+      }),
+      budgetReservation: r1,
+    });
+    expect(settleR1.status).toBe(200);
+
+    // Previously authorised in-flight nonce1 settles during maintenance
+    const settleNonce1 = await postGateway(t, '/api/evidence-chat/acceptance/record', {
+      token: nonce1,
+      reservation: consumedBody.reservation,
+      turn: makeTurnPayload({
+        turnId: 'turn-maint-settle-nonce1',
+        generationMode: 'deterministic_evidence_synthesis',
+        providerStatus: 'not_invoked',
+      }),
+    });
+    expect(settleNonce1.status).toBe(200);
+
+    // 6. Task C — Normal operation resumes after maintenance is disabled (`off`)
+    vi.stubEnv('RESEARCH_CHAT_MAINTENANCE', 'off');
+    // r2 was started at t=NOW; advance +6m so r2 becomes `unknown` and reconcile r2 to £0.01
+    vi.setSystemTime(NOW + 6 * MIN);
+    const recResult = await t.mutation(reconcileRef, {
+      reservationSha256: sha256(r2),
+      resolution: 'settled',
+      chargeGbp: 0.01,
+      chargeBasis: 'actual_billing',
+      operator: 'ops-task-b',
+      note: 'Reconciled after maintenance test',
+    });
+    expect(recResult).toEqual({ ok: true, duplicate: false });
+
+    // Resumed normal reservation and unconsumed nonce2 consumption succeed after maintenance is disabled
+    const postMaintReserve = await reserveGateway(asA);
+    expect(postMaintReserve.status).toBe(200);
+    expect(await postMaintReserve.json()).toMatchObject({
+      spentGbp: 0.01,
+      ceilingGbp: 0.15,
+    });
+    expect(
+      (
+        await postGateway(t, '/api/evidence-chat/acceptance/consume', {
+          token: nonce2,
+          question: QUESTION,
+        })
+      ).status,
+    ).toBe(200);
   });
 });

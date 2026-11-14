@@ -253,3 +253,73 @@ describe('Correction 2 — acceptance nonces',()=>{
   expect((await record(t,s,turn(noCall))).status).toBe(200);
  });
 });
+
+describe('Task A — Financial precision: integer accounting units (1 micro-GBP = £0.000001) at the £0.15 / £0.05 boundary',()=>{
+ it('exact ceiling equality: a £0.15 ceiling accepts exactly three £0.05 reservations (150,000 units = 150,000 units) without IEEE-754 0.1+0.05 drift, and rejects the fourth',async()=>{
+  const {t,asA}=setup();await setCeiling(t,A,0.15);
+  const r1=await reserve(asA);expect(r1.status).toBe(200);expect(await r1.json()).toMatchObject({spentGbp:0,ceilingGbp:0.15});
+  const r2=await reserve(asA);expect(r2.status).toBe(200);expect(await r2.json()).toMatchObject({spentGbp:0.05,ceilingGbp:0.15});
+  const r3=await reserve(asA);expect(r3.status).toBe(200);expect(await r3.json()).toMatchObject({spentGbp:0.1,ceilingGbp:0.15});
+  const r4=await reserve(asA);expect(r4.status).toBe(409);expect(await r4.json()).toMatchObject({error:{code:'budget_exceeded',spentGbp:0.15,ceilingGbp:0.15}});
+  expect(await reservations(t)).toHaveLength(3);
+ });
+ it('one accounting unit (£0.000001) above the limit is rejected fail-closed (both via £0.100001 spend against £0.15 ceiling and via £0.149999 ceiling)',async()=>{
+  const {t,asA,asB}=setup();await setCeiling(t,A,0.15);
+  const rSettled=await reserveStarted(asA);
+  expect((await postTurn(asA,{turn:turn({...live,estimatedCostGbp:0.000001,actualCostGbp:0.000001}),budgetReservation:rSettled})).status).toBe(200);
+  expect((await reserve(asA)).status).toBe(200);
+  expect((await reserve(asA)).status).toBe(200);
+  const third=await reserve(asA);
+  expect(third.status).toBe(409);
+  expect(await third.json()).toMatchObject({error:{code:'budget_exceeded',spentGbp:0.100001,ceilingGbp:0.15}});
+
+  await setCeiling(t,B,0.149999);
+  expect((await reserve(asB)).status).toBe(200);
+  expect((await reserve(asB)).status).toBe(200);
+  const thirdB=await reserve(asB);
+  expect(thirdB.status).toBe(409);
+  expect(await thirdB.json()).toMatchObject({error:{code:'budget_exceeded',spentGbp:0.1,ceilingGbp:0.149999}});
+ });
+ it('concurrent reservations at the £0.15 boundary: 10 parallel £0.05 requests accept exactly 3 and reject 7',async()=>{
+  const {t,asA}=setup();await setCeiling(t,A,0.15);
+  const results=await Promise.all(Array.from({length:10},()=>reserve(asA)));
+  expect(results.filter(r=>r.status===200)).toHaveLength(3);
+  expect(results.filter(r=>r.status===409)).toHaveLength(7);
+  expect(await reservations(t)).toHaveLength(3);
+ });
+ it('reconciliation and duplicate settlement at the 1-accounting-unit boundary unlock exact headroom when <= ceiling and block when 1 unit over',async()=>{
+  const {t,asA}=setup();await setCeiling(t,A,0.15);
+  const r1=await reserveStarted(asA),r2=await reserveStarted(asA),r3=await reserveStarted(asA);
+  vi.setSystemTime(NOW+6*MIN);
+  expect((await reserve(asA)).status).toBe(409);
+  await t.mutation(reconcile,{reservationSha256:sha(r1),resolution:'settled',chargeGbp:0.000001,chargeBasis:'actual_billing',operator:'ops',note:'1 micro-GBP charge'});
+  expect(await t.mutation(reconcile,{reservationSha256:sha(r1),resolution:'settled',chargeGbp:0.000001,chargeBasis:'actual_billing',operator:'ops',note:'1 micro-GBP charge'})).toMatchObject({duplicate:true});
+  expect((await reserve(asA)).status).toBe(409);
+  const tr2=turn({...live,createdAtMs:Date.now(),estimatedCostGbp:0.049999,actualCostGbp:0.049999});
+  expect((await postTurn(asA,{turn:tr2,budgetReservation:r2})).status).toBe(200);
+  expect(await (await postTurn(asA,{turn:tr2,budgetReservation:r2})).json()).toMatchObject({duplicate:true});
+  const r4=await reserve(asA);
+  expect(r4.status).toBe(200);
+  expect(await r4.json()).toMatchObject({spentGbp:0.1,ceilingGbp:0.15});
+  expect(r3).toBeTruthy();
+ });
+ it('midnight and 24-hour liability rollover at the 1-accounting-unit boundary: unresolved reservations persist across midnight and 24h while settled spend rolls off at 24h+1ms',async()=>{
+  const {t,asA}=setup();await setCeiling(t,A,0.15);
+  // 1. r1 is settled at £0.000001 (1 unit); r2 and r3 are started (`in_flight`, 50,000 units each -> total 100,001 units)
+  const r1=await reserveStarted(asA);
+  expect((await postTurn(asA,{turn:turn({...live,estimatedCostGbp:0.000001,actualCostGbp:0.000001}),budgetReservation:r1})).status).toBe(200);
+  await reserveStarted(asA);
+  await reserveStarted(asA);
+  // Across UTC midnight (+13h): total is still 100,001 units, so another £0.05 reservation (50,000 units -> 150,001 > 150,000) is blocked!
+  vi.setSystemTime(NOW+13*60*MIN);
+  expect((await reserve(asA)).status).toBe(409);
+  // At 24h + 1ms: the £0.000001 settled turn rolls off the 24h window, while the two unresolved reservations (now `unknown`, 100,000 units total) remain liable!
+  // Now 100,000 + 50,000 = 150,000 <= 150,000 -> exact ceiling equality succeeds!
+  vi.setSystemTime(NOW+24*60*MIN+1);
+  const afterRollover=await reserve(asA);
+  expect(afterRollover.status).toBe(200);
+  expect(await afterRollover.json()).toMatchObject({spentGbp:0.1,ceilingGbp:0.15});
+  // And a 4th reservation (150,000 + 50,000 = 200,000 > 150,000) is blocked because the two >24h unresolved reservations still hold £0.10!
+  expect((await reserve(asA)).status).toBe(409);
+ });
+});
