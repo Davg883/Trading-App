@@ -279,7 +279,12 @@ export const askEvidenceLockedQuestion = action({
     simulateProviderFailure: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const rawIdentity = await ctx.auth.getUserIdentity();
+    let rawIdentity: import('convex/server').UserIdentity | null = null;
+    try {
+      rawIdentity = await ctx.auth.getUserIdentity();
+    } catch {
+      throw new Error('Sign in required before querying the Evidence-Locked Research Assistant');
+    }
     if (!rawIdentity) {
       throw new Error('Sign in required before querying the Evidence-Locked Research Assistant');
     }
@@ -626,7 +631,12 @@ export const checkGeminiProviderStatusAction = action({
   args: {},
   handler: async (ctx) => {
     // MVP hardening: previously anonymous, letting any caller make this deployment call the provider with its key.
-    const rawIdentity = await ctx.auth.getUserIdentity();
+    let rawIdentity: import('convex/server').UserIdentity | null = null;
+    try {
+      rawIdentity = await ctx.auth.getUserIdentity();
+    } catch {
+      throw new Error('Sign in required');
+    }
     if (!rawIdentity) throw new Error('Sign in required');
     const identity = verifyIdentityClaims(rawIdentity);
     if (identity.actorType !== undefined && identity.actorType !== 'human') {

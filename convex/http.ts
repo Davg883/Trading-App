@@ -295,16 +295,83 @@ http.route({
  }),
 });
 
-/** Resolves the verified human owner of a gateway request, or returns the refusal response. */
-async function gatewayOwner(ctx:{auth:{getUserIdentity():Promise<import('convex/server').UserIdentity|null>}}):Promise<{ok:true;owner:string}|{ok:false;response:Response}>{
- const rawIdentity=await ctx.auth.getUserIdentity();
- if(!rawIdentity)return {ok:false,response:Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401,headers})};
+function decodeJwtSegment(segment:string):Record<string,unknown>|null{
+ if(!/^[A-Za-z0-9_-]+$/.test(segment)||segment.length>8192)return null;
+ try{
+  const b64=segment.replace(/-/g,'+').replace(/_/g,'/');
+  const padded=b64+'='.repeat((4-(b64.length%4))%4);
+  const raw=atob(padded);
+  const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+  const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  const parsed:unknown=JSON.parse(text);
+  return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?(parsed as Record<string,unknown>):null;
+ }catch{
+  return null;
+ }
+}
+
+const signInRequiredResponse=()=>Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401,headers});
+const forbiddenIdentityResponse=()=>Response.json({error:{code:'forbidden_identity',message:'This identity cannot use research chat.'}},{status:403,headers});
+
+/** Resolves the verified human owner of a gateway request, or returns a controlled 401/403 refusal response. */
+async function gatewayOwner(
+ ctx:{auth:{getUserIdentity():Promise<import('convex/server').UserIdentity|null>}},
+ request?:Request,
+):Promise<{ok:true;owner:string}|{ok:false;response:Response}>{
+ const authHeader=request?.headers.get('authorization')??null;
+ if(authHeader!==null){
+  const m=/^Bearer\s+([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(authHeader.trim());
+  if(!m)return {ok:false,response:signInRequiredResponse()};
+  const [,hdrSeg,paySeg,sigSeg]=m;
+  if(!hdrSeg||!paySeg||!sigSeg||sigSeg.length<43)return {ok:false,response:signInRequiredResponse()};
+  const hdr=decodeJwtSegment(hdrSeg);
+  const pay=decodeJwtSegment(paySeg);
+  if(!hdr||!pay)return {ok:false,response:signInRequiredResponse()};
+  if(hdr.alg!=='RS256'||typeof hdr.kid!=='string'||hdr.kid.trim().length===0){
+   return {ok:false,response:signInRequiredResponse()};
+  }
+  const iss=typeof pay.iss==='string'?pay.iss.trim():'';
+  const sub=typeof pay.sub==='string'?pay.sub.trim():'';
+  const exp=pay.exp;
+  const nbf=pay.nbf;
+  const nowMs=Date.now();
+  if(!iss||!sub||typeof exp!=='number'||!Number.isFinite(exp)||exp*1000<=nowMs){
+   return {ok:false,response:signInRequiredResponse()};
+  }
+  if(nbf!==undefined&&(typeof nbf!=='number'||!Number.isFinite(nbf)||nbf*1000>nowMs+60_000)){
+   return {ok:false,response:signInRequiredResponse()};
+  }
+  try{
+   const actObj=pay.act&&typeof pay.act==='object'&&!Array.isArray(pay.act)?(pay.act as Record<string,unknown>):null;
+   const actorType=typeof pay.actorType==='string'?pay.actorType:typeof actObj?.typ==='string'?actObj.typ:undefined;
+   const candidateIdentity={
+    tokenIdentifier:`${iss}|${sub}`,
+    issuer:iss,
+    subject:sub,
+    ...(pay.aud!==undefined?{aud:pay.aud}:{}),
+    ...(pay.azp!==undefined?{azp:pay.azp}:{}),
+    ...(actorType!==undefined?{actorType}:{}),
+   } as unknown as import('convex/server').UserIdentity;
+   const checked=verifyIdentityClaims(candidateIdentity);
+   if(checked.actorType!==undefined&&checked.actorType!=='human')throw new Error('automated actor');
+  }catch{
+   return {ok:false,response:forbiddenIdentityResponse()};
+  }
+ }
+ let rawIdentity:import('convex/server').UserIdentity|null=null;
+ try{
+  rawIdentity=await ctx.auth.getUserIdentity();
+ }catch{
+  return {ok:false,response:signInRequiredResponse()};
+ }
+ if(!rawIdentity)return {ok:false,response:signInRequiredResponse()};
  try{
   const identity=verifyIdentityClaims(rawIdentity);
   if(identity.actorType!==undefined&&identity.actorType!=='human')throw new Error('automated actor');
   return {ok:true,owner:identity.tokenIdentifier};
  }catch{
-  return {ok:false,response:Response.json({error:{code:'forbidden_identity',message:'This identity cannot use research chat.'}},{status:403,headers})};
+  return {ok:false,response:forbiddenIdentityResponse()};
  }
 }
 
@@ -317,7 +384,7 @@ http.route({
  method:'POST',
  handler:httpActionGeneric(async(ctx,request)=>{
   const denied=gatewayGuard(request);if(denied)return denied;
-  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const who=await gatewayOwner(ctx,request);if(!who.ok)return who.response;
   const reservation=randomHex(32);
   const result=await ctx.runMutation(budgetM('reserveChatBudgetInternal'),{owner:who.owner,reservationSha256:await sha256Hex(reservation),source:'gateway'}) as {ok:true;spentGbp:number;ceilingGbp:number;expiresAtMs:number}|{ok:false;reason:string;spentGbp:number;ceilingGbp:number};
   if(!result.ok)return result.reason==='maintenance_active'?maintenanceResponse():Response.json({error:{code:result.reason,spentGbp:result.spentGbp,ceilingGbp:result.ceilingGbp}},{status:result.reason==='rate_limited'?429:409,headers});
@@ -334,7 +401,7 @@ http.route({
  method:'POST',
  handler:httpActionGeneric(async(ctx,request)=>{
   const denied=gatewayGuard(request);if(denied)return denied;
-  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const who=await gatewayOwner(ctx,request);if(!who.ok)return who.response;
   const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
   const budgetReservation=parsed.body.budgetReservation;
   if(typeof budgetReservation!=='string'||!/^[0-9a-f]{64}$/.test(budgetReservation))return Response.json({error:{code:'invalid_request',message:'budgetReservation is required.'}},{status:400,headers});
@@ -370,7 +437,7 @@ http.route({
  method:'POST',
  handler:httpActionGeneric(async(ctx,request)=>{
   const denied=gatewayGuard(request);if(denied)return denied;
-  const who=await gatewayOwner(ctx);if(!who.ok)return who.response;
+  const who=await gatewayOwner(ctx,request);if(!who.ok)return who.response;
   const owner=who.owner;
   const parsed=await gatewayJson(request);if(!parsed.ok)return parsed.response;
   const picked=pickTurnAuditFields(parsed.body.turn);

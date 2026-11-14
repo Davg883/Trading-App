@@ -219,9 +219,21 @@ function unauthenticated() {
   return NextResponse.json(
     {
       error: 'Authentication required to query the Evidence-Locked Research Assistant.',
+      code: 'sign_in_required',
       executionAuthority: 'none',
     },
     { status: 401, headers: NO_STORE_HEADERS },
+  );
+}
+
+function forbiddenIdentity() {
+  return NextResponse.json(
+    {
+      error: 'This identity cannot use research chat.',
+      code: 'forbidden_identity',
+      executionAuthority: 'none',
+    },
+    { status: 403, headers: NO_STORE_HEADERS },
   );
 }
 
@@ -410,12 +422,18 @@ export async function POST(req: NextRequest) {
         const started = await startChatBudget(caller.convexToken, reserved.value.reservation);
         if (!started.ok) {
           if (started.reason === 'maintenance_active') return maintenanceUnavailable();
+          if (started.status === 401 || started.reason === 'sign_in_required') return unauthenticated();
+          if (started.status === 403 || started.reason === 'forbidden_identity') return forbiddenIdentity();
           return budgetUnavailable();
         }
         budgetReservation = reserved.value.reservation;
         budgetOverride = { dailySpentGbpSoFar: reserved.value.spentGbp, dailyCostCeilingGbp: reserved.value.ceilingGbp };
       } else if (reserved.reason === 'maintenance_active') {
         return maintenanceUnavailable();
+      } else if (reserved.status === 401 || reserved.reason === 'sign_in_required') {
+        return unauthenticated();
+      } else if (reserved.status === 403 || reserved.reason === 'forbidden_identity') {
+        return forbiddenIdentity();
       } else if (reserved.kind === 'rejected' && reserved.reason === 'rate_limited') {
         return NextResponse.json(
           { error: 'Rate limit exceeded: too many research chat turns in the last minute', executionAuthority: 'none' },
@@ -529,6 +547,12 @@ export async function POST(req: NextRequest) {
           if (rec.reason === 'maintenance_active') {
             return maintenanceUnavailable();
           }
+          if (rec.status === 401 || rec.reason === 'sign_in_required') {
+            return unauthenticated();
+          }
+          if (rec.status === 403 || rec.reason === 'forbidden_identity') {
+            return forbiddenIdentity();
+          }
         }
       }
       // The caller's own credential cannot record live provider turns (pre-merge risk H1), so the legacy
@@ -548,7 +572,13 @@ export async function POST(req: NextRequest) {
           if (/maintenance_active/.test(legacyMsg)) {
             return maintenanceUnavailable();
           }
-          lastAuditReason = legacyMsg || lastAuditReason;
+          if (/Sign in required/i.test(legacyMsg)) {
+            return unauthenticated();
+          }
+          if (/Untrusted token|automated actors|forbidden_identity/i.test(legacyMsg)) {
+            return forbiddenIdentity();
+          }
+          lastAuditReason = 'legacy_audit_unavailable';
           auditId = null;
         }
       }

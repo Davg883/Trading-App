@@ -323,3 +323,106 @@ describe('Task A — Financial precision: integer accounting units (1 micro-GBP 
   expect((await reserve(asA)).status).toBe(409);
  });
 });
+
+describe('Task 1 — Forged or malformed Clerk JWTs return controlled 401/403 (never 500) with zero private leak',()=>{
+ const b64u=(obj:unknown)=>Buffer.from(JSON.stringify(obj),'utf8').toString('base64url');
+ const fakeSig='A'.repeat(86);
+ const signedRoutes=['/api/evidence-chat/budget/reserve','/api/evidence-chat/budget/start','/api/evidence-chat/turn'] as const;
+
+ it('malformed, truncated, wrong-alg, missing-kid, or expired Authorization Bearer tokens return 401 sign_in_required on all user gateway routes',async()=>{
+  const {t}=setup();
+  const validHdr=b64u({alg:'RS256',typ:'JWT',kid:'ins_test_key_1'});
+  const expiredPay=b64u({iss:ISS,sub:'user_a',aud:'convex',exp:Math.floor((NOW-60_000)/1000)});
+  const noKidHdr=b64u({alg:'RS256',typ:'JWT'});
+  const noneAlgHdr=b64u({alg:'none',typ:'JWT',kid:'ins_test_key_1'});
+  const validPay=b64u({iss:ISS,sub:'user_a',aud:'convex',exp:Math.floor((NOW+300_000)/1000)});
+
+  const malformedTokens=[
+   'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.forged.signature',
+   'Bearer not-a-jwt',
+   'Token some-opaque-string',
+   `Bearer ${validHdr}.${expiredPay}.${fakeSig}`,
+   `Bearer ${noKidHdr}.${validPay}.${fakeSig}`,
+   `Bearer ${noneAlgHdr}.${validPay}.${fakeSig}`,
+   `Bearer ${validHdr}.${validPay}.short`,
+  ];
+
+  for(const path of signedRoutes){
+   for(const auth of malformedTokens){
+    const res=await t.fetch(path,{
+     method:'POST',
+     headers:{...H,Authorization:auth},
+     body:JSON.stringify({}),
+    });
+    expect(res.status,`${path} with ${auth}`).toBe(401);
+    const body=await res.json() as {error:{code:string;message:string}};
+    expect(body).toEqual({
+     error:{
+      code:'sign_in_required',
+      message:'A verified user session is required.',
+     },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/stack|Request ID|at handler|secret|token/i);
+   }
+  }
+  expect(await reservations(t)).toHaveLength(0);
+  expect(await auditRows(t)).toHaveLength(0);
+ });
+
+ it('structurally valid JWTs with untrusted issuer, untrusted audience, untrusted azp, or automated actorType return 403 forbidden_identity (never 500)',async()=>{
+  const {t}=setup();
+  const validHdr=b64u({alg:'RS256',typ:'JWT',kid:'ins_test_key_1'});
+  const exp=Math.floor((NOW+300_000)/1000);
+  const forbiddenPayloads=[
+   {iss:'https://untrusted-issuer.clerk.accounts.dev',sub:'user_a',aud:'convex',exp},
+   {iss:ISS,sub:'user_a',aud:'https://evil.example.com',exp},
+   {iss:ISS,sub:'user_a',aud:'convex',azp:'https://evil.example.com',exp},
+   {iss:ISS,sub:'user_a',aud:'convex',actorType:'agent',exp},
+  ];
+
+  for(const path of signedRoutes){
+   for(const pay of forbiddenPayloads){
+    const jwt=`Bearer ${validHdr}.${b64u(pay)}.${fakeSig}`;
+    const res=await t.fetch(path,{
+     method:'POST',
+     headers:{...H,Authorization:jwt},
+     body:JSON.stringify({}),
+    });
+    expect(res.status,`${path} with ${JSON.stringify(pay)}`).toBe(403);
+    const body=await res.json() as {error:{code:string;message:string}};
+    expect(body).toEqual({
+     error:{
+      code:'forbidden_identity',
+      message:'This identity cannot use research chat.',
+     },
+    });
+   }
+  }
+  expect(await reservations(t)).toHaveLength(0);
+  expect(await auditRows(t)).toHaveLength(0);
+ });
+
+ it('structurally valid JWT with trusted claims but unverified/forged signature returns 401 sign_in_required when getUserIdentity returns null',async()=>{
+  const {t}=setup();
+  const validHdr=b64u({alg:'RS256',typ:'JWT',kid:'ins_test_key_1'});
+  const validPay=b64u({iss:ISS,sub:'user_a',aud:'convex',exp:Math.floor((NOW+300_000)/1000)});
+  const forgedJwt=`Bearer ${validHdr}.${validPay}.${fakeSig}`;
+
+  for(const path of signedRoutes){
+   const res=await t.fetch(path,{
+    method:'POST',
+    headers:{...H,Authorization:forgedJwt},
+    body:JSON.stringify({}),
+   });
+   expect(res.status,path).toBe(401);
+   expect(await res.json()).toEqual({
+    error:{
+     code:'sign_in_required',
+     message:'A verified user session is required.',
+    },
+   });
+  }
+  expect(await reservations(t)).toHaveLength(0);
+  expect(await auditRows(t)).toHaveLength(0);
+ });
+});

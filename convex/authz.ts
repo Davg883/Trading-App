@@ -82,7 +82,12 @@ export function verifyIdentityClaims(user:UserIdentity):UserIdentity{
 }
 
 export async function signedIn(ctx:Ctx):Promise<UserIdentity>{
- const user=await ctx.auth.getUserIdentity();
+ let user:UserIdentity|null=null;
+ try{
+  user=await ctx.auth.getUserIdentity();
+ }catch{
+  throw new Error('Sign in required');
+ }
  if(!user)throw new Error('Sign in required');
  return verifyIdentityClaims(user);
 }

@@ -128,3 +128,26 @@ describe('H2 — legitimate chat that makes no paid call still works',()=>{
   expect((await res.json() as Turn).telemetry).toMatchObject({generationMode:'deterministic_evidence_synthesis',providerStatus:'not_invoked'});
  });
 });
+
+describe('Task 1 — forged or untrusted Clerk JWT rejected with controlled 401/403 and zero provider invocation',()=>{
+ it('forged or expired JWT rejected by gateway /budget/reserve returns 401 sign_in_required without calling Gemini or leaking internals',async()=>{
+  gatewayReply=p=>p.endsWith('/reserve')?Response.json({error:{code:'sign_in_required',message:'A verified user session is required.'}},{status:401}):Response.json({},{status:404});
+  const res=await ask();
+  expect(res.status).toBe(401);
+  const body=await res.json() as Record<string,unknown>;
+  expect(body).toMatchObject({code:'sign_in_required',executionAuthority:'none'});
+  expect(JSON.stringify(body)).not.toMatch(/stack|Request ID|jwt-token|test-key-not-real/i);
+  expect(h.generate).not.toHaveBeenCalled();
+  expect(h.convexMutations).toEqual([]);
+ });
+
+ it('untrusted issuer or automated actor JWT rejected by gateway /budget/reserve returns 403 forbidden_identity without calling Gemini',async()=>{
+  gatewayReply=p=>p.endsWith('/reserve')?Response.json({error:{code:'forbidden_identity',message:'This identity cannot use research chat.'}},{status:403}):Response.json({},{status:404});
+  const res=await ask();
+  expect(res.status).toBe(403);
+  const body=await res.json() as Record<string,unknown>;
+  expect(body).toMatchObject({code:'forbidden_identity',executionAuthority:'none'});
+  expect(h.generate).not.toHaveBeenCalled();
+  expect(h.convexMutations).toEqual([]);
+ });
+});
