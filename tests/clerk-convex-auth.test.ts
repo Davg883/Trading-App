@@ -159,6 +159,92 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
         azp: 'https://attacker.example.com',
       } as unknown as UserIdentity),
     ).toThrow('Untrusted token authorized party');
+
+    // 5b. Valid aud ("convex") cannot override an explicitly unauthorised azp claim
+    const validAudForeignAzpJwt = makeJwt({
+      iss: 'https://clerk.capital.aiguides.co.uk',
+      sub: 'user_prod_1',
+      aud: 'convex',
+      azp: 'https://attacker.example.com',
+    });
+    expect(validateClerkConvexJwtClaims(validAudForeignAzpJwt)).toBe(false);
+    expect(() =>
+      verifyIdentityClaims(
+        {
+          tokenIdentifier: 'https://clerk.capital.aiguides.co.uk|user_prod_1',
+          issuer: 'https://clerk.capital.aiguides.co.uk',
+          subject: 'user_prod_1',
+          aud: 'convex',
+          azp: 'https://attacker.example.com',
+        } as unknown as UserIdentity,
+        { requireApplicationContext: true },
+      ),
+    ).toThrow('Untrusted token authorized party');
+
+    // 5c. Valid azp ("https://capital.aiguides.co.uk") cannot override an explicitly unauthorised aud claim
+    const validAzpForeignAudJwt = makeJwt({
+      iss: 'https://clerk.capital.aiguides.co.uk',
+      sub: 'user_prod_1',
+      aud: 'foreign-relying-party',
+      azp: 'https://capital.aiguides.co.uk',
+    });
+    expect(validateClerkConvexJwtClaims(validAzpForeignAudJwt)).toBe(false);
+    expect(() =>
+      verifyIdentityClaims(
+        {
+          tokenIdentifier: 'https://clerk.capital.aiguides.co.uk|user_prod_1',
+          issuer: 'https://clerk.capital.aiguides.co.uk',
+          subject: 'user_prod_1',
+          aud: 'foreign-relying-party',
+          azp: 'https://capital.aiguides.co.uk',
+        } as unknown as UserIdentity,
+        { requireApplicationContext: true },
+      ),
+    ).toThrow('Untrusted token audience');
+
+    // 6. Rejects raw tokens that omit BOTH aud and azp (missing application context)
+    const missingContextJwt = makeJwt({
+      iss: 'https://clerk.capital.aiguides.co.uk',
+      sub: 'user_prod_1',
+    });
+    expect(validateClerkConvexJwtClaims(missingContextJwt)).toBe(false);
+    expect(() =>
+      verifyIdentityClaims(
+        {
+          tokenIdentifier: 'https://clerk.capital.aiguides.co.uk|user_prod_1',
+          issuer: 'https://clerk.capital.aiguides.co.uk',
+          subject: 'user_prod_1',
+        } as unknown as UserIdentity,
+        { requireApplicationContext: true },
+      ),
+    ).toThrow('Missing token application context');
+
+    // 7. Rejects null, empty, mixed-untrusted array, or non-string aud / azp claims in both raw JWTs and UserIdentity
+    for (const invalidClaims of [
+      { aud: null },
+      { aud: [] },
+      { aud: '' },
+      { aud: [123] },
+      { aud: ['convex', 'https://attacker.example.com'] },
+      { azp: null },
+      { azp: '' },
+      { azp: 123 },
+    ]) {
+      const malformedContextJwt = makeJwt({
+        iss: 'https://clerk.capital.aiguides.co.uk',
+        sub: 'user_prod_1',
+        ...invalidClaims,
+      });
+      expect(validateClerkConvexJwtClaims(malformedContextJwt)).toBe(false);
+      expect(() =>
+        verifyIdentityClaims({
+          tokenIdentifier: 'https://clerk.capital.aiguides.co.uk|user_prod_1',
+          issuer: 'https://clerk.capital.aiguides.co.uk',
+          subject: 'user_prod_1',
+          ...invalidClaims,
+        } as unknown as UserIdentity),
+      ).toThrow(/Untrusted token (audience|authorized party)/);
+    }
   });
 
   it('guards __internal_onBeforeSetActive without timer leaks, false success, or unhandled late rejections', async () => {

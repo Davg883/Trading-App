@@ -38,12 +38,19 @@ function allowedAzpOrigins():Set<string>{
  return new Set([...DEFAULT_ALLOWED_AZP_ORIGINS,...extra]);
 }
 
+export type VerifyIdentityClaimsOptions={
+ requireApplicationContext?:boolean;
+};
+
 /**
  * Verifies issuer, audience (`aud`), and authorized party (`azp`) application binding
  * across both OIDC (`template: "convex"`, `aud: "convex"`) and `customJwt` (Clerk default
  * RS256 session token with `azp: "<origin>"`) verification paths.
  */
-export function verifyIdentityClaims(user:UserIdentity):UserIdentity{
+export function verifyIdentityClaims(
+ user:UserIdentity,
+ options?:VerifyIdentityClaimsOptions,
+):UserIdentity{
  const issuers=configuredIssuers();
  if(issuers.length>0){
   const tokenPrefix=typeof user.tokenIdentifier==='string'&&user.tokenIdentifier.includes('|')
@@ -59,23 +66,43 @@ export function verifyIdentityClaims(user:UserIdentity):UserIdentity{
 
  const allowedOrigins=allowedAzpOrigins();
  const rawAud=(user as Record<string,unknown>).aud;
- if(rawAud!==undefined&&rawAud!==null){
-  const audList=Array.isArray(rawAud)?rawAud.map(String):[String(rawAud)];
-  const validAud=audList.some(a=>{
-   const norm=normalizeOriginOrIssuer(a);
-   return norm==='convex'||allowedOrigins.has(norm);
-  });
+ let hasValidAud=false;
+ if(rawAud!==undefined){
+  if(rawAud===null){
+   throw new Error('Untrusted token audience');
+  }
+  const audList=Array.isArray(rawAud)
+   ? rawAud.filter((entry):entry is string=>typeof entry==='string')
+   : typeof rawAud==='string'
+     ? [rawAud]
+     : [];
+  const validAud=audList.length>0
+   &&(!Array.isArray(rawAud)||audList.length===rawAud.length)
+   &&audList.every(a=>{
+    const norm=normalizeOriginOrIssuer(a);
+    return norm==='convex'||allowedOrigins.has(norm);
+   });
   if(!validAud){
    throw new Error('Untrusted token audience');
   }
+  hasValidAud=true;
  }
 
  const rawAzp=(user as Record<string,unknown>).azp;
- if(rawAzp!==undefined&&rawAzp!==null){
-  const azp=normalizeOriginOrIssuer(String(rawAzp));
+ let hasValidAzp=false;
+ if(rawAzp!==undefined){
+  if(rawAzp===null||typeof rawAzp!=='string'){
+   throw new Error('Untrusted token authorized party');
+  }
+  const azp=normalizeOriginOrIssuer(rawAzp);
   if(!azp||!allowedOrigins.has(azp)){
    throw new Error('Untrusted token authorized party');
   }
+  hasValidAzp=true;
+ }
+
+ if(options?.requireApplicationContext&&!hasValidAud&&!hasValidAzp){
+  throw new Error('Missing token application context');
  }
 
  return user;

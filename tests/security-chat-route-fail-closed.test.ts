@@ -150,4 +150,43 @@ describe('Task 1 — forged or untrusted Clerk JWT rejected with controlled 401/
   expect(h.generate).not.toHaveBeenCalled();
   expect(h.convexMutations).toEqual([]);
  });
+
+ it('session token missing both aud and azp (or carrying unauthorised azp even when matching request Origin/Host) is rejected with 403 forbidden_identity before any gateway or Gemini call',async()=>{
+  const b64u=(obj:unknown)=>Buffer.from(JSON.stringify(obj),'utf8').toString('base64url');
+  const hdr=b64u({alg:'RS256',typ:'JWT',kid:'ins_test_1'});
+  const missingContextToken=`${hdr}.${b64u({iss:'https://complete-bunny-8662.clerk.accounts.dev',sub:'user_a'})}.sig_placeholder`;
+  h.token=missingContextToken;
+  const resMissing=await ask();
+  expect(resMissing.status).toBe(403);
+  expect(await resMissing.json()).toMatchObject({code:'forbidden_identity',executionAuthority:'none'});
+
+  // Spoofed request URL / Origin header must NEVER expand allowedAzpOrigins on the server
+  const spoofedAzpToken=`${hdr}.${b64u({iss:'https://complete-bunny-8662.clerk.accounts.dev',sub:'user_a',azp:'https://attacker.example.com'})}.sig_placeholder`;
+  h.token=spoofedAzpToken;
+  const resSpoofed=await POST(new NextRequest('https://attacker.example.com/api/graph/chat',{
+   method:'POST',
+   headers:{'content-type':'application/json',origin:'https://attacker.example.com',host:'attacker.example.com'},
+   body:JSON.stringify({question:Q}),
+  }));
+  expect(resSpoofed.status).toBe(403);
+  expect(await resSpoofed.json()).toMatchObject({code:'forbidden_identity',executionAuthority:'none'});
+
+  // Valid aud ("convex") cannot override an explicitly unauthorised azp claim
+  const validAudBadAzpToken=`${hdr}.${b64u({iss:'https://complete-bunny-8662.clerk.accounts.dev',sub:'user_a',aud:'convex',azp:'https://attacker.example.com'})}.sig_placeholder`;
+  h.token=validAudBadAzpToken;
+  const resValidAudBadAzp=await ask();
+  expect(resValidAudBadAzp.status).toBe(403);
+  expect(await resValidAudBadAzp.json()).toMatchObject({code:'forbidden_identity',executionAuthority:'none'});
+
+  // Valid azp ("https://capital.aiguides.co.uk") cannot override an explicitly unauthorised aud claim
+  const validAzpBadAudToken=`${hdr}.${b64u({iss:'https://complete-bunny-8662.clerk.accounts.dev',sub:'user_a',aud:'foreign-relying-party',azp:'https://capital.aiguides.co.uk'})}.sig_placeholder`;
+  h.token=validAzpBadAudToken;
+  const resValidAzpBadAud=await ask();
+  expect(resValidAzpBadAud.status).toBe(403);
+  expect(await resValidAzpBadAud.json()).toMatchObject({code:'forbidden_identity',executionAuthority:'none'});
+
+  expect(calls).toHaveLength(0);
+  expect(h.generate).not.toHaveBeenCalled();
+  expect(h.convexMutations).toEqual([]);
+ });
 });

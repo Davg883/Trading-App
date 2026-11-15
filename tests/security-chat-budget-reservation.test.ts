@@ -376,8 +376,13 @@ describe('Task 1 — Forged or malformed Clerk JWTs return controlled 401/403 (n
   const forbiddenPayloads=[
    {iss:'https://untrusted-issuer.clerk.accounts.dev',sub:'user_a',aud:'convex',exp},
    {iss:ISS,sub:'user_a',aud:'https://evil.example.com',exp},
-   {iss:ISS,sub:'user_a',aud:'convex',azp:'https://evil.example.com',exp},
+   {iss:ISS,sub:'user_a',aud:'convex',azp:'https://attacker.example.com',exp},
+   {iss:ISS,sub:'user_a',aud:'foreign-relying-party',azp:'https://capital.aiguides.co.uk',exp},
    {iss:ISS,sub:'user_a',aud:'convex',actorType:'agent',exp},
+   {iss:ISS,sub:'user_a',exp},
+   {iss:ISS,sub:'user_a',aud:null,exp},
+   {iss:ISS,sub:'user_a',azp:null,exp},
+   {iss:ISS,sub:'user_a',aud:[],exp},
   ];
 
   for(const path of signedRoutes){

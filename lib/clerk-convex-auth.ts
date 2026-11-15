@@ -71,30 +71,63 @@ export function validateClerkConvexJwtClaims(
     return false;
   }
 
+  const envAzpOrigins = (process.env.CLERK_ALLOWED_AZP_ORIGINS ?? '')
+    .split(',')
+    .map(normalizeOrigin)
+    .filter(Boolean);
+  const vercelDeploymentOrigins = [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map((v) => {
+      const trimmed = v.trim();
+      return normalizeOrigin(trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`);
+    });
   const runtimeOrigin =
     typeof window !== 'undefined' && window.location?.origin
       ? [normalizeOrigin(window.location.origin)]
       : [];
   const allowedOrigins = new Set(
-    [...DEFAULT_ALLOWED_AZP_ORIGINS, ...runtimeOrigin, ...(options?.allowedAzpOrigins ?? [])].map(
-      normalizeOrigin,
-    ),
+    [
+      ...DEFAULT_ALLOWED_AZP_ORIGINS,
+      ...envAzpOrigins,
+      ...vercelDeploymentOrigins,
+      ...runtimeOrigin,
+      ...(options?.allowedAzpOrigins ?? []),
+    ].map(normalizeOrigin),
   );
 
   const rawAud = payload.aud;
-  if (rawAud !== undefined && rawAud !== null) {
-    const audList = Array.isArray(rawAud) ? rawAud.map(String) : [String(rawAud)];
-    const validAud = audList.some((a) => {
+  let hasValidAud = false;
+  if (rawAud !== undefined) {
+    if (rawAud === null) return false;
+    const audList = Array.isArray(rawAud)
+      ? rawAud.filter((entry): entry is string => typeof entry === 'string')
+      : typeof rawAud === 'string'
+        ? [rawAud]
+        : [];
+    if (audList.length === 0 || (Array.isArray(rawAud) && audList.length !== rawAud.length)) {
+      return false;
+    }
+    const validAud = audList.every((a) => {
       const norm = normalizeOrigin(a);
       return norm === 'convex' || allowedOrigins.has(norm);
     });
     if (!validAud) return false;
+    hasValidAud = true;
   }
 
   const rawAzp = payload.azp;
-  if (rawAzp !== undefined && rawAzp !== null) {
-    const azp = normalizeOrigin(String(rawAzp));
+  let hasValidAzp = false;
+  if (rawAzp !== undefined) {
+    if (rawAzp === null || typeof rawAzp !== 'string') return false;
+    const azp = normalizeOrigin(rawAzp);
     if (!azp || !allowedOrigins.has(azp)) return false;
+    hasValidAzp = true;
+  }
+
+  // Every browser-issued Clerk JWT carries either `aud` ("convex" template) or `azp` (default RS256 session token).
+  // Reject tokens that omit both application-context claims.
+  if (!hasValidAud && !hasValidAzp) {
+    return false;
   }
 
   return true;

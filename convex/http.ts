@@ -349,11 +349,11 @@ async function gatewayOwner(
     tokenIdentifier:`${iss}|${sub}`,
     issuer:iss,
     subject:sub,
-    ...(pay.aud!==undefined?{aud:pay.aud}:{}),
-    ...(pay.azp!==undefined?{azp:pay.azp}:{}),
+    ...('aud' in pay?{aud:pay.aud}:{}),
+    ...('azp' in pay?{azp:pay.azp}:{}),
     ...(actorType!==undefined?{actorType}:{}),
    } as unknown as import('convex/server').UserIdentity;
-   const checked=verifyIdentityClaims(candidateIdentity);
+   const checked=verifyIdentityClaims(candidateIdentity,{requireApplicationContext:true});
    if(checked.actorType!==undefined&&checked.actorType!=='human')throw new Error('automated actor');
   }catch{
    return {ok:false,response:forbiddenIdentityResponse()};

@@ -28,6 +28,7 @@ import {
   type GatewayResult,
 } from '../../../../lib/graph/evidence-chat-gateway';
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
+import { validateClerkConvexJwtClaims } from '../../../../lib/clerk-convex-auth';
 
 /** Must match `SHARED_CHAT_TURNS_PER_MINUTE` in convex/evidenceChat.ts. */
 const SHARED_CHAT_TURNS_PER_MINUTE = 10;
@@ -58,6 +59,7 @@ const chatRequestSchema = z
 async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
   callerId: string;
   convexToken: string | null;
+  invalidTokenClaims?: boolean;
 } | null> {
   // Test-runner only. The previous localhost exception trusted the request's Host header on any
   // non-production build, so it has been removed.
@@ -70,9 +72,14 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
   try {
     const session = await auth();
     if (session?.userId) {
-      const token =
-        (await session.getToken({ template: 'convex' }).catch(() => null)) ??
-        (await session.getToken().catch(() => null));
+      const templated = await session.getToken({ template: 'convex' }).catch(() => null);
+      if (templated && !validateClerkConvexJwtClaims(templated)) {
+        return { callerId: session.userId, convexToken: null, invalidTokenClaims: true };
+      }
+      const token = templated ?? (await session.getToken().catch(() => null));
+      if (token && !validateClerkConvexJwtClaims(token)) {
+        return { callerId: session.userId, convexToken: null, invalidTokenClaims: true };
+      }
       return { callerId: session.userId, convexToken: token };
     }
   } catch {
@@ -91,6 +98,9 @@ export async function GET(req: NextRequest) {
       },
       { status: 401, headers: NO_STORE_HEADERS },
     );
+  }
+  if (caller.invalidTokenClaims) {
+    return forbiddenIdentity();
   }
 
   const url = new URL(req.url);
@@ -256,6 +266,9 @@ export async function POST(req: NextRequest) {
       },
       { status: 400, headers: NO_STORE_HEADERS },
     );
+  }
+  if (caller?.invalidTokenClaims) {
+    return forbiddenIdentity();
   }
 
   let parsed: z.infer<typeof chatRequestSchema>;
