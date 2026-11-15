@@ -418,10 +418,15 @@ export function evaluateCollectionHealth(input:{
    j.jobKey==='daily_intelligence_briefing'
     ?(input.latestBriefingDate??(j.lastSuccessAt?getLondonTimeParts(j.lastSuccessAt).dateKey:null))
     :null;
+  const briefingWeekendHold=
+   j.jobKey==='daily_intelligence_briefing'&&
+   !londonNow.isWeekday&&
+   ageMs!==null&&
+   ageMs<=72*3600_000;
   const freshness:JobHealthSummary['freshness']=
    ageMs===null?'unavailable':
    j.jobKey==='daily_intelligence_briefing'&&jobBriefingDate!==londonNow.dateKey
-    ?((londonNow.isWeekday&&londonNow.minutesSinceMidnight<7*60+30&&ageMs<=staleThresholdMs)?'delayed':'stale')
+    ?((londonNow.isWeekday&&londonNow.minutesSinceMidnight<7*60+30&&ageMs<=staleThresholdMs)||briefingWeekendHold?'delayed':'stale')
     :ageMs<=freshThresholdMs?'fresh':
     ageMs<=staleThresholdMs?'delayed':'stale';
 
@@ -532,9 +537,13 @@ export function evaluateCollectionHealth(input:{
  const briefingDate=input.latestBriefingDate??(briefJob?.lastSuccessAt?getLondonTimeParts(briefJob.lastSuccessAt).dateKey:null);
  const briefingGeneratedAt=input.latestBriefingGeneratedAt??briefJob?.lastSuccessAt??null;
  const briefingIsToday=briefingDate===londonNow.dateKey;
+ const briefingWeekendHoldLayer=
+  !londonNow.isWeekday&&
+  briefingGeneratedAt!==null&&
+  Math.max(0,now-briefingGeneratedAt)<=72*3600_000;
  const briefingStatus:OperationalLayerStatus['briefing']['status']=
   briefingIsToday?'generated':
-  (londonNow.isWeekday&&londonNow.minutesSinceMidnight<7*60+30)?'awaiting_uk_0730':
+  ((londonNow.isWeekday&&londonNow.minutesSinceMidnight<7*60+30)||briefingWeekendHoldLayer)?'awaiting_uk_0730':
   briefingGeneratedAt!==null?'stale':'missing';
 
  const operationalLayers:OperationalLayerStatus={

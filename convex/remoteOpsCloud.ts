@@ -763,6 +763,14 @@ export const runScheduledCloudCycle=internalAction({
     }else{
      const runId=`cloud-daily_intelligence_briefing-${now}`;
      const overview=await ctx.runQuery(qRef('getOperationsOverviewInternal'),{owner}) as {
+      health:{
+       jobs:Array<{jobKey:string;lastSuccessAt:number|null;lastErrorCode:string|null}>;
+      };
+      marketData?:{
+       totalObservationsStored:number;
+       coveredSymbols:readonly string[];
+       latestBySymbol:Array<{symbol:string;sessionDate:string;eventAt:number}>;
+      };
       stagedItems:Array<{
        externalId:string;
        sourceUrl:string;
@@ -776,6 +784,10 @@ export const runScheduledCloudCycle=internalAction({
        validationStatus:string;
       }>;
      };
+     const mktJobState=overview.health?.jobs?.find(j=>j.jobKey==='market_data_collect')??null;
+     const totalObsCount=overview.marketData?.totalObservationsStored??0;
+     const latestMktDateIso=overview.marketData?.latestBySymbol?.[0]?.sessionDate??null;
+     const mktCollectorHealthy=Boolean(mktJobState?.lastSuccessAt&&!mktJobState?.lastErrorCode&&totalObsCount>0);
      const promotedItems=overview.stagedItems.filter(s=>s.validationStatus==='promoted'||s.isPrimarySource);
      const confirmedFacts=discoveredFacts.length>0?discoveredFacts:promotedItems.slice(0,6).map(s=>({
       id:`fact-${s.externalId}`,
@@ -820,8 +832,12 @@ export const runScheduledCloudCycle=internalAction({
         id:`risk-provider-${now}`,
         category:'provider_health',
         severity:'warn',
-        title:'Market-data collector reported unconfigured licensed intraday quote provider.',
-        detail:'market_data_collect recorded failed:licensed_quote_provider_unconfigured; delayed public reference closes are never presented as live quotes.',
+        title:mktCollectorHealthy
+         ?`Delayed EOD market observations verified (${totalObsCount} observations through ${latestMktDateIso??'latest session'}).`
+         :'Market-data collector reported unconfigured licensed intraday quote provider.',
+        detail:mktCollectorHealthy
+         ?`market_data_collect succeeded (${totalObsCount} stored observations across 8 symbols; latest session ${latestMktDateIso??'current'}); delayed public reference closes are never presented as live quotes.`
+         :'market_data_collect recorded failed:licensed_quote_provider_unconfigured; delayed public reference closes are never presented as live quotes.',
         href:'/policy-risk#sources',
        },
       ],
@@ -830,7 +846,9 @@ export const runScheduledCloudCycle=internalAction({
         id:`gap-licensed-quotes-${now}`,
         domain:'Market Data (`market_data_collect`)',
         missingItem:'Licensed real-time equity & index quote feed (`LICENSED_MARKET_DATA_API_KEY`)',
-        impact:'Collector run failed closed on live quote ingestion; non-held instrument orders remain blocked.',
+        impact:mktCollectorHealthy
+         ?`Delayed public EOD closes are active (${totalObsCount} observations through ${latestMktDateIso??'latest session'}), but licensed real-time quotes and split-adjusted corporate-action verification remain unconfigured.`
+         :'Collector run failed closed on live quote ingestion; non-held instrument orders remain blocked.',
         pendingVerificationCount:overview.stagedItems.filter(s=>s.validationStatus==='pending_verification').length,
         resolutionHref:'/policy-risk#sources',
        },

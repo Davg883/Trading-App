@@ -26,6 +26,23 @@ export type TradingOverview={liveKillSwitchEngaged:boolean;reviewer:boolean;orde
 export type OperationsOverview={
  health:CollectionHealthReport;
  latestBriefing:MorningBriefingRecord|null;
+ marketData?:{
+  totalObservationsStored:number;
+  coveredSymbols:readonly string[];
+  latestBySymbol:Array<{
+   symbol:string;
+   sessionDate:string;
+   eventAt:number;
+   publishedAt:number;
+   serverReceivedAt:number;
+   close:number;
+   closeGbp:number|null;
+   usdToGbp:number|null;
+   sourceUrl:string;
+   priceBasis:string;
+   corporateActionsReviewed:boolean;
+  }>;
+ };
  missingEvidenceResolution?:MissingEvidenceResolverReport;
  forwardResearchEvents?:ForwardResearchEventRecord[];
 };
@@ -51,6 +68,8 @@ function Collapsible({title,testId,children,wide}:{title:string;testId:string;ch
 export function CommandCentre({portfolio,trading,operations,feed,flags,now,signedIn,configured,fixtureLabel,onSync,onToggleJob}:{portfolio:PortfolioData|null;trading:TradingOverview|null;operations?:OperationsOverview|null;feed:ResearchFeed;flags:{demo:boolean;live:boolean};now:number;signedIn:boolean;configured:boolean;fixtureLabel?:string;onSync?:(env:'live'|'demo',connectionId:string)=>Promise<string>;onToggleJob?:(jobKey:string,enabled:boolean)=>Promise<void>}){
  const fixture=Boolean(fixtureLabel),wide=useWide(),provider=fixture?'Synthetic fixture':'Trading 212';
  const hasDemo=Boolean(portfolio?.demo.snapshot),[env,setEnv]=useState<'live'|'demo'>('live');
+ const [syncingHeader,setSyncingHeader]=useState(false);
+ const [syncHeaderNote,setSyncHeaderNote]=useState<string|null>(null);
  const data=portfolio?portfolio[env]:null,snap=toSnapshot(data?.snapshot??null),kpis=accountKpis(snap,data?.valuations??[],data?.flows??[],now,provider);
  const currency=snap?.currency??'GBP',fresh=freshness(snap?.summaryAt??null,now),posFresh=freshness(snap?.positionsAt??null,now);
  const all=data?performance(data.valuations,data.flows,currency,'All',now):null;
@@ -58,10 +77,30 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  const execution:ExecutionState={demoFlag:flags.demo,liveFlag:flags.live,liveKillSwitchEngaged:trading?.liveKillSwitchEngaged??null,reviewer:trading?.reviewer??null};
  const deposits=(data?.flows??[]).filter(f=>f.amount>0).reduce((a,f)=>a+f.amount,0);
  const accountKind=fixture?'synthetic' as const:env;
- const missingPrices=feed.watchlist.filter(w=>w.close===null).map(w=>w.ticker);
- const activeHealth=operations?.health??feed.agentOperations;
- const activeBriefing=operations!==undefined&&operations!==null?operations.latestBriefing:(feed.morningBriefing??null);
- const latestWatchlistAt=feed.watchlist.reduce<number|null>((max,w)=>w.closeAt!==null&&(max===null||w.closeAt>max)?w.closeAt:max,feed.marketDataAsOf??null);
+ const opsMarketMap=new Map((operations?.marketData?.latestBySymbol??[]).map(o=>[o.symbol,o]));
+ const effectiveWatchlist=opsMarketMap.size>0?feed.watchlist.map(w=>{
+  const obs=opsMarketMap.get(w.ticker);
+  if(!obs)return w;
+  return {
+   ...w,
+   close:obs.close,
+   closeGbp:obs.closeGbp,
+   usdToGbp:obs.usdToGbp,
+   closeAt:obs.eventAt,
+   serverReceivedAt:obs.serverReceivedAt,
+   priceBasis:obs.priceBasis,
+   corporateActionsReviewed:obs.corporateActionsReviewed,
+   source:obs.sourceUrl,
+  };
+ }):feed.watchlist;
+ const missingPrices=effectiveWatchlist.filter(w=>w.close===null).map(w=>w.ticker);
+ const opsHasActivity=Boolean(operations?.health&&(operations.health.jobs.length===0||operations.health.jobs.some(j=>j.lastRunAt!==null||j.lastSuccessAt!==null)||operations.health.operationalLayers?.briefing?.generatedAt!==null));
+ const activeHealth=operations?.health&&(opsHasActivity||fixture)?operations.health:{
+  ...feed.agentOperations,
+  ...(operations?.health?.evidenceChat?{evidenceChat:operations.health.evidenceChat}:{}),
+ };
+ const activeBriefing=operations!==undefined&&operations!==null?(opsHasActivity?operations.latestBriefing:(operations.latestBriefing??feed.morningBriefing??null)):(feed.morningBriefing??null);
+ const latestWatchlistAt=effectiveWatchlist.reduce<number|null>((max,w)=>w.closeAt!==null&&(max===null||w.closeAt>max)?w.closeAt:max,feed.marketDataAsOf??null);
  const marketObsAgeMs=latestWatchlistAt!==null?Math.max(0,now-latestWatchlistAt):null;
  const marketObsStale=marketObsAgeMs===null||marketObsAgeMs>4*86_400_000;
  const alerts:Alert[]=[
@@ -74,12 +113,23 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
   ...((count(['unknown','submitting'])??0)>0?[{id:'unknown',tone:'alert' as const,title:'Order outcome unknown.',detail:'It will not be re-sent.',href:'/trading#orders',hrefLabel:'Reconcile against Trading 212'}]:[]),
   ...(marketObsStale?[{id:'market-stale',tone:'warn' as const,title:'Historical research snapshot active (collector stale or unverified).',detail:`Displayed market observations are as of ${iso(latestWatchlistAt)} (${marketObsAgeMs!==null?age(marketObsAgeMs):'unknown age'}); verify background market-data collector freshness.`,href:'#agent-operations',hrefLabel:'Inspect collector health'}]:[]),
   ...(activeHealth.alerts.map(a=>({id:a.id,tone:a.severity,title:a.title,detail:a.detail,href:a.href,hrefLabel:'Inspect'}))),
-  {id:'market',tone:'info',title:'Market data is delayed.',detail:`Watchlist prices are public reference closes as of ${iso(feed.marketDataAsOf)}; no licensed real-time feed is connected${missingPrices.length?`; no price for ${missingPrices.join(', ')}`:''}.`,href:'/policy-risk#sources',hrefLabel:'View price evidence'},
+  {id:'market',tone:'info',title:'Market data is delayed.',detail:`Watchlist prices are public reference closes as of ${iso(latestWatchlistAt)}; no licensed real-time feed is connected${missingPrices.length?`; no price for ${missingPrices.join(', ')}`:''}.`,href:'/policy-risk#sources',hrefLabel:'View price evidence'},
   {id:'exec',tone:flags.live?'alert':'info',title:`Live submission ${flags.live?'ENABLED':'disabled'}.`,detail:`Demo submission ${flags.demo?'enabled':'disabled'}. This page cannot change trading permissions.`,href:'/trading#controls',hrefLabel:'Trading controls'},
  ];
  const syncValue:Value=data?.connection?.lastSuccessfulSyncAt?{ok:true,value:data.connection.lastSuccessfulSyncAt,source:`${provider} full synchronisation`,observedAt:data.connection.lastSuccessfulSyncAt}:{ok:false,reason:'No full synchronisation yet'};
  const ownedTickers=(snap?.positions??[]).filter(p=>(p.quantity??0)>0).map(p=>p.ticker);
  const hasPerformanceSeries=Boolean(all&&all.series.length>=2);
+ async function handleHeaderSync(){
+  if(!onSync||!data?.connection||syncingHeader)return;
+  setSyncingHeader(true);
+  setSyncHeaderNote(null);
+  try{
+   const msg=await onSync(env,data.connection.connectionId);
+   setSyncHeaderNote(msg);
+  }finally{
+   setSyncingHeader(false);
+  }
+ }
  const portfolioSnapshotSection=(
   <section className="cc-account cc-panel g6-portfolio-snapshot" aria-labelledby="account-title" data-testid="portfolio-snapshot">
    <header className="cc-account-head">
@@ -90,9 +140,17 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
       <span className="g6-meta-pill" data-testid="broker-last-sync-pill">Last Broker Sync: {snap?.summaryAt?`${iso(snap.summaryAt)} (${age(fresh.ageMs)})`:data?.connection?.lastSuccessfulSyncAt?`${iso(data.connection.lastSuccessfulSyncAt)}`:signedIn?'Not yet synchronised':'Signed out (no broker data loaded)'}</span>
      </div>
      <h1 id="account-title">Portfolio command centre</h1>
-     <p>{snap?<>Source: {fixture?'synthetic fixture (not Trading 212)':`Trading 212 · ${env==='live'?'Live account (read-only)':'Demo account'}`} · summary {iso(snap.summaryAt)} <span className={`cc-fresh cc-${fresh.state}`} data-testid="freshness">{fresh.state==='stale'?`Stale · ${age(fresh.ageMs)}`:`Fresh · ${age(fresh.ageMs)}`}</span></>:configured?signedIn?'No synchronised Trading 212 account yet.':'Sign in to load your Trading 212 account.':'Account integration not configured.'}</p>
+     <p>{snap?<>Source: {fixture?'synthetic fixture (not Trading 212)':`Trading 212 · ${env==='live'?'Live account (read-only)':'Demo account'}`} · summary {iso(snap.summaryAt)} <span className={`cc-fresh cc-${fresh.state}`} data-testid="freshness">{fresh.state==='stale'?`Stale · ${age(fresh.ageMs)}`:`Fresh · ${age(fresh.ageMs)}`}</span>{syncHeaderNote&&<small style={{marginLeft:8}} data-testid="header-sync-note">({syncHeaderNote})</small>}</>:configured?signedIn?'No synchronised Trading 212 account yet.':'Sign in to load your Trading 212 account.':'Account integration not configured.'}</p>
     </div>
-    <div className="cc-account-tools">{snap&&<DataBadge kind={accountKind}/>}{hasDemo&&<div role="radiogroup" aria-label="Account" className="cc-segment"><button role="radio" aria-checked={env==='live'} onClick={()=>setEnv('live')}>Live</button><button role="radio" aria-checked={env==='demo'} onClick={()=>setEnv('demo')}>Demo</button></div>}</div>
+    <div className="cc-account-tools">
+     {signedIn&&data?.connection&&onSync&&(
+      <button type="button" className="cc-fix" data-testid="header-sync-now" disabled={syncingHeader} onClick={()=>{void handleHeaderSync();}}>
+       {syncingHeader?'Synchronising…':'Synchronise now'}
+      </button>
+     )}
+     {snap&&<DataBadge kind={accountKind}/>}
+     {hasDemo&&<div role="radiogroup" aria-label="Account" className="cc-segment"><button role="radio" aria-checked={env==='live'} onClick={()=>setEnv('live')}>Live</button><button role="radio" aria-checked={env==='demo'} onClick={()=>setEnv('demo')}>Demo</button></div>}
+    </div>
    </header>
    {kpis?<>
     <div className="cc-kpis cc-kpis-primary" data-testid="kpi-strip">
@@ -128,7 +186,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
   {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
   <AlertsCentre alerts={alerts} links={LINKS}/>
-  <ExecutiveOverviewSections watchlist={feed.watchlist} ownedTickers={ownedTickers} now={now} morningBriefing={activeBriefing} reportGeneratedAtMs={activeBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
+  <ExecutiveOverviewSections watchlist={effectiveWatchlist} ownedTickers={ownedTickers} now={now} morningBriefing={activeBriefing} reportGeneratedAtMs={activeBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
   <details className="g6-drawer-details" data-testid="technical-evidence-details">
    <summary className="g6-drawer-summary">
     <span>Technical, Operations &amp; Evidence Audit Details (Agent Operations, Morning Brief, Watchlist &amp; Data Boundaries)</span>
@@ -138,7 +196,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
     <Collapsible title="Morning intelligence brief" testId="brief-collapsible" wide={wide}><MorningBriefPanel briefing={activeBriefing} fixture={fixture}/></Collapsible>
     <Collapsible title="Agent operations & collection health" testId="ops-collapsible" wide={wide}><AgentOperationsPanel health={activeHealth} now={now} fixture={fixture} onToggleJob={onToggleJob}/></Collapsible>
     <Collapsible title="Research intelligence" testId="intel-collapsible" wide={wide}><ResearchIntel events={feed.events} forwardPredictions={operations?.forwardResearchEvents?.length??feed.forwardPredictions} missingEvidenceResolution={operations?.missingEvidenceResolution??feed.missingEvidenceResolution} forwardResearchEvents={operations?.forwardResearchEvents??feed.forwardResearchEvents}/></Collapsible>
-    <Collapsible title="Research watchlist (delayed public reference prices)" testId="watch-collapsible" wide={wide}><WatchlistPanel items={feed.watchlist} now={now} ownedTickers={ownedTickers}/></Collapsible>
+    <Collapsible title="Research watchlist (delayed public reference prices)" testId="watch-collapsible" wide={wide}><WatchlistPanel items={effectiveWatchlist} now={now} ownedTickers={ownedTickers}/></Collapsible>
     <Collapsible title="Data boundaries" testId="bound-collapsible" wide={wide}><section className="cc-panel cc-boundaries" aria-labelledby="bound-title"><header className="cc-panel-head"><div><h2 id="bound-title">Data boundaries</h2><p>Real and simulated results are never combined.</p></div></header><ul>
      <li><DataBadge kind="live"/> Actual orders, positions and cash. Trading 212 is authoritative.</li><li><DataBadge kind="demo"/> Trading 212 practice account; never added to Live figures.</li><li><DataBadge kind="paper"/> Internal paper ledger (Paper Trading module); never mixed with broker P/L.</li><li><DataBadge kind="synthetic"/> Illustrative examples and development fixtures only.</li><li><DataBadge kind="retrospective"/> Cases registered after the event; not predictions.</li><li><DataBadge kind="forward"/> Registered before the outcome; {(operations?.forwardResearchEvents?.length??feed.forwardPredictions)>0?`${operations?.forwardResearchEvents?.length??feed.forwardPredictions} active`:'none yet'}.</li></ul></section></Collapsible>
    </div>

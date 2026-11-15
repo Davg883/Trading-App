@@ -32,6 +32,19 @@ export default async function Home(){
       source:obs.sourceUrl,
     };
   });
+  const qqqObs=latestMap.get("QQQ" as never);
+  const updatedBenchmarks=qqqObs?baseFeed.benchmarks.map(b=>{
+    if(b.id!=="QQQ")return b;
+    const hasPoint=b.observations.some(o=>o.at===qqqObs.eventAt);
+    const mergedObs=hasPoint
+      ?b.observations.map(o=>o.at===qqqObs.eventAt?{at:qqqObs.eventAt,close:qqqObs.close,currency:"USD",gbpPerUnit:qqqObs.usdToGbp}:o)
+      :[...b.observations,{at:qqqObs.eventAt,close:qqqObs.close,currency:"USD",gbpPerUnit:qqqObs.usdToGbp}].sort((x,y)=>x.at-y.at);
+    return {
+      ...b,
+      observations:mergedObs,
+      convention:`QQQ total in GBP = Nasdaq public close × ECB/Bank of England USD/GBP reference on the same date; price return only, no dividends; updated through ${qqqObs.sessionDate}.`,
+    };
+  }):baseFeed.benchmarks;
   const latestMarketAt=(liveOps?.marketData?.latestBySymbol??[]).reduce((max,o)=>Math.max(max,o.eventAt),baseFeed.marketDataAsOf??0);
   const forwardEvents=liveOps?.forwardResearchEvents??baseFeed.forwardResearchEvents;
   const vaultSelfTest=verifyBrokerVaultSelfTest();
@@ -67,6 +80,7 @@ export default async function Home(){
   const feed=liveOps&&reconciledHealth?{
     ...baseFeed,
     watchlist:updatedWatchlist,
+    benchmarks:updatedBenchmarks,
     marketDataAsOf:latestMarketAt,
     agentOperations:reconciledHealth,
     ...(liveOps.latestBriefing?{morningBriefing:liveOps.latestBriefing}:{}),
