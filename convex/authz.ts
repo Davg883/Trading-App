@@ -34,8 +34,8 @@ function configuredIssuers():string[]{
 
 function allowedAzpOrigins():Set<string>{
  const raw=process.env.CLERK_ALLOWED_AZP_ORIGINS??'';
- const extra=raw.split(',').map(normalizeOriginOrIssuer).filter(Boolean);
- return new Set([...DEFAULT_ALLOWED_AZP_ORIGINS,...extra]);
+ const configured=raw.split(',').map(normalizeOriginOrIssuer).filter(Boolean);
+ return new Set(configured.length>0?configured:DEFAULT_ALLOWED_AZP_ORIGINS);
 }
 
 export type VerifyIdentityClaimsOptions={

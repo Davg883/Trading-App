@@ -11,6 +11,8 @@ import { buildWorkspaceConnectionsReport } from '../../lib/remote-ops/workspace-
 
 export const dynamic = 'force-dynamic';
 
+const getServerVerificationTimestampMs = () => Date.now();
+
 export default async function WorkspacePage() {
   const configured = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
   const liveOps = await fetchLiveOperationsOverview();
@@ -37,7 +39,7 @@ export default async function WorkspacePage() {
                     status: hasProviderErrors
                       ? ('degraded' as const)
                       : ('configured_not_tested' as const),
-                    lastVerifiedAt: Date.now(),
+                    lastVerifiedAt: getServerVerificationTimestampMs(),
                     detail: hasProviderErrors
                       ? `${geminiStatus.detail} Live generateContent returned HTTP 402 (RESOURCE_EXHAUSTED: Google AI Studio prepayment credits depleted); explicit safe abstention enforced.`
                       : `${geminiStatus.detail} Awaiting first verified live generateContent response.`,

@@ -245,6 +245,21 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
         } as unknown as UserIdentity),
       ).toThrow(/Untrusted token (audience|authorized party)/);
     }
+
+    // 8. Explicit CLERK_ALLOWED_AZP_ORIGINS overrides default origins so development environments do not inherit production origins
+    vi.stubEnv(
+      'CLERK_ALLOWED_AZP_ORIGINS',
+      'http://localhost:3000,https://trading-k0a509nbc-david-grannums-projects.vercel.app',
+    );
+    expect(validateClerkConvexJwtClaims(validAzp)).toBe(false);
+    expect(() =>
+      verifyIdentityClaims({
+        tokenIdentifier: 'https://clerk.capital.aiguides.co.uk|user_prod_1',
+        issuer: 'https://clerk.capital.aiguides.co.uk',
+        subject: 'user_prod_1',
+        azp: 'https://capital.aiguides.co.uk',
+      } as unknown as UserIdentity),
+    ).toThrow('Untrusted token authorized party');
   });
 
   it('guards __internal_onBeforeSetActive without timer leaks, false success, or unhandled late rejections', async () => {

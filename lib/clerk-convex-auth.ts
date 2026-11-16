@@ -87,8 +87,7 @@ export function validateClerkConvexJwtClaims(
       : [];
   const allowedOrigins = new Set(
     [
-      ...DEFAULT_ALLOWED_AZP_ORIGINS,
-      ...envAzpOrigins,
+      ...(envAzpOrigins.length > 0 ? envAzpOrigins : DEFAULT_ALLOWED_AZP_ORIGINS),
       ...vercelDeploymentOrigins,
       ...runtimeOrigin,
       ...(options?.allowedAzpOrigins ?? []),

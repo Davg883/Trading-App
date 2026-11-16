@@ -3,7 +3,6 @@ import {
   SEVEN_STOCK_COVERAGE_MATRIX,
   type CoverageCategoryKey,
   type CoverageCellAudit,
-  type ObservationAuditStatus,
 } from './financial-data-readiness';
 import {
   computeDeterministicValuationMetrics,
@@ -216,6 +215,110 @@ export interface SecXbrlExpansionPackage {
 
 let cachedExpansionPackage: SecXbrlExpansionPackage | null = null;
 
+type RawJsonFact = SecXbrlRawFact & {
+  start?: string | null;
+  end: string;
+  durationDays?: number;
+  fp?: string | null;
+  rawVal: number;
+  rawTag?: string;
+  _derivedQ4Basis?: string;
+};
+
+type RawJsonRestatement = {
+  form: string;
+  accessionNumber: string;
+  filingDate: string;
+  reportDate?: string | null;
+  acceptanceDateTime: string;
+  publishedAtMs: number;
+};
+
+type RawJsonBridge = {
+  latestQuarterPeriodEnd: string;
+  latestQuarterValUsdMillions: number | null;
+  latestQuarterFcfUsdMillions: number | null;
+  latestQuarterBasis: string | null;
+  ttmValUsdMillions: number | null;
+  ttmFcfUsdMillions: number | null;
+  ttmCapexToOcfPct: number | null;
+  companySpecificReconciliationNote: string;
+};
+
+type RawJsonCompany = {
+  cik: string;
+  entityName: string;
+  receivedAtMs: number;
+  latestFiling: {
+    form: string;
+    accessionNumber: string;
+    filingDate: string;
+    acceptanceDateTime: string;
+    publishedAtMs: number;
+  };
+  restatementsAndAmendments?: RawJsonRestatement[];
+  rawXbrlFacts: {
+    quarterlyRevenues?: RawJsonFact[];
+    quarterlyOperatingIncome?: RawJsonFact[];
+    quarterlyNetIncome?: RawJsonFact[];
+    quarterlyOperatingCashFlow?: RawJsonFact[];
+    quarterlyCapex?: RawJsonFact[];
+    annualRevenues?: RawJsonFact[];
+    annualOperatingIncome?: RawJsonFact[];
+    annualNetIncome?: RawJsonFact[];
+    annualOperatingCashFlow?: RawJsonFact[];
+    annualCapex?: RawJsonFact[];
+    ytdRevenues?: RawJsonFact[];
+    ytdOperatingIncome?: RawJsonFact[];
+    ytdNetIncome?: RawJsonFact[];
+    ytdOperatingCashFlow?: RawJsonFact[];
+    ytdCapex?: RawJsonFact[];
+    quarterlyDilutedShares?: RawJsonFact[];
+    quarterlyBasicShares?: RawJsonFact[];
+    commonSharesOutstandingInstant?: RawJsonFact[];
+    cashInstant?: RawJsonFact[];
+    shortTermInvestmentsInstant?: RawJsonFact[];
+    shortTermDebtInstant?: RawJsonFact[];
+    longTermDebtInstant?: RawJsonFact[];
+    stockholdersEquityInstant?: RawJsonFact[];
+  };
+  normalisedFinancialValues: {
+    asOfPeriodEnd: string;
+    publishedAtMs: number;
+    receivedAtMs: number;
+    yoyQuarterlyRevenueGrowthPct: number | null;
+    ttmOperatingMarginPct: number | null;
+    ttmFcfMarginPct: number | null;
+    revenueBridge: RawJsonBridge;
+    ebitBridge: RawJsonBridge;
+    netIncomeBridge: RawJsonBridge;
+    ocfBridge: RawJsonBridge;
+    capexBridge: RawJsonBridge;
+    freeCashFlowBridge: RawJsonBridge;
+    balanceSheet: {
+      asOfDate: string;
+      cashAndEquivalentsUsdMillions: number;
+      shortTermInvestmentsUsdMillions: number;
+      totalCashAndShortTermInvestmentsUsdMillions: number;
+      shortTermDebtUsdMillions: number;
+      longTermDebtNoncurrentUsdMillions: number;
+      totalDebtExLeasesUsdMillions: number;
+      financeLeaseLiabilitiesUsdMillions?: number;
+      operatingLeaseLiabilitiesUsdMillions?: number | null;
+      totalDebtIncludingFinanceLeasesUsdMillions: number;
+      netDebtUsdMillions: number;
+      stockholdersEquityUsdMillions: number;
+    };
+    shareCounts: {
+      weightedAverageDilutedSharesMillions: number;
+      weightedAverageBasicSharesMillions: number;
+      commonStockSharesOutstandingMillions?: number;
+      deiEntityCommonStockSharesOutstandingMillions?: number;
+      antiDilutionOrMultiClassNote: string;
+    };
+  };
+};
+
 /**
  * Returns the complete Phase G.7.1 SEC EDGAR XBRL expansion dataset, normalising the raw
  * bridge and fact tables from `data/sec-xbrl/phase-g7-1-sec-xbrl-expansion.json` into
@@ -249,7 +352,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
         resolutionStatus: string;
       }>;
     };
-    companies: Record<UniverseTicker, any>;
+    companies: Record<UniverseTicker, RawJsonCompany>;
   };
 
   const tickers: UniverseTicker[] = ['NVDA', 'MSFT', 'GOOGL', 'AMZN', 'AMD', 'CRWV', 'INTC'];
@@ -270,29 +373,29 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
     const scRaw = nf.shareCounts;
 
     // Build chronological `quarterlySeries` from `rf.quarterlyRevenues`, deriving missing 10-K Q4 (`FY - 9M YTD`) quarters
-    const qRevList: Array<any> = [...(rf.quarterlyRevenues ?? [])];
-    const qEbitByEnd = new Map<string, any>(
-      (rf.quarterlyOperatingIncome ?? []).map((x: any) => [x.end, x]),
+    const qRevList: Array<RawJsonFact> = [...(rf.quarterlyRevenues ?? [])];
+    const qEbitByEnd = new Map<string, RawJsonFact>(
+      (rf.quarterlyOperatingIncome ?? []).map((x: RawJsonFact) => [x.end, x]),
     );
-    const qNiByEnd = new Map<string, any>(
-      (rf.quarterlyNetIncome ?? []).map((x: any) => [x.end, x]),
+    const qNiByEnd = new Map<string, RawJsonFact>(
+      (rf.quarterlyNetIncome ?? []).map((x: RawJsonFact) => [x.end, x]),
     );
-    const qOcfByEnd = new Map<string, any>(
-      (rf.quarterlyOperatingCashFlow ?? []).map((x: any) => [x.end, x]),
+    const qOcfByEnd = new Map<string, RawJsonFact>(
+      (rf.quarterlyOperatingCashFlow ?? []).map((x: RawJsonFact) => [x.end, x]),
     );
-    const qCapexByEnd = new Map<string, any>(
-      (rf.quarterlyCapex ?? []).map((x: any) => [x.end, x]),
+    const qCapexByEnd = new Map<string, RawJsonFact>(
+      (rf.quarterlyCapex ?? []).map((x: RawJsonFact) => [x.end, x]),
     );
 
-    const findMatching9m = (ytdList: Array<any>, fyStart: string, fyEnd: string) =>
+    const findMatching9m = (ytdList: Array<RawJsonFact>, fyStart: string | null | undefined, fyEnd: string) =>
       (ytdList ?? [])
         .filter(
-          (y: any) =>
+          (y: RawJsonFact) =>
             y.start === fyStart &&
             y.end < fyEnd &&
             (y.durationDays === undefined || (y.durationDays >= 245 && y.durationDays <= 290)),
         )
-        .sort((a: any, b: any) => String(b.end).localeCompare(String(a.end)))[0] ?? null;
+        .sort((a: RawJsonFact, b: RawJsonFact) => String(b.end).localeCompare(String(a.end)))[0] ?? null;
 
     for (const fyRev of rf.annualRevenues ?? []) {
       if (!qRevList.some((q) => q.end === fyRev.end)) {
@@ -315,7 +418,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
           });
 
           const fyEbit = (rf.annualOperatingIncome ?? []).find(
-            (x: any) => x.end === fyRev.end,
+            (x: RawJsonFact) => x.end === fyRev.end,
           );
           const ytd9mEbit = findMatching9m(
             rf.ytdOperatingIncome ?? [],
@@ -332,7 +435,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
             });
           }
 
-          const fyNi = (rf.annualNetIncome ?? []).find((x: any) => x.end === fyRev.end);
+          const fyNi = (rf.annualNetIncome ?? []).find((x: RawJsonFact) => x.end === fyRev.end);
           const ytd9mNi = findMatching9m(rf.ytdNetIncome ?? [], fyRev.start, fyRev.end);
           if (fyNi && ytd9mNi && !qNiByEnd.has(fyRev.end)) {
             qNiByEnd.set(fyRev.end, {
@@ -345,7 +448,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
           }
 
           const fyOcf = (rf.annualOperatingCashFlow ?? []).find(
-            (x: any) => x.end === fyRev.end,
+            (x: RawJsonFact) => x.end === fyRev.end,
           );
           const ytd9mOcf = findMatching9m(
             rf.ytdOperatingCashFlow ?? [],
@@ -362,7 +465,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
             });
           }
 
-          const fyCapex = (rf.annualCapex ?? []).find((x: any) => x.end === fyRev.end);
+          const fyCapex = (rf.annualCapex ?? []).find((x: RawJsonFact) => x.end === fyRev.end);
           const ytd9mCapex = findMatching9m(rf.ytdCapex ?? [], fyRev.start, fyRev.end);
           if (fyCapex && ytd9mCapex && !qCapexByEnd.has(fyRev.end)) {
             qCapexByEnd.set(fyRev.end, {
@@ -586,7 +689,7 @@ export function getSecXbrlExpansionPackage(): SecXbrlExpansionPackage {
 
     const restatementRecords: SecXbrlRestatementRecord[] = (
       c.restatementsAndAmendments ?? []
-    ).map((r: any) => ({
+    ).map((r: RawJsonRestatement) => ({
       form: r.form,
       accessionNumber: r.accessionNumber,
       filingDate: r.filingDate,

@@ -33,6 +33,8 @@ import {
   type GeminiInferenceTelemetry,
 } from '../lib/graph/evidence-chat-contracts';
 
+const currentDecisionTimestampMs = () => Date.now();
+
 export type DataRoomViewKey =
   | 'executive_overview'
   | 'sector_intelligence'
@@ -598,7 +600,7 @@ export default function MacroDataRoom({
     rel: MacroRelationship,
     decision: 'approved' | 'rejected',
   ) => {
-    const nowMs = Date.now();
+    const nowMs = currentDecisionTimestampMs();
     const reviewerId = 'demo:browser_local_reviewer';
     const note =
       reviewNoteInput.trim() ||

@@ -748,7 +748,7 @@ export function PortfolioRiskDashboard({
 
       {/* Brokerage Privacy & Isolation Governance Footer */}
       <footer className="broker-privacy-notice" data-testid="broker-privacy-notice" style={{ marginTop: '2rem', padding: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: '0.85rem', color: '#8892b0' }}>
-        <strong>Brokerage Privacy &amp; Isolation:</strong> Trading 212 API credentials remain encrypted within the secure server-side vault. Under platform security rules (<code>executionAuthority: "none"</code>, <code>LIVE_TRADING_ENABLED=false</code>), no broker credentials or raw authorization tokens are ever transmitted to client browsers or exposed to LLM research agents. Read-only portfolio synchronisation is strictly owner-isolated and deterministic.
+        <strong>Brokerage Privacy &amp; Isolation:</strong> Trading 212 API credentials remain encrypted within the secure server-side vault. Under platform security rules (<code>{'executionAuthority: "none"'}</code>, <code>LIVE_TRADING_ENABLED=false</code>), no broker credentials or raw authorization tokens are ever transmitted to client browsers or exposed to LLM research agents. Read-only portfolio synchronisation is strictly owner-isolated and deterministic.
       </footer>
     </div>
   );

@@ -12,8 +12,6 @@ import { Trading212Adapter } from '../lib/brokers/trading212';
 import {
   encryptCredentials,
   decryptCredentials,
-  maskApiKey,
-  BrokerVaultError,
 } from '../lib/brokers/vault';
 import { calculatePortfolioConcentrationIntelligence } from '../lib/portfolio/multi-asset-risk-pilot';
 import {
@@ -93,7 +91,7 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
         );
       });
 
-      const adapter = new Trading212Adapter('live', creds, { fetch: mockFetch as any });
+      const adapter = new Trading212Adapter('live', creds, { fetch: mockFetch as unknown as typeof fetch });
       const summary = await adapter.getAccountSummary();
 
       expect(capturedUrl).toBe('https://live.trading212.com/api/v0/equity/account/summary');
@@ -176,7 +174,7 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
         environment: 'live',
         maskedKey: '••••9876',
         encryptedPayload: mockPayload,
-      })) as { connectionId: any; revision: number };
+      })) as { connectionId: string; revision: number };
 
       const aliceConnectionId = saveRes.connectionId;
       expect(aliceConnectionId).toBeDefined();
@@ -222,7 +220,7 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
         environment: 'live',
         maskedKey: '••••9876',
         encryptedPayload: mockPayload,
-      })) as { connectionId: any; revision: number };
+      })) as { connectionId: string; revision: number };
 
       // Alice acquires sync and records an account snapshot
       const lease = (await t.mutation(mutation('acquireSyncInternal'), {
@@ -230,7 +228,7 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
         connectionId: saveRes.connectionId,
         environment: 'live',
         operation: 'sync',
-      })) as any;
+      })) as { ok: boolean; leaseToken: string; revision: number };
       expect(lease.ok).toBe(true);
 
       const mockSnapshot: BrokerSyncSnapshot = {
