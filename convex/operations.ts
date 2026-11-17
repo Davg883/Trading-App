@@ -14,6 +14,7 @@ import {
  stagedSubmissionRequestSchema,
 } from '../lib/remote-ops/contracts';
 import {factDedupeKey,validateForwardExperimentRegistration,validateStagedItem} from '../lib/remote-ops/staging-validator';
+import {accessionFromSecArchiveUrl,briefingFactIdFor,isQuarantined,quarantineKeyFor} from '../lib/remote-ops/evidence-integrity';
 import {
  evaluateCollectionHealth,
  type EvidenceChatOperationsSummary,
@@ -193,9 +194,21 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  const settings=await ctx.db.query('operationsSettings').withIndex('by_owner',q=>q.eq('owner',owner)).first();
  const jobs=await ctx.db.query('researchJobs').withIndex('by_owner',q=>q.eq('owner',owner)).collect();
  const recentRuns=privateRead?await ctx.db.query('researchJobRuns').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25):[];
- const staged=privateRead?await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50):[];
+ const stagedRaw=privateRead?await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50):[];
+ // Sprint G9.2: quarantined evidence never reaches research lists, briefings or counts; it stays listed separately for audit.
+ const staged=stagedRaw.filter(s=>!isQuarantined(s));
+ const quarantineRows=privateRead?await ctx.db.query('evidenceQuarantines').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50):[];
  const pendingCount=staged.filter(s=>s.validationStatus==='pending_verification').length;
- const latestBriefing=privateRead?await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').first():null;
+ // The latest briefing's date and generation time are public status (no content); its content stays owner-only.
+ const latestBriefingDoc=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').first();
+ const latestBriefing=privateRead?latestBriefingDoc:null;
+ const withheldFactReasons=new Map<string,string>();
+ if(latestBriefing){
+  for(const q of quarantineRows){
+   if(!q.affectedBriefingIds.some(id=>id===latestBriefing._id))continue;
+   for(const factId of q.affectedBriefingFactIds??[])withheldFactReasons.set(factId,`${q.reasonCode}: ${q.reason}`);
+  }
+ }
  const spend=privateRead?await computeSpend(ctx,owner,now):ZERO_SPEND;
 
  const effectiveJobs=jobs.length>0?jobs:DEFAULT_RESEARCH_JOBS.map(d=>({
@@ -226,6 +239,10 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  const mktJob=effectiveJobs.find(j=>j.jobKey==='market_data_collect')??null;
  const agentJob=effectiveJobs.find(j=>j.jobKey==='news_discovery_agent')??null;
  const marketObsRows=await ctx.db.query('marketObservations').withIndex('by_owner',q=>q.eq('owner',owner)).take(500);
+ const latestMarketEventAt=marketObsRows.reduce<number|null>((m,r)=>m===null||r.eventAt>m?r.eventAt:m,null);
+ // Source observation time for SEC jobs: publication time of the newest non-quarantined promoted filing (public metadata only).
+ const secSourceRows=await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(50);
+ const latestSecPublishedAt=secSourceRows.filter(r=>!isQuarantined(r)&&r.validationStatus==='promoted'&&r.publishedAt!==null).reduce<number|null>((m,r)=>m===null||(r.publishedAt as number)>m?(r.publishedAt as number):m,null);
  const forwardRows=privateRead?await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').take(25):[];
  const graphCheckpoint=await ctx.db
   .query('graphProjectionCheckpoints')
@@ -543,9 +560,13 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   monthlyEstimatedCostGbp:spend.monthlyEstimated,
   monthlyActualCostGbp:spend.monthlyActual,
   pendingVerificationCount:pendingCount,
-  latestBriefingDate:latestBriefing?.briefingDate??null,
-  latestBriefingGeneratedAt:latestBriefing?.generatedAt??null,
-  jobs:privateRead?effectiveJobs:effectiveJobs.map(j=>({...j,estimatedCostGbpTotal:0,actualCostGbpTotal:null,cursor:null})),
+  latestBriefingDate:latestBriefingDoc?.briefingDate??null,
+  latestBriefingGeneratedAt:latestBriefingDoc?.generatedAt??null,
+  schedulerEnv:readSchedulerEnv(),
+  jobs:(privateRead?effectiveJobs:effectiveJobs.map(j=>({...j,estimatedCostGbpTotal:0,actualCostGbpTotal:null,cursor:null}))).map(j=>({
+   ...j,
+   latestSourceObservationAt:j.jobKey==='market_data_collect'?latestMarketEventAt:j.jobKey==='daily_intelligence_briefing'?latestBriefingDoc?.generatedAt??null:(j.jobKey==='sec_filings_collect'||j.jobKey==='news_discovery_agent')?latestSecPublishedAt:null,
+  })),
   providers,
   environmentAudit,
   graphProjection,
@@ -678,6 +699,18 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   missingEvidenceResolution,
   forwardResearchEvents:forwardEventsFormatted,
   recentRuns:formattedRecentRuns,
+  quarantinedEvidence:quarantineRows.map(q=>({
+   quarantineKey:q.quarantineKey,
+   ticker:q.ticker,
+   sourceUrl:q.sourceUrl,
+   stagingExternalId:q.stagingExternalId,
+   reasonCode:q.reasonCode,
+   reason:q.reason,
+   quarantinedAt:q.quarantinedAt,
+   replacedAt:q.replacedAt,
+   evidenceCount:q.evidenceIds.length,
+   affectedBriefingCount:q.affectedBriefingIds.length,
+  })),
   stagedItems:staged.slice(0,15).map(s=>({
    externalId:s.externalId,
    runId:s.runId,
@@ -703,7 +736,10 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    briefingDate:latestBriefing.briefingDate,
    generatedAt:latestBriefing.generatedAt,
    timezone:latestBriefing.timezone,
-   confirmedFacts:JSON.parse(latestBriefing.confirmedFactsJson),
+   // Sprint G9.2: the stored briefing is a historical record and is never rewritten; facts later quarantined are
+   // withheld from display and listed with their reason instead.
+   confirmedFacts:(JSON.parse(latestBriefing.confirmedFactsJson) as Array<{id:string}>).filter(f=>!withheldFactReasons.has(f.id)),
+   withheldFacts:[...withheldFactReasons].filter(([id])=>(JSON.parse(latestBriefing.confirmedFactsJson) as Array<{id:string}>).some(f=>f.id===id)).map(([id,reason])=>({id,reason})),
    researchInterpretation:JSON.parse(latestBriefing.researchInterpretationJson),
    riskChanges:JSON.parse(latestBriefing.riskChangesJson),
    incompleteEvidence:JSON.parse(latestBriefing.incompleteEvidenceJson),
@@ -905,6 +941,7 @@ export const registerForwardStudy=mutation({
   const items=args.stagedExternalIds.map(id=>{
    const row=byExt.get(id);
    if(!row)throw new Error(`Unknown staged evidence item: ${id}`);
+   if(isQuarantined(row))throw new Error(`Staged evidence item is quarantined: ${id}`);
    const meta=row.untrustedAgentMetadataJson?JSON.parse(row.untrustedAgentMetadataJson) as {agentReportedReceivedAt:number}:undefined;
    return {
     externalId:row.externalId,
@@ -953,9 +990,10 @@ export const getStagingStateInternal=internalQuery({
    monthlyCostCeilingGbp:settings?.monthlyCostCeilingGbp??DEFAULT_MONTHLY_CEILING_GBP,
    spend,
    rateWindow,
-   seenUrls:staged.map(s=>s.sourceUrl),
-   seenContentHashes:staged.map(s=>s.contentSha256),
-   seenFactKeys:evidence.map(e=>factDedupeKey({entity:e.symbol,metric:e.metric,period:e.period,value:e.value,unit:e.unit})),
+   // Quarantined rows are excluded so a corrected re-ingestion of the same filing URL is not treated as a duplicate.
+   seenUrls:staged.filter(s=>!isQuarantined(s)).map(s=>s.sourceUrl),
+   seenContentHashes:staged.filter(s=>!isQuarantined(s)).map(s=>s.contentSha256),
+   seenFactKeys:evidence.filter(e=>!isQuarantined(e)).map(e=>factDedupeKey({entity:e.symbol,metric:e.metric,period:e.period,value:e.value,unit:e.unit})),
    existingBriefingDates:briefings.map(b=>b.briefingDate),
   };
  },
@@ -1162,9 +1200,10 @@ export const submitStagedResearchInternal=internalMutation({
 
   const priorStaged=await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
   const priorEvidence=await ctx.db.query('evidence').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
-  const seenUrls=new Set(priorStaged.map(s=>s.sourceUrl));
-  const seenContentHashes=new Set(priorStaged.map(s=>s.contentSha256));
-  const seenFactKeys=new Set(priorEvidence.map(e=>factDedupeKey({entity:e.symbol,metric:e.metric,period:e.period,value:e.value,unit:e.unit})));
+  const activeStaged=priorStaged.filter(s=>!isQuarantined(s));
+  const seenUrls=new Set(activeStaged.map(s=>s.sourceUrl));
+  const seenContentHashes=new Set(activeStaged.map(s=>s.contentSha256));
+  const seenFactKeys=new Set(priorEvidence.filter(e=>!isQuarantined(e)).map(e=>factDedupeKey({entity:e.symbol,metric:e.metric,period:e.period,value:e.value,unit:e.unit})));
 
   let evidenceStaged=0;
   let evidencePromoted=0;
@@ -1210,7 +1249,7 @@ export const submitStagedResearchInternal=internalMutation({
     quarantinedCount+=1;
    }
 
-   await ctx.db.insert('researchStagingItems',{
+   const newStagingId=await ctx.db.insert('researchStagingItems',{
     owner:args.owner,
     externalId:validated.externalId,
     runId:submission.runId,
@@ -1240,6 +1279,12 @@ export const submitStagedResearchInternal=internalMutation({
     executionAuthority:'none',
     version:REMOTE_OPS_VERSION,
    });
+   // Sprint G9.2: explicit, auditable replacement link for any open quarantine on this filing URL.
+   const openQuarantines=(await ctx.db.query('evidenceQuarantines').withIndex('by_url',q=>q.eq('owner',args.owner).eq('sourceUrl',validated.canonicalUrl)).collect()).filter(q=>q.replacementStagingItemId===null);
+   for(const q of openQuarantines){
+    await ctx.db.patch(q._id,{replacementStagingItemId:newStagingId,replacedAt:now});
+    await ctx.db.insert('audit',{owner:args.owner,action:'evidence_quarantine_replaced',recordId:q._id,detail:`replacement=${newStagingId}; status=${validated.validationStatus}; url=${validated.canonicalUrl}`,at:now});
+   }
    evidenceStaged+=1;
   }
 
@@ -1816,5 +1861,86 @@ export const storeForwardResearchEventInternal=internalMutation({
    evidenceSha256:event.evidenceSha256,
    executionAuthority:'none' as const,
   };
+ },
+});
+
+/** Sprint G9.2: the cron gate value actually configured on this Convex deployment (read, never inferred from job rows). */
+function readSchedulerEnv():'remote'|'local'|'disabled'|'unset'{
+ const raw=(process.env.RESEARCH_SCHEDULER_ENV??'').trim();
+ return raw==='remote'||raw==='local'||raw==='disabled'?raw:'unset';
+}
+
+/**
+ * Sprint G9.2: places promoted evidence proven invalid into an append-only quarantine ledger.
+ * Never deletes or rewrites the original staging, evidence, briefing or forward-event records: it adds quarantine
+ * markers that every research consumer filters on, records which briefings and frozen forward events cited the
+ * evidence, and leaves the filing URL eligible for a corrected re-ingestion that is linked back as the replacement.
+ * Internal only (CLI/admin); idempotent per staging item. `dryRun` reports the impact without writing.
+ */
+export const quarantineStagedEvidenceInternal=internalMutation({
+ args:{
+  owner:v.string(),
+  quarantinedBy:v.string(),
+  dryRun:v.optional(v.boolean()),
+  items:v.array(v.object({
+   stagingItemId:v.id('researchStagingItems'),
+   reasonCode:v.string(),
+   reason:v.string(),
+   claimedJson:v.string(),
+   expectedJson:v.string(),
+  })),
+ },
+ handler:async(ctx,args)=>{
+  validOwner(args.owner);
+  const now=Date.now();
+  const briefings=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const forwardEvents=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const report:Array<Record<string,unknown>>=[];
+  for(const item of args.items){
+   const doc=await ctx.db.get(item.stagingItemId);
+   if(!doc||doc.owner!==args.owner)throw new Error(`Staging item ${item.stagingItemId} not found for this owner`);
+   const key=quarantineKeyFor(doc.externalId);
+   const existing=await ctx.db.query('evidenceQuarantines').withIndex('by_key',q=>q.eq('owner',args.owner).eq('quarantineKey',key)).first();
+   if(existing){report.push({stagingItemId:doc._id,status:'already_quarantined',quarantineId:existing._id});continue;}
+   const claims=JSON.parse(doc.claimsJson) as Array<{entity?:string}>;
+   const ticker=(claims[0]?.entity??doc.entities[0]??'UNKNOWN').toUpperCase();
+   const citedAccession=/\((\d{10}-\d{2}-\d{6})\)/.exec(doc.title)?.[1]??accessionFromSecArchiveUrl(doc.sourceUrl);
+   const tokens=[doc._id as string,doc.externalId,...doc.promotedEvidenceIds.map(id=>id as string),...(citedAccession?[briefingFactIdFor(ticker,citedAccession)]:[])];
+   const hit=(text:string)=>tokens.some(t=>text.includes(t));
+   const affectedBriefings=briefings.filter(b=>hit(b.confirmedFactsJson+b.researchInterpretationJson+b.riskChangesJson+b.incompleteEvidenceJson));
+   const affectedForward=forwardEvents.filter(e=>hit(e.evidenceJson));
+   const affectedFactIds=[...new Set(affectedBriefings.flatMap(b=>(JSON.parse(b.confirmedFactsJson) as Array<{id:string}>).filter(f=>hit(JSON.stringify(f))).map(f=>f.id)))];
+   const entry={stagingItemId:doc._id,ticker,sourceUrl:doc.sourceUrl,evidenceIds:doc.promotedEvidenceIds,affectedBriefings:affectedBriefings.map(b=>({id:b._id,date:b.briefingDate})),affectedForwardEvents:affectedForward.map(e=>({id:e._id,eventKey:e.eventKey})),affectedBriefingFactIds:affectedFactIds,reasonCode:item.reasonCode};
+   if(args.dryRun){report.push({...entry,status:'would_quarantine'});continue;}
+   const quarantineId=await ctx.db.insert('evidenceQuarantines',{
+    owner:args.owner,
+    quarantineKey:key,
+    stagingItemId:doc._id,
+    stagingExternalId:doc.externalId,
+    sourceUrl:doc.sourceUrl,
+    ticker,
+    evidenceIds:doc.promotedEvidenceIds,
+    affectedBriefingIds:affectedBriefings.map(b=>b._id),
+    affectedForwardEventIds:affectedForward.map(e=>e._id),
+    affectedBriefingFactIds:affectedFactIds,
+    reasonCode:item.reasonCode,
+    reason:item.reason,
+    claimedJson:item.claimedJson,
+    expectedJson:item.expectedJson,
+    quarantinedAt:now,
+    quarantinedBy:args.quarantinedBy,
+    replacementStagingItemId:null,
+    replacedAt:null,
+    executionAuthority:'none',
+   });
+   await ctx.db.patch(doc._id,{quarantinedAt:now,quarantineId});
+   for(const evId of doc.promotedEvidenceIds){
+    const ev=await ctx.db.get(evId);
+    if(ev&&ev.owner===args.owner&&!isQuarantined(ev))await ctx.db.patch(evId,{quarantinedAt:now,quarantineId});
+   }
+   await ctx.db.insert('audit',{owner:args.owner,action:'evidence_quarantined',recordId:quarantineId,detail:`staging=${doc._id}; ticker=${ticker}; reason=${item.reasonCode}; evidence=${doc.promotedEvidenceIds.length}; briefings=${affectedBriefings.length}; forwardEvents=${affectedForward.length}; by=${args.quarantinedBy}`,at:now});
+   report.push({...entry,status:'quarantined',quarantineId});
+  }
+  return {dryRun:Boolean(args.dryRun),evaluatedAt:now,report,executionAuthority:'none' as const};
  },
 });

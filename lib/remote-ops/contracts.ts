@@ -242,4 +242,6 @@ export type MorningBriefingRecord={
  modelVersion:string|null;
  executionAuthority:'none';
  version:typeof REMOTE_OPS_VERSION;
+ /** Sprint G9.2: facts of this stored briefing later quarantined; withheld from display, record itself unchanged. */
+ withheldFacts?:Array<{id:string;reason:string}>;
 };

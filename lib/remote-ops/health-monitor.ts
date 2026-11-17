@@ -84,6 +84,19 @@ export type JobHealthSummary={
  conditionalSkipLastRun:boolean;
  lastOutcome:string|null;
  lastErrorCode:string|null;
+ /** Sprint G9.2: newest upstream observation this job has stored (market close, filing publication, briefing generation). */
+ latestSourceObservationAt:number|null;
+ /** Sprint G9.2: false when the cron gate is disabled, so nextRunAt is not a real scheduled execution. */
+ scheduled:boolean;
+ /** Sprint G9.2: the stored next run time has passed without a run. */
+ nextRunOverdue:boolean;
+};
+
+/** Sprint G9.2: honest status of external (non-SEC) financial-news ingestion, separate from SEC filing discovery. */
+export type ExternalNewsIngestionStatus={
+ status:'NOT_IMPLEMENTED'|'DISABLED'|'HEALTHY';
+ label:string;
+ detail:string;
 };
 
 export type OperationalLayerStatus={
@@ -92,6 +105,11 @@ export type OperationalLayerStatus={
   label:string;
   detail:string;
   lastTickAt:number|null;
+  /** Sprint G9.2: RESEARCH_SCHEDULER_ENV as configured on the backend ('unset' when not reported). */
+  schedulerEnv:'remote'|'local'|'disabled'|'unset';
+  /** Sprint G9.2: the cron gate is open but no job has run within the expected tick window. */
+  overdue:boolean;
+  nextExpectedTickAt:number|null;
  };
  collector:{
   status:'working'|'partial'|'failed';
@@ -121,6 +139,8 @@ export type OperationalLayerStatus={
   ukDate:string;
   ukRegime:'GMT'|'BST';
   generatedAt:number|null;
+  /** Sprint G9.2: date of the newest stored briefing (never today's date when none exists). */
+  latestBriefingDate:string|null;
  };
 };
 
@@ -293,7 +313,13 @@ export type CollectionHealthReport={
  graphProjection?:GraphProjectionOperationsSummary;
  recentRuns?:OperationRunAuditItem[];
  evidenceChat?:EvidenceChatOperationsSummary;
+ externalNewsIngestion:ExternalNewsIngestionStatus;
 };
+
+/** Convex cron cadence for the research cycle (convex/crons.ts). */
+export const SCHEDULER_TICK_INTERVAL_MS=15*60_000;
+/** The scheduler is overdue when no job has run for three cron intervals. */
+export const SCHEDULER_OVERDUE_AFTER_MS=3*SCHEDULER_TICK_INTERVAL_MS;
 
 const CREDENTIAL_ERROR_CODES=new Set([
  'credentials_revoked','invalid_credentials','environment_mismatch','missing_permissions','unauthorized','401','403','expired_token',
@@ -312,6 +338,10 @@ export function evaluateCollectionHealth(input:{
  pendingVerificationCount:number;
  latestBriefingDate?:string|null;
  latestBriefingGeneratedAt?:number|null;
+ /** Sprint G9.2: RESEARCH_SCHEDULER_ENV read on the backend. Omitted by legacy callers (treated as 'unset'). */
+ schedulerEnv?:'remote'|'local'|'disabled'|'unset';
+ /** Sprint G9.2: whether any external (non-SEC) financial-news collector is wired. None is today. */
+ externalNewsCollectorImplemented?:boolean;
  jobs:Array<{
   jobKey:string;
   name?:string;
@@ -334,6 +364,7 @@ export function evaluateCollectionHealth(input:{
   lastConditionalSkip?:boolean;
   lastOutcome:string|null;
   lastErrorCode:string|null;
+  latestSourceObservationAt?:number|null;
  }>;
  providers?:ProviderCredentialState[];
  executionPaths?:HostedExecutionPathItem[];
@@ -344,6 +375,8 @@ export function evaluateCollectionHealth(input:{
 }):CollectionHealthReport{
  const {now}=input;
  const londonNow=getLondonTimeParts(now);
+ const schedulerEnv=input.schedulerEnv??'unset';
+ const cronGateOpen=input.systemEnabled&&input.activeEnvironment!=='disabled'&&schedulerEnv!=='disabled';
  const alerts:HealthMonitorAlert[]=[];
 
  if(!input.systemEnabled||input.activeEnvironment==='disabled'){
@@ -457,10 +490,12 @@ export function evaluateCollectionHealth(input:{
 
   return {
    jobKey:j.jobKey,
-   name:j.name??def?.name??j.jobKey,
+   // Sprint G9.2: the "news" agent only discovers SEC filings; never present it as general financial-news collection.
+   name:j.jobKey==='news_discovery_agent'?'SEC Filing Discovery Agent (deterministic XBRL; external news not implemented)':(j.name??def?.name??j.jobKey),
    purpose:j.purpose??def?.purpose??'Scheduled research job',
    category,
    usesAiModel,
+   // `enabled` keeps the owner's job toggle semantics; `scheduled` (below) reports whether the cron will actually run it.
    enabled:j.enabled&&input.systemEnabled&&input.activeEnvironment!=='disabled',
    environment:j.environment??(input.activeEnvironment==='local'?'local':'remote'),
    pausedReason:j.pausedReason??(usesAiModel&&(dailyExceeded||monthlyExceeded)?'budget_exceeded':null),
@@ -480,6 +515,9 @@ export function evaluateCollectionHealth(input:{
    conditionalSkipLastRun:j.lastConditionalSkip??false,
    lastOutcome:j.lastOutcome,
    lastErrorCode:j.lastErrorCode,
+   latestSourceObservationAt:j.latestSourceObservationAt??null,
+   scheduled:j.enabled&&cronGateOpen,
+   nextRunOverdue:j.nextRunAt<now&&(j.lastRunAt===null||j.lastRunAt<j.nextRunAt),
   };
  });
 
@@ -514,7 +552,11 @@ export function evaluateCollectionHealth(input:{
  // 5-layer operational distinction (Phase 003.2 Section 4):
  // A healthy scheduler does NOT automatically imply healthy data ingestion.
  const lastTickAt=jobs.reduce<number|null>((acc,j)=>j.lastRunAt!==null&&(acc===null||j.lastRunAt>acc)?j.lastRunAt:acc,null);
- const schedulerWorking=input.systemEnabled&&input.activeEnvironment!=='disabled';
+ // Sprint G9.2: "working" requires an open cron gate AND an observed recent tick. Enabled job rows alone prove nothing.
+ const schedulerOverdue=cronGateOpen&&(lastTickAt===null||now-lastTickAt>SCHEDULER_OVERDUE_AFTER_MS);
+ const schedulerWorking=cronGateOpen&&!schedulerOverdue;
+ const nextExpectedTickAt=cronGateOpen?(lastTickAt===null?now:lastTickAt+SCHEDULER_TICK_INTERVAL_MS):null;
+ const lastTickIso=lastTickAt===null?'never':new Date(lastTickAt).toISOString();
  const healthyJobsCount=jobs.filter(j=>!j.lastErrorCode&&j.pausedReason===null&&j.lastSuccessAt!==null).length;
  const failedJobsCount=jobs.filter(j=>Boolean(j.lastErrorCode)||j.pausedReason!==null).length;
  const collectorStatus:OperationalLayerStatus['collector']['status']=
@@ -548,12 +590,25 @@ export function evaluateCollectionHealth(input:{
 
  const operationalLayers:OperationalLayerStatus={
   scheduler:{
-   status:!schedulerWorking?'paused':lastTickAt!==null?'working':'degraded',
-   label:!schedulerWorking?'Paused':lastTickAt!==null?'Scheduler working':'Awaiting first tick',
-   detail:!schedulerWorking
+   status:!cronGateOpen?'paused':schedulerOverdue?'degraded':'working',
+   label:!input.systemEnabled||input.activeEnvironment==='disabled'
+    ?'Paused (operations disabled)'
+    :schedulerEnv==='disabled'
+     ?'Scheduler disabled (RESEARCH_SCHEDULER_ENV=disabled)'
+     :schedulerOverdue
+      ?(lastTickAt===null?'Scheduler overdue (no run recorded)':'Scheduler overdue')
+      :'Scheduler working',
+   detail:!input.systemEnabled||input.activeEnvironment==='disabled'
     ?'Central operations disabled.'
-    :`Convex cloud cron (${input.activeEnvironment}) active; healthy scheduler does not imply all upstream sources succeeded.`,
+    :schedulerEnv==='disabled'
+     ?`Convex cron cycles exit without collecting (RESEARCH_SCHEDULER_ENV=disabled). No automatic SEC, market or briefing run will occur; last run ${lastTickIso}.`
+     :schedulerOverdue
+      ?`No research job has run for more than ${SCHEDULER_OVERDUE_AFTER_MS/60_000} minutes (last run ${lastTickIso}); the cron is configured but not executing.`
+      :`Convex cloud cron (${schedulerEnv==='unset'?input.activeEnvironment:schedulerEnv}) last ticked ${lastTickIso}; a working scheduler does not imply every upstream source succeeded.`,
    lastTickAt,
+   schedulerEnv,
+   overdue:schedulerOverdue,
+   nextExpectedTickAt,
   },
   collector:{
    status:collectorStatus,
@@ -595,6 +650,7 @@ export function evaluateCollectionHealth(input:{
    ukDate:londonNow.dateKey,
    ukRegime:londonNow.regime,
    generatedAt:briefingGeneratedAt,
+   latestBriefingDate:input.latestBriefingDate??null,
   },
  };
 
@@ -604,7 +660,9 @@ export function evaluateCollectionHealth(input:{
    label:'Convex Cloud Scheduler & SEC/FX Collectors',
    deployment:'cloud_hosted',
    status:schedulerWorking?'active':'standby',
-   detail:'Hosted Convex scheduler: 15-minute research cycle and the weekday 07:30 Europe/London briefing schedule.',
+   detail:schedulerWorking
+    ?'Hosted Convex scheduler: 15-minute research cycle and the weekday 07:30 Europe/London briefing schedule.'
+    :`Hosted Convex scheduler not executing (${schedulerEnv==='disabled'?'RESEARCH_SCHEDULER_ENV=disabled':schedulerOverdue?'overdue':'operations disabled'}).`,
   },
   {
    id:'python_remote_research_cli',
@@ -772,5 +830,8 @@ export function evaluateCollectionHealth(input:{
   ...(input.graphProjection?{graphProjection:input.graphProjection}:{}),
   ...(input.recentRuns?{recentRuns:input.recentRuns}:{}),
   ...(input.evidenceChat?{evidenceChat:input.evidenceChat}:{}),
+  externalNewsIngestion:input.externalNewsCollectorImplemented
+   ?{status:cronGateOpen?'HEALTHY':'DISABLED',label:cronGateOpen?'External news ingestion healthy':'External news ingestion disabled',detail:'External financial-news collector wired.'}
+   :{status:'NOT_IMPLEMENTED',label:'External financial-news ingestion: NOT IMPLEMENTED',detail:'No external news collector exists. The only discovery agent reads SEC EDGAR filings and extracts XBRL facts deterministically; it never collects or summarises general financial news.'},
  };
 }

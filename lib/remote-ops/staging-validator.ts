@@ -6,6 +6,7 @@ import {
  type StagedClaim,
  type StagingValidationStatus,
 } from './contracts';
+import {assessSecFilingClaimIntegrity,isSecArchiveUrl} from './evidence-integrity';
 
 const SHA256_K=new Uint32Array([
  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -350,7 +351,22 @@ export function validateStagedItem(
     claimPrimaryUrl=parsedClaimPrimary.canonicalUrl;
    }
   }
-  const verifiedPrimary=Boolean(claimPrimaryUrl)&&claim.isPrimarySource;
+  // Sprint G9.2: SEC filing integrity. A claim attached to an EDGAR filing must cite that filing's own accession, come
+  // from a periodic report, and describe that filing's current reporting period (never a prior-year comparative column).
+  const secUrl=isSecArchiveUrl(claimPrimaryUrl)?claimPrimaryUrl:isSecArchiveUrl(canonicalUrl)?canonicalUrl:null;
+  let secIntegrityHold=false;
+  if(secUrl){
+   const verdict=assessSecFilingClaimIntegrity({sourceUrl:secUrl,title:item.title,text:item.text,claim:{period:claim.period,excerpt:claim.excerpt},publishedAtMs:item.publishedAt});
+   if(verdict.status==='reject'){
+    reasons.push(`rejected_${verdict.reasonCode}:${claim.id}`);
+    continue;
+   }
+   if(verdict.status==='pending'){
+    reasons.push(`pending_${verdict.reasonCode}:${claim.id}`);
+    secIntegrityHold=true;
+   }
+  }
+  const verifiedPrimary=Boolean(claimPrimaryUrl)&&claim.isPrimarySource&&!secIntegrityHold;
   const normalizedClaim:StagedClaim={
    ...claim,
    entity:ticker,

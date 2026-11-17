@@ -6,6 +6,7 @@ import {
  DEFAULT_RESEARCH_JOBS,
 } from '../lib/remote-ops/contracts';
 import {evaluateLondonMorningBriefWindow} from '../lib/remote-ops/morning-briefing';
+import {assessSecFilingClaimIntegrity} from '../lib/remote-ops/evidence-integrity';
 import {runNewsResearchAgentWorkflow,type CandidateSourceDocument} from '../lib/remote-ops/news-agent';
 import {
  MARKET_DATA_SYMBOLS,
@@ -484,7 +485,12 @@ export const runScheduledCloudCycle=internalAction({
        userAgent,
        now,
       });
-      if(item){
+      // Sprint G9.2: a discovered fact reaches the briefing only if it passes the same filing-integrity rule that gates
+      // evidence promotion (own accession, periodic report, current reporting period).
+      const integrity=item?assessSecFilingClaimIntegrity({sourceUrl:item.candidate.url,title:item.candidate.title,text:item.candidate.text,claim:{period:item.period},publishedAtMs:item.candidate.publishedAt??null}):null;
+      if(item&&integrity?.status!=='ok'){
+       candidates.push(item.candidate);
+      }else if(item){
        candidates.push(item.candidate);
        discoveredFacts.push({
         id:`fact-${u.ticker}-${item.accession}`,
