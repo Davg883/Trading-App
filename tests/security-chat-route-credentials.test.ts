@@ -18,6 +18,7 @@ let calls:Array<{path:string;body:Record<string,unknown>}>=[];
 let reply:(path:string,body:Record<string,unknown>)=>Response=()=>Response.json({},{status:404});
 let n=0;
 beforeEach(()=>{
+ vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY','pk_test_unit_only');vi.stubEnv('CLERK_SECRET_KEY','sk_test_unit_only'); // G9.3.3: the route reads a Clerk session only when Clerk is configured
  h.generate.mockReset();h.get.mockReset();calls=[];h.session=null;
  vi.stubEnv('GEMINI_API_KEY','');vi.stubEnv('GOOGLE_API_KEY','');vi.stubEnv('GOOGLE_GEMINI_API_KEY','');vi.stubEnv('GOOGLE_GENERATIVE_AI_API_KEY','');
  vi.stubEnv('NEXT_PUBLIC_CONVEX_URL','https://example-deployment-123.convex.cloud');vi.stubEnv('EVIDENCE_CHAT_GATEWAY_SECRET',G);vi.stubEnv('TYPEDB_HTTP_ADDRESS','');

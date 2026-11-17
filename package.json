@@ -29,7 +29,8 @@
     "eval:live": "vitest run tests/live/live-evaluation.test.ts",
     "convex:fingerprint": "node scripts/write-convex-fingerprint.mjs",
     "release:check": "node scripts/release-fingerprint-check.mjs",
-    "test:serial": "vitest run --no-file-parallelism"
+    "test:serial": "vitest run --no-file-parallelism",
+    "check:server-bundle": "node scripts/check-server-bundle-client-refs.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.22",

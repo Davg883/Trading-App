@@ -28,7 +28,8 @@ import {
   type GatewayResult,
 } from '../../../../lib/graph/evidence-chat-gateway';
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
-import { validateClerkConvexJwtClaims } from '../../../../lib/clerk-convex-auth';
+// Server-safe claim validation. Never import auth helpers from the `'use client'` module lib/clerk-convex-auth here.
+import { checkServerClerkToken } from '../../../../lib/auth/clerk-jwt-claims';
 
 /** Must match `SHARED_CHAT_TURNS_PER_MINUTE` in convex/evidenceChat.ts. */
 const SHARED_CHAT_TURNS_PER_MINUTE = 10;
@@ -56,11 +57,25 @@ const chatRequestSchema = z
   })
   .strict();
 
-async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
+type ResolvedCaller = {
   callerId: string;
   convexToken: string | null;
-  invalidTokenClaims?: boolean;
-} | null> {
+  /** G9.3.3: set when Clerk returned a token that fails claim validation or has expired. Answered with 401. */
+  invalidToken?: 'invalid_claims' | 'expired';
+};
+
+/** Same predicate as proxy.ts: without both Clerk keys there is no session layer, so no session can exist. */
+function clerkConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
+}
+
+/**
+ * Resolves the signed-in caller. Returns null when there is no session (including when Clerk is not configured on this
+ * server, so acceptance-nonce requests still work without Clerk). Throws only on a genuine internal failure — Clerk is
+ * configured but `auth()` or claim validation fails unexpectedly — which the handlers answer with a generic 500, never
+ * with 401. Swallowing such failures as 401 previously hid a server-side defect from every signed-in user.
+ */
+async function resolveAuthenticatedCaller(req: NextRequest): Promise<ResolvedCaller | null> {
   // Test-runner only. The previous localhost exception trusted the request's Host header on any
   // non-production build, so it has been removed.
   if (process.env.NODE_ENV === 'test' && !process.env.VERCEL_ENV) {
@@ -69,38 +84,66 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<{
       return { callerId: testCaller.trim(), convexToken: null };
     }
   }
-  try {
-    const session = await auth();
-    if (session?.userId) {
-      const templated = await session.getToken({ template: 'convex' }).catch(() => null);
-      if (templated && !validateClerkConvexJwtClaims(templated)) {
-        return { callerId: session.userId, convexToken: null, invalidTokenClaims: true };
-      }
-      const token = templated ?? (await session.getToken().catch(() => null));
-      if (token && !validateClerkConvexJwtClaims(token)) {
-        return { callerId: session.userId, convexToken: null, invalidTokenClaims: true };
-      }
-      return { callerId: session.userId, convexToken: token };
-    }
-  } catch {
-    // Fall through to 401
+  if (!clerkConfigured()) return null;
+  const session = await auth();
+  if (!session?.userId) return null;
+  const templated = await session.getToken({ template: 'convex' }).catch(() => null);
+  if (templated) {
+    const check = checkServerClerkToken(templated);
+    if (check !== 'valid') return { callerId: session.userId, convexToken: null, invalidToken: check };
   }
-  return null;
+  const token = templated ?? (await session.getToken().catch(() => null));
+  if (token) {
+    const check = checkServerClerkToken(token);
+    if (check !== 'valid') return { callerId: session.userId, convexToken: null, invalidToken: check };
+  }
+  return { callerId: session.userId, convexToken: token };
+}
+
+/** Safe server-side diagnostics: error class and a JWT-redacted, truncated message only. Never a token or stack. */
+function logInternalError(where: string, err: unknown) {
+  const name = err instanceof Error ? err.name : typeof err;
+  const message = (err instanceof Error ? err.message : String(err))
+    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted-jwt]')
+    .replace(/(sk|pk)_(test|live)_[A-Za-z0-9]+/g, '[redacted-key]')
+    .slice(0, 200);
+  console.error(`[graph/chat] ${where} internal error: ${name}: ${message}`);
+}
+
+function internalError() {
+  return NextResponse.json(
+    {
+      error: 'Evidence-locked research assistant request failed',
+      code: 'internal_error',
+      executionAuthority: 'none',
+    },
+    { status: 500, headers: NO_STORE_HEADERS },
+  );
 }
 
 export async function GET(req: NextRequest) {
+  try {
+    return await handleGet(req);
+  } catch (err) {
+    logInternalError('GET', err);
+    return internalError();
+  }
+}
+
+async function handleGet(req: NextRequest) {
   const caller = await resolveAuthenticatedCaller(req);
   if (!caller) {
     return NextResponse.json(
       {
         error: 'Authentication required to access the Evidence-Locked Research Assistant.',
+        code: 'sign_in_required',
         executionAuthority: 'none',
       },
       { status: 401, headers: NO_STORE_HEADERS },
     );
   }
-  if (caller.invalidTokenClaims) {
-    return forbiddenIdentity();
+  if (caller.invalidToken) {
+    return invalidAuthentication(caller.invalidToken);
   }
 
   const url = new URL(req.url);
@@ -236,6 +279,25 @@ function unauthenticated() {
   );
 }
 
+/**
+ * G9.3.3: the session token Clerk issued failed claim validation (untrusted issuer, unauthorised `azp`/`aud`, missing
+ * application context, malformed) or has expired. That is invalid authentication, so 401 — not 403, which is reserved
+ * for an authenticated identity that lacks permission (for example an automated actor refused by the gateway).
+ */
+function invalidAuthentication(reason: 'invalid_claims' | 'expired') {
+  return NextResponse.json(
+    {
+      error:
+        reason === 'expired'
+          ? 'Your session token has expired. Sign in again to use the Evidence-Locked Research Assistant.'
+          : 'Your session token is not valid for this application. Sign in again to use the Evidence-Locked Research Assistant.',
+      code: reason === 'expired' ? 'token_expired' : 'invalid_token',
+      executionAuthority: 'none',
+    },
+    { status: 401, headers: NO_STORE_HEADERS },
+  );
+}
+
 function forbiddenIdentity() {
   return NextResponse.json(
     {
@@ -251,7 +313,14 @@ export async function POST(req: NextRequest) {
   // The acceptance token is a single-use bearer credential minted by the deployment administrator. It is the
   // only acceptance header this route reads: no request header or body field can name the owner of a turn.
   const acceptanceToken = req.headers.get('x-aci-acceptance-nonce')?.trim() || null;
-  let caller = await resolveAuthenticatedCaller(req);
+  let caller: ResolvedCaller | null;
+  try {
+    caller = await resolveAuthenticatedCaller(req);
+  } catch (err) {
+    // Nothing has been consumed or reserved yet, so there is nothing to roll back.
+    logInternalError('POST auth', err);
+    return internalError();
+  }
   if (!caller && !acceptanceToken) return unauthenticated();
   // Correction 3: a request authenticates EITHER with a signed-in session OR with an acceptance nonce, never
   // both. No legitimate workflow sends both, and silently preferring one would let a request run under a
@@ -267,8 +336,8 @@ export async function POST(req: NextRequest) {
       { status: 400, headers: NO_STORE_HEADERS },
     );
   }
-  if (caller?.invalidTokenClaims) {
-    return forbiddenIdentity();
+  if (caller?.invalidToken) {
+    return invalidAuthentication(caller.invalidToken);
   }
 
   let parsed: z.infer<typeof chatRequestSchema>;
@@ -604,7 +673,8 @@ export async function POST(req: NextRequest) {
       { ...turnResult, ...(auditId ? { auditId } : {}), auditRecorded },
       { status: 200, headers: NO_STORE_HEADERS },
     );
-  } catch {
+  } catch (err) {
+    logInternalError('POST', err);
     // The nonce was consumed but no turn could be produced: record the failure so the nonce is not left
     // ambiguous. The nonce stays unusable either way.
     if (acceptance) {

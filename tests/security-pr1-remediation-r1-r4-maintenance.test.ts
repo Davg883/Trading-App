@@ -103,6 +103,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY','pk_test_unit_only');vi.stubEnv('CLERK_SECRET_KEY','sk_test_unit_only'); // G9.3.3: the route reads a Clerk session only when Clerk is configured
   resetGeminiChatRateLimitsForTests();
   h.generate.mockReset();
   h.get.mockReset();
