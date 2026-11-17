@@ -1,0 +1,92 @@
+{
+  "stage": "G9.3.4 — authenticated Preview acceptance (chat history fails closed)",
+  "recordedAt": "2026-11-17T19:20:00Z",
+  "releaseCommit": "1aa1de11001bd4cc08ff80a1c24b6b44f72ddc5d",
+  "environment": {
+    "vercelDeploymentId": "dpl_25z9ZhNxgfTjDHYzabRnrosJ493C",
+    "branchAlias": "https://trading-app-git-verify-combined-864cea-david-grannums-projects.vercel.app (allowlisted)",
+    "perDeploymentUrl": "https://trading-7kkoc6jwr-david-grannums-projects.vercel.app (not allowlisted)",
+    "convex": "dev:prestigious-dragon-8, fingerprint 2231bc060038…",
+    "clerkIssuer": "https://complete-bunny-8662.clerk.accounts.dev"
+  },
+  "identities": {
+    "method": "Preview CLERK_SECRET_KEY streamed via vercel env pull into a Windows named pipe, held in memory only; JWKS key-id instance check; 120 s single-use sign-in tickets sealed (ECDH P-256 + AES-256-GCM) to a non-extractable key generated in the Preview page; ciphertext only left the broker; broker bound to 127.0.0.1 and shut down after use",
+    "instanceCheck": "backend key ids match complete-bunny-8662 public JWKS = true; key kind sk_test (development)",
+    "userA": {"id": "user_3MFNsDH0vp446qcYmYjjBmEWbUR", "externalId": "aci-g934-test-a", "created": "2026-11-17T19:09:19Z"},
+    "userB": {"id": "user_3MFNsJvzYKXxySpjfAN9HOqwAQT", "externalId": "aci-g934-test-b", "created": "2026-11-17T19:09:20Z"},
+    "label": "public_metadata.purpose = 'G9.3.4 chat history acceptance', temporary: true; no password",
+    "tickets": "4 minted (#1 for A expired unused — Clerk not loaded on /research-chat; #2 A on alias, #3 B on alias, #4 A on per-deployment URL consumed)",
+    "ownerCredentials": "not used"
+  },
+  "tokenClaims": {
+    "aliasSession": "iss complete-bunny-8662, azp = branch alias, no aud, lifetime 60 s",
+    "perDeploymentSession": "azp = https://trading-7kkoc6jwr-david-grannums-projects.vercel.app, no aud"
+  },
+  "nextHttpResults": [
+    {"id": "B1", "test": "User A, alias, GET /api/graph/chat", "status": 200, "body": "history length 0, executionAuthority none", "result": "PASS"},
+    {"id": "B2", "test": "User A, alias, POST {notAQuestion:true}", "status": 400, "body": "'Invalid research chat request payload'; issues question:invalid_type, unrecognized_keys", "result": "PASS"},
+    {"id": "B3", "test": "User B, alias, GET /api/graph/chat", "status": 200, "body": "history length 0", "result": "PASS"},
+    {"id": "B4", "test": "User A, per-deployment URL, GET /api/graph/chat (twice)", "status": 401, "body": "code invalid_token, 'Your session token is not valid for this application…', no history field, executionAuthority none", "result": "PASS", "previously": "200 with empty history (G9.3.3)"},
+    {"id": "B4b", "test": "User A, per-deployment URL, POST invalid payload", "status": 400, "result": "PASS"},
+    {"id": "B5", "test": "User A token held in page memory, used as Bearer 41 s after exp, signed out", "status": 401, "body": "GET and POST code sign_in_required (Clerk rejects the expired token before the route's own expiry check)", "result": "PASS"},
+    {"id": "B6", "test": "After sign-out (alias, after A and after B; per-deployment URL after A), GET and POST", "status": 401, "body": "code sign_in_required", "result": "PASS"},
+    {"id": "B8", "test": "Responses expose no Convex text", "result": "PASS", "detail": "no body matched Request ID / Uncaught / authz.ts / convex.cloud / deployment name / JWT / stack frame / 'Untrusted token' / 'authorized party' / 'Token expired'"}
+  ],
+  "convexDirectResults": [
+    {"caller": "User A alias token", "function": "evidenceChat:listChatHistory", "http": 200, "status": "success", "rows": 0},
+    {"caller": "User A alias token", "function": "brokers:viewer", "http": 200, "status": "success", "detail": "returns A's own subject"},
+    {"caller": "User B alias token", "function": "evidenceChat:listChatHistory", "http": 200, "status": "success", "rows": 0},
+    {"caller": "User B alias token", "function": "brokers:viewer", "http": 200, "detail": "contains B's subject, not A's (isolation)"},
+    {"caller": "User A per-deployment token", "function": "evidenceChat:listChatHistory", "http": 200, "status": "error", "error": "Uncaught Error: Untrusted token authorized party"},
+    {"caller": "User A expired token (41 s past exp)", "function": "evidenceChat:listChatHistory", "http": 401, "code": "InvalidAuthHeader", "message": "Could not validate token: Token expired N seconds ago"}
+  ],
+  "dependencyUnavailable": {
+    "id": "B9",
+    "method": "isolated test doubles (vitest, mocked ConvexHttpClient); the shared development deployment was not disrupted",
+    "suite": "tests/sprint-g9-3-4-chat-history-fail-closed.test.ts + tests/sprint-g9-3-4-convex-application-context.test.ts: 43/43 passed, exit 0",
+    "cases": ["network failure → 503", "timeout → 503", "Convex 5xx / unknown error → 503", "non-array result → 503", "token in failure message redacted → 503", "Convex URL not configured → 503", "signed in, no token → 503"],
+    "response": "503 {code: history_unavailable, executionAuthority: none}, Retry-After: 30",
+    "result": "PASS (test doubles; not exercised live)"
+  },
+  "runtimeLogs": {
+    "source": "Vercel dashboard Runtime Logs, past hour, read 2026-11-17T19:18Z",
+    "levels": "Info 21, Warning 0, Error 0, Fatal 0",
+    "testWindow": "19:09:27–19:13:05: Clerk development telemetry notices and [tls-profile] lines only, on /research-chat, /, /api/graph/chat, /settings/brokers (page render only)",
+    "graphChatInternalErrors": 0,
+    "serverClientBoundaryExceptions": 0,
+    "result": "PASS",
+    "screenshot": "docs/screenshots/g9-3-4-authenticated-runtime-logs.jpg"
+  },
+  "operational": {
+    "researchSchedulerEnv": "disabled",
+    "executionAuthority": "none",
+    "release": "COMPATIBLE, frontend 1aa1de1 on trading-7kkoc6jwr, backend prestigious-dragon-8 2231bc06 (19:17:47Z)",
+    "releaseGate": "RELEASE GATE PASS",
+    "allowedOrigins": "5, unchanged",
+    "modelCalls": "none — no valid question submitted; Preview has no Gemini key",
+    "budgetReservations": "none — chatBudgetReservations unchanged (71 rows)",
+    "brokerageOperations": "none — brokerConnections unchanged (2 rows)",
+    "result": "PASS"
+  },
+  "databaseComparison": {
+    "baseline": "backups/convex-dev/pre-g9-3-4-auth-20261117T190801Z",
+    "afterTests": "backups/convex-dev/post-g9-3-4-auth-20261117T191555Z",
+    "afterCleanup": "backups/convex-dev/post-g9-3-4-cleanup-20261117T191702Z",
+    "tables": 73,
+    "rows": 892,
+    "changedEntries": 0,
+    "referencesToTestUsers": 0,
+    "spotChecks": "chatBudgetReservations 71, evidenceChatAudit 47, acceptanceNonces 49, brokerConnections 2, audit 238 — all byte-identical",
+    "result": "PASS — unchanged"
+  },
+  "cleanup": {
+    "inventory": "Clerk: the two labelled users only; Convex: 0 rows reference either subject",
+    "preCheck": "both users matched id, external_id and purpose label",
+    "deleted": ["user_3MFNsDH0vp446qcYmYjjBmEWbUR: DELETE 200, then GET 404", "user_3MFNsJvzYKXxySpjfAN9HOqwAQT: DELETE 200, then GET 404"],
+    "remainingWithG934ExternalIds": 0,
+    "databaseAfterCleanup": "identical to baseline",
+    "result": "PASS"
+  },
+  "secrets": "No Clerk secret, ticket or session token printed, logged, persisted, screenshotted or committed; the held expired token was discarded from page memory after use",
+  "notPerformed": ["push", "code deploy", "Convex deploy", "environment-variable changes", "allowlist changes", "identity migration", "scheduler activation", "broker synchronisation", "SEC evidence changes", "trades", "Production changes"]
+}

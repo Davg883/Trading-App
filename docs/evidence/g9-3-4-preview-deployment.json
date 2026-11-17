@@ -1,0 +1,51 @@
+{
+  "stage": "G9.3.4 — authorised development Preview deployment and signed-out acceptance",
+  "recordedAt": "2026-11-17T18:42:00Z",
+  "releaseCommit": "1aa1de11001bd4cc08ff80a1c24b6b44f72ddc5d",
+  "preChecks": {
+    "branch": "verify/combined-release-candidate",
+    "head": "1aa1de11001bd4cc08ff80a1c24b6b44f72ddc5d",
+    "trackedChanges": 0,
+    "releaseCheck": {"exitCode": 0, "result": "RELEASE GATE PASS", "convexUrl": "https://prestigious-dragon-8.eu-west-1.convex.cloud", "sourceSha256": "2231bc060038945e445f12ba318273224ecc704d38c466c469ccd1718fcd28aa", "backendDeployedGitSha": "8172b5fff52036087c388db35556a36a095ef316"},
+    "researchSchedulerEnv": "disabled",
+    "executionAuthority": "none",
+    "clerkIssuer": "https://complete-bunny-8662.clerk.accounts.dev (unchanged)",
+    "allowedOrigins": "5 origins, unchanged",
+    "production": "Vercel dpl_Hw8mEKhT1CTB5PmYu6VJYnQrGBJW (capital.aiguides.co.uk, created 2026-11-10) unchanged",
+    "main": "639a2ed74ff2d694f3639bbf5adc05d841c117da unchanged"
+  },
+  "deployment": {
+    "push": "33d15b3..1aa1de1 verify/combined-release-candidate (only ref pushed)",
+    "convexDeploy": "none (frontend-only change; fingerprint unchanged)",
+    "environmentVariablesChanged": "none",
+    "vercelDeploymentId": "dpl_25z9ZhNxgfTjDHYzabRnrosJ493C",
+    "url": "https://trading-7kkoc6jwr-david-grannums-projects.vercel.app",
+    "target": "preview",
+    "status": "Ready (build 26 s)",
+    "alias": "https://trading-app-git-verify-combined-864cea-david-grannums-projects.vercel.app -> dpl_25z9ZhNxgfTjDHYzabRnrosJ493C",
+    "rollbackTarget": "dpl_5ok463tNAGtFRHe4i5DwwMH5zj29 (trading-dm5jc16hx, commit 33d15b3)"
+  },
+  "releaseRoute": {"verdict": "COMPATIBLE", "frontendGitSha": "1aa1de11001bd4cc08ff80a1c24b6b44f72ddc5d", "vercelEnv": "preview", "backendConvexDeployment": "prestigious-dragon-8", "executionAuthority": "none", "checkedOn": ["branch alias", "per-deployment URL"]},
+  "signedOutChat": {
+    "clerkState": "Clerk loaded, no user, no session",
+    "results": [
+      {"origin": "branch alias", "request": "GET /api/graph/chat", "status": 401, "code": "sign_in_required"},
+      {"origin": "branch alias", "request": "POST /api/graph/chat (valid question)", "status": 401, "code": "sign_in_required"},
+      {"origin": "branch alias", "request": "GET with Authorization: Bearer not.a.jwt", "status": 401, "code": "sign_in_required"},
+      {"origin": "branch alias", "request": "POST malformed JSON body", "status": 401, "code": "sign_in_required"},
+      {"origin": "per-deployment URL", "request": "GET /api/graph/chat", "status": 401, "code": "sign_in_required"},
+      {"origin": "per-deployment URL", "request": "POST /api/graph/chat", "status": 401, "code": "sign_in_required"}
+    ],
+    "leakScan": "no response matched Request ID / Uncaught / authz.ts / convex.cloud / deployment name / JWT / stack-frame patterns"
+  },
+  "acceptance": [
+    {"check": "Market Radar unchanged", "result": "PASS", "detail": "five job rows data-effective-state=not_scheduled; 'Collectors idle (scheduler disabled)'; 'Scheduler disabled (RESEARCH_SCHEDULER_ENV=disabled)'; external news NOT IMPLEMENTED; SEC rows 'Source observed 2026-11-12'; 'Overdue' absent from visible text (present only in the RSC data payload, as in G9.3.1)"},
+    {"check": "Historical briefing labelled", "result": "PASS", "detail": "Historical bundled briefing (2026-11-05) — not current research; latest stored briefing 2026-11-15"},
+    {"check": "Market Stress unchanged", "result": "PASS", "detail": "observed-data workspace, delayed EOD reference closes (8 symbols, 2026-11-13); licence-required gating intact"},
+    {"check": "Trading research-only", "result": "PASS", "detail": "Research-only deployment notice; executionAuthority none; no order buttons; GET /api/trading 405"},
+    {"check": "Vercel runtime logs", "result": "PASS", "detail": "past hour: Info 13, Warning 0, Error 0, Fatal 0; entries are tls-profile and Clerk development telemetry notices on /, /recovery, /api/health/release; no /api/graph/chat errors", "screenshot": "docs/screenshots/g9-3-4-preview-runtime-logs.jpg"},
+    {"check": "Error classifier exposes no internal Convex text", "result": "PASS (signed-out scope)", "detail": "all signed-out responses generic; the Convex-refusal paths (401 invalid_token / token_expired, 403, 503) are only reachable signed in and are covered by 23 unit tests; live confirmation deferred to the authenticated acceptance plan"}
+  ],
+  "authenticatedAcceptancePlan": "docs/phase-g9-3-4-authenticated-acceptance-plan.md (prepared, not executed)",
+  "notPerformed": ["account creation", "signed-in checks", "Convex deploy", "environment variable changes", "Clerk or allowlist changes", "research record mutations", "scheduler activation", "broker synchronisation", "SEC quarantine or re-ingestion", "Production changes"]
+}
