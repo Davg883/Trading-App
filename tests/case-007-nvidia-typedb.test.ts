@@ -310,8 +310,30 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     );
     expect(liveHtml).toContain('SOURCE MODE: LIVE GRAPH');
     expect(liveHtml).toContain('data-testid="live-graph-dataset-banner"');
+    expect(liveHtml).toContain('VERIFIED IN LIVE GRAPH (20 Case 007 relationships');
+    expect(liveHtml).toContain('data-testid="live-graph-observations-panel"');
+    expect(liveHtml).not.toContain('data-testid="macro-case-001-workspace"');
     expect(liveHtml).toContain('Colette Kress');
     expect(liveHtml).toContain('contingent-signed capital commitment(s)');
+
+    // Gate 6 check: when LIVE_GRAPH has pre-existing records only (0 Case 007 edges), explicitly states NOT YET VERIFIED
+    const preCase007LiveHtml = renderToStaticMarkup(
+      createElement(MacroDataRoom, {
+        dataset: loadInitialAcceptanceDataset(),
+        benchmark,
+        graphSourceMode: 'LIVE_GRAPH',
+        liveTypeDbStatus: {
+          reachable: true,
+          version: '3.14.2',
+          databaseName: 'aci_macro_intelligence_staging',
+          tlsEnabled: true,
+        },
+      }),
+    );
+    expect(preCase007LiveHtml).toContain(
+      'NVIDIA Case 007 Live Ingestion: NOT YET VERIFIED IN LIVE GRAPH',
+    );
+    expect(preCase007LiveHtml).not.toContain('data-testid="macro-case-001-workspace"');
 
     const liveExplorerHtml = renderToStaticMarkup(
       createElement(MacroDataRoom, {
@@ -354,7 +376,10 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     );
     expect(unavailHtml).toContain('SOURCE MODE: GRAPH UNAVAILABLE');
     expect(unavailHtml).toContain('data-testid="graph-unavailable-banner"');
+    expect(unavailHtml).toContain('data-testid="graph-unavailable-workspace"');
     expect(unavailHtml).toContain('Fail-Closed Safeguard Active');
+    expect(unavailHtml).not.toContain('rel-loughton-msft-r2');
+    expect(unavailHtml).not.toContain('data-testid="active-edge-count"');
 
     const execOverviewHtml = renderToStaticMarkup(
       createElement(ExecutiveOverviewSections, {
@@ -415,6 +440,7 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
       const disposableDb = 'aci_case_007_wp2_disposable';
       const v1UpgradeDb = 'aci_case_007_v1_upgrade_disposable';
       const badSchemaDb = 'aci_case_007_bad_schema_disposable';
+      const sentinelDb = 'aci_case_007_sentinel_anti_static';
 
       const baseDriver = new TypeDBHttpDriver({
         username: 'admin',
@@ -626,10 +652,76 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
           if (prevDbEnv === undefined) delete process.env.TYPEDB_DATABASE;
           else process.env.TYPEDB_DATABASE = prevDbEnv;
         }
+
+        // G. Gate 1 & Gate 2 Anti-Static-Leakage Proof:
+        //    Project a 1-relationship sentinel dataset into TypeDB, then call executeAllowlistedGraphQuery
+        //    WHILE explicitly passing `datasets: [loadInitialAcceptanceDataset()]`. Prove ZERO static
+        //    relationships or observations from `initial-acceptance-dataset.json` leak into LIVE_GRAPH.
+        const sentinelDataset = {
+          ...case007.dataset,
+          organisations: case007.dataset.organisations.filter((o) =>
+            ['org-nvda', 'org-anthropic'].includes(o.orgId),
+          ),
+          executives: [],
+          instruments: [],
+          sources: case007.dataset.sources.filter(
+            (s) => s.sourceDocId === 'doc-anthropic-s1a2-20261110',
+          ),
+          observations: [
+            {
+              ...case007.dataset.observations[0]!,
+              observationId: 'obs-sentinel-live-only-1',
+              subjectOrgId: 'org-nvda',
+              sourceDocIds: ['doc-anthropic-s1a2-20261110'],
+            },
+          ],
+          relationships: [
+            {
+              ...case007.dataset.relationships.find(
+                (r) => r.relationshipId === 'rel-case007-nvda-anthropic-hw-partnership-r1',
+              )!,
+              relationshipId: 'rel-sentinel-live-only-r1',
+            },
+          ],
+        };
+        const sentinelConfig: TypeDbConnectionConfig = {
+          ...disposableConfig,
+          databaseName: sentinelDb,
+        };
+        await projectDatasetIntoLiveTypeDb(sentinelDataset, {
+          config: sentinelConfig,
+          recreateDatabase: true,
+        });
+
+        const sentinelLiveQuery = await executeAllowlistedGraphQuery(
+          {
+            queryType: 'as_known_at_date_graph',
+            asOfMs: CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+            temporalBasis: 'receipt',
+          },
+          {
+            callerId: 'sentinel_verifier',
+            datasets: [loadInitialAcceptanceDataset()],
+            preferLiveTypeDb: true,
+            requireLiveGraph: true,
+            typeDbConfig: sentinelConfig,
+          },
+        );
+        expect(sentinelLiveQuery.graphSourceMode).toBe('LIVE_GRAPH');
+        expect(sentinelLiveQuery.edges.map((e) => e.relationshipId)).toEqual([
+          'rel-sentinel-live-only-r1',
+        ]);
+        expect(sentinelLiveQuery.observations.map((o) => o.observationId)).toEqual([
+          'obs-sentinel-live-only-1',
+        ]);
+        expect(
+          sentinelLiveQuery.edges.some((e) => e.relationshipId === 'rel-loughton-msft-r2'),
+        ).toBe(false);
       } finally {
         await baseDriver.deleteDatabase(disposableDb).catch(() => {});
         await baseDriver.deleteDatabase(v1UpgradeDb).catch(() => {});
         await baseDriver.deleteDatabase(badSchemaDb).catch(() => {});
+        await baseDriver.deleteDatabase(sentinelDb).catch(() => {});
       }
     },
     60_000,

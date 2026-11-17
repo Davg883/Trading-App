@@ -425,35 +425,11 @@ export async function executeAllowlistedGraphQuery(
       callerOwner: context.callerId,
     });
     if (hydrated.ok && hydrated.dataset) {
-      if (context.datasets && context.datasets.length > 0) {
-        const seenRelIds = new Set(hydrated.dataset.relationships.map((r) => r.relationshipId));
-        const seenOrgIds = new Set(hydrated.dataset.organisations.map((o) => o.orgId));
-        const seenExecIds = new Set((hydrated.dataset.executives ?? []).map((e) => e.personId));
-        const seenSecIds = new Set(hydrated.dataset.sectors.map((s) => s.sectorId));
-        const seenLocIds = new Set(hydrated.dataset.locations.map((l) => l.locationId));
-        const seenAssetIds = new Set(hydrated.dataset.energyAssets.map((a) => a.assetId));
-        const seenProjIds = new Set(hydrated.dataset.projects.map((p) => p.projectId));
-        const seenInstIds = new Set(hydrated.dataset.instruments.map((i) => i.instrumentId));
-        const seenSrcIds = new Set(hydrated.dataset.sources.map((s) => s.sourceDocId));
-        const seenObsIds = new Set(hydrated.dataset.observations.map((o) => o.observationId));
-
-        const supplemental = context.datasets.map((ds) => ({
-          ...ds,
-          sectors: ds.sectors.filter((x) => !seenSecIds.has(x.sectorId)),
-          organisations: ds.organisations.filter((x) => !seenOrgIds.has(x.orgId)),
-          executives: (ds.executives ?? []).filter((x) => !seenExecIds.has(x.personId)),
-          locations: ds.locations.filter((x) => !seenLocIds.has(x.locationId)),
-          energyAssets: ds.energyAssets.filter((x) => !seenAssetIds.has(x.assetId)),
-          projects: ds.projects.filter((x) => !seenProjIds.has(x.projectId)),
-          instruments: ds.instruments.filter((x) => !seenInstIds.has(x.instrumentId)),
-          sources: ds.sources.filter((x) => !seenSrcIds.has(x.sourceDocId)),
-          observations: ds.observations.filter((x) => !seenObsIds.has(x.observationId)),
-          relationships: ds.relationships.filter((x) => !seenRelIds.has(x.relationshipId)),
-        }));
-        activeDatasets = [hydrated.dataset, ...supplemental];
-      } else {
-        activeDatasets = [hydrated.dataset];
-      }
+      // Strict Gate 1 & Gate 2 invariant: when labelled LIVE_GRAPH, 100% of nodes,
+      // edges, and observations MUST derive from live TypeDB concept rows. Static
+      // fallback datasets (`loadInitialAcceptanceDataset()` or `context.datasets`)
+      // are never merged into a LIVE_GRAPH response.
+      activeDatasets = [hydrated.dataset];
       backendMode = 'typedb_live';
       graphSourceMode = 'LIVE_GRAPH';
       sourceModeDetail = `Hydrated directly from live TypeDB ${hydrated.serverVersion} (${resolvedTypeDbConfig.databaseName})`;

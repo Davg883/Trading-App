@@ -13,17 +13,34 @@ import './data-room.css';
 
 export const dynamic = 'force-dynamic';
 
+const EMPTY_UNAVAILABLE_DATASET: MacroGraphDataset = {
+  datasetVersion: 'macro-graph-dataset-g1-v1',
+  schemaVersion: 'macro-intelligence-graph-3.14-v1',
+  owner: 'public_research',
+  visibility: 'public_research',
+  sectors: [],
+  organisations: [],
+  executives: [],
+  locations: [],
+  energyAssets: [],
+  projects: [],
+  instruments: [],
+  sources: [],
+  observations: [],
+  relationships: [],
+};
+
 export default async function DataRoomPage({
   searchParams,
 }: {
   searchParams?: Promise<{ focal?: string; asOf?: string; view?: string }>;
 }) {
   const resolvedParams = searchParams ? await searchParams : undefined;
-  const fallbackDataset = loadInitialAcceptanceDataset();
+  const queryTimestampIso = new Date().toISOString();
   const probe = await probeTypeDbServer();
   const requireLive = process.env.ACI_REQUIRE_LIVE_TYPEDB === '1';
 
-  let activeDataset: MacroGraphDataset = fallbackDataset;
+  let activeDataset: MacroGraphDataset | null = null;
   let graphSourceMode: GraphSourceMode = requireLive
     ? 'GRAPH_UNAVAILABLE'
     : 'HISTORICAL_MIRROR';
@@ -39,10 +56,23 @@ export default async function DataRoomPage({
       if (hydrated.ok && hydrated.dataset) {
         activeDataset = hydrated.dataset;
         graphSourceMode = 'LIVE_GRAPH';
-        sourceModeDetail = `Hydrated from live TypeDB ${hydrated.serverVersion ?? ''} (${probe.databaseName})`.trim();
+        const c = hydrated.dataset;
+        const conceptTotal =
+          c.organisations.length +
+          (c.executives?.length ?? 0) +
+          c.sectors.length +
+          c.locations.length +
+          c.energyAssets.length +
+          c.projects.length +
+          c.instruments.length +
+          c.sources.length +
+          c.observations.length +
+          c.relationships.length;
+        sourceModeDetail = `Hydrated from live TypeDB ${hydrated.serverVersion ?? ''} (${probe.databaseName}) at ${queryTimestampIso} · ${conceptTotal} concepts (${c.relationships.length} relationships, ${c.observations.length} observations)`.trim();
       }
     } catch (err) {
       graphSourceMode = 'GRAPH_UNAVAILABLE';
+      activeDataset = EMPTY_UNAVAILABLE_DATASET;
       sourceModeDetail =
         err instanceof TypeDbSchemaOrHydrationError
           ? err.publicMessage
@@ -50,7 +80,18 @@ export default async function DataRoomPage({
     }
   }
 
-  const benchmark = await runGraphVsConvexBenchmark(fallbackDataset);
+  // Static acceptance dataset is loaded ONLY when operating in HISTORICAL_MIRROR mode
+  if (!activeDataset) {
+    if (graphSourceMode === 'GRAPH_UNAVAILABLE') {
+      activeDataset = EMPTY_UNAVAILABLE_DATASET;
+    } else {
+      activeDataset = loadInitialAcceptanceDataset();
+    }
+  }
+
+  const benchmark = await runGraphVsConvexBenchmark(
+    activeDataset.relationships.length > 0 ? activeDataset : loadInitialAcceptanceDataset(),
+  );
   const parsedAsOf = resolvedParams?.asOf ? Number(resolvedParams.asOf) : undefined;
   const latestRelMs =
     graphSourceMode === 'LIVE_GRAPH' && activeDataset.relationships.length > 0
@@ -63,6 +104,7 @@ export default async function DataRoomPage({
       benchmark={benchmark}
       graphSourceMode={graphSourceMode}
       sourceModeDetail={sourceModeDetail}
+      queryTimestampIso={queryTimestampIso}
       initialFocalId={
         resolvedParams?.focal ??
         (graphSourceMode === 'LIVE_GRAPH' &&

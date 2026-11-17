@@ -51,6 +51,7 @@ export interface MacroDataRoomProps {
   benchmark: BenchmarkComparisonReport;
   graphSourceMode?: GraphSourceMode;
   sourceModeDetail?: string;
+  queryTimestampIso?: string;
   initialView?: DataRoomViewKey;
   initialFocalId?: string;
   initialAsOfMs?: number;
@@ -137,6 +138,7 @@ export default function MacroDataRoom({
   benchmark,
   graphSourceMode = 'HISTORICAL_MIRROR',
   sourceModeDetail,
+  queryTimestampIso,
   initialView = 'executive_overview',
   initialFocalId = 'org-nscale',
   initialAsOfMs = 1794146400000,
@@ -799,7 +801,11 @@ export default function MacroDataRoom({
       <div data-testid="evidence-drawer-content" className="dr-drawer-inner">
         <div className="dr-drawer-header">
           <div>
-            <span className="eyebrow">IMMUTABLE EVIDENCE DRAWER (STATIC FIXTURE)</span>
+            <span className="eyebrow">
+              {graphSourceMode === 'LIVE_GRAPH'
+                ? 'IMMUTABLE EVIDENCE DRAWER (LIVE TYPEDB READ)'
+                : 'IMMUTABLE EVIDENCE DRAWER (STATIC FIXTURE)'}
+            </span>
             <h3 style={{ margin: '6px 0 4px', fontSize: '15px', color: '#192434' }}>
               {rel.relationshipId} (v{rel.version})
             </h3>
@@ -1241,58 +1247,107 @@ export default function MacroDataRoom({
 
       {/* Source-Mode Specific Provenance Banner */}
       {graphSourceMode === 'GRAPH_UNAVAILABLE' ? (
-        <div
-          role="alert"
-          data-testid="graph-unavailable-banner"
-          style={{
-            background: '#fff5f5',
-            borderBottom: '1px solid #feb2b2',
-            padding: '10px 18px',
-            fontSize: '12px',
-            color: '#742a2a',
-          }}
-        >
-          <strong>GRAPH UNAVAILABLE (Fail-Closed Safeguard Active):</strong>{' '}
-          {sourceModeDetail ??
-            'Live TypeDB 3.14 graph could not be verified or returned an unsupported schema/concept payload.'}{' '}
-          Static fixture claims are never substituted as live graph state.
-        </div>
-      ) : graphSourceMode === 'LIVE_GRAPH' ? (
-        <div
-          data-testid="live-graph-dataset-banner"
-          style={{
-            background: '#f0fff4',
-            borderBottom: '1px solid #9ae6b4',
-            padding: '8px 18px',
-            fontSize: '12px',
-            color: '#22543d',
-          }}
-        >
-          <strong>LIVE GRAPH Active:</strong>{' '}
-          {sourceModeDetail ??
-            'Nodes, typed hyperedges, and financial observations are hydrated directly from live TypeDB 3.14 read transactions.'}{' '}
-          Proposed/contingent offerings remain strictly distinguished from completed funded ownership.
-        </div>
+        <>
+          <div
+            role="alert"
+            data-testid="graph-unavailable-banner"
+            style={{
+              background: '#fff5f5',
+              borderBottom: '1px solid #feb2b2',
+              padding: '10px 18px',
+              fontSize: '12px',
+              color: '#742a2a',
+            }}
+          >
+            <strong>GRAPH UNAVAILABLE (Fail-Closed Safeguard Active):</strong>{' '}
+            {sourceModeDetail ??
+              'Live TypeDB 3.14 graph could not be verified or returned an unsupported schema/concept payload.'}{' '}
+            Static fixture claims are never substituted as live graph state.
+          </div>
+          <div
+            data-testid="graph-unavailable-workspace"
+            style={{
+              margin: '24px 18px',
+              padding: '20px',
+              background: '#fff5f5',
+              border: '1px solid #feb2b2',
+              borderRadius: '8px',
+              color: '#742a2a',
+              fontSize: '13px',
+            }}
+          >
+            <h2 style={{ margin: '0 0 8px', fontSize: '16px' }}>
+              Live Graph Retrieval Unavailable — Fail-Closed State
+            </h2>
+            <p style={{ margin: 0 }}>
+              No graph nodes, relationships, or financial observations are rendered because live
+              TypeDB verification failed closed and static mirror substitution is disabled for this
+              response.
+            </p>
+          </div>
+        </>
       ) : (
-        <div
-          data-testid="static-demo-dataset-banner"
-          style={{
-            background: '#fffaf0',
-            borderBottom: '1px solid #f6e05e',
-            padding: '8px 18px',
-            fontSize: '12px',
-            color: '#744210',
-          }}
-        >
-          <strong>Static Demonstration &amp; Synthetic Stress-Test Dataset Notice:</strong> This
-          Data Room renders bundled static fixture records from{' '}
-          <code>data/graph/initial-acceptance-dataset.json</code> (including future-dated 2026
-          Macro Case 001 stress-test filings, synthetic reviewer allocations, and non-live
-          reference URIs) for staging and governance verification. It does not perform live
-          TypeDB queries on page load or write browser review actions to production Convex
-          tables.
-        </div>
-      )}
+        <>
+          {graphSourceMode === 'LIVE_GRAPH' ? (
+            <div
+              data-testid="live-graph-dataset-banner"
+              style={{
+                background: '#f0fff4',
+                borderBottom: '1px solid #9ae6b4',
+                padding: '8px 18px',
+                fontSize: '12px',
+                color: '#22543d',
+              }}
+            >
+              <div>
+                <strong>LIVE GRAPH Active:</strong>{' '}
+                {sourceModeDetail ??
+                  'Nodes, typed hyperedges, and financial observations are hydrated directly from live TypeDB 3.14 read transactions.'}
+                {queryTimestampIso ? ` · Read UTC: ${queryTimestampIso}` : ''} ·{' '}
+                Proposed/contingent offerings remain strictly distinguished from completed funded
+                ownership.
+              </div>
+              <div
+                data-testid="case-007-live-promotion-status"
+                style={{
+                  marginTop: '4px',
+                  fontWeight: 600,
+                  color: dataset.relationships.some((r) =>
+                    r.relationshipId.startsWith('rel-case007-'),
+                  )
+                    ? '#22543d'
+                    : '#744210',
+                }}
+              >
+                {dataset.relationships.some((r) => r.relationshipId.startsWith('rel-case007-'))
+                  ? `NVIDIA Case 007 Live Ingestion: VERIFIED IN LIVE GRAPH (${
+                      dataset.relationships.filter((r) =>
+                        r.relationshipId.startsWith('rel-case007-'),
+                      ).length
+                    } Case 007 relationships hydrated from TypeDB).`
+                  : 'NVIDIA Case 007 Live Ingestion: NOT YET VERIFIED IN LIVE GRAPH — 0 Case 007 records have been promoted to shared TypeDB staging yet; currently displaying pre-existing TypeDB staging records only.'}
+              </div>
+            </div>
+          ) : (
+            <div
+              data-testid="static-demo-dataset-banner"
+              style={{
+                background: '#fffaf0',
+                borderBottom: '1px solid #f6e05e',
+                padding: '8px 18px',
+                fontSize: '12px',
+                color: '#744210',
+              }}
+            >
+              <strong>Static Demonstration &amp; Synthetic Stress-Test Dataset Notice:</strong>{' '}
+              This Data Room renders bundled static fixture records from{' '}
+              <code>data/graph/initial-acceptance-dataset.json</code> (including future-dated 2026
+              Macro Case 001 stress-test filings, synthetic reviewer allocations, and non-live
+              reference URIs) for staging and governance verification. It does not perform live
+              TypeDB queries on page load or write browser review actions to production Convex
+              tables.
+            </div>
+          )}
 
       {/* Sub-navigation & Temporal Time Machine */}
       <nav className="data-room-subnav" aria-label="Macro Data Room Views">
@@ -1567,7 +1622,71 @@ export default function MacroDataRoom({
                 {tldr.nonCausationNotice}
               </div>
 
-              {/* MACRO CASE 001: AI INFRASTRUCTURE CONTAGION, US TO IRELAND */}
+              {/* Static Case 001 Demonstration Dossier renders ONLY in HISTORICAL_MIRROR mode */}
+              {graphSourceMode === 'LIVE_GRAPH' ? (
+                <div
+                  data-testid="live-graph-observations-panel"
+                  style={{
+                    marginTop: '20px',
+                    borderTop: '2px solid #d4dde8',
+                    paddingTop: '18px',
+                  }}
+                >
+                  <div className="dr-card-header" style={{ marginBottom: '12px' }}>
+                    <div>
+                      <span className="eyebrow">
+                        LIVE TYPEDB 3.14 OBSERVATIONS &amp; CONCEPT LEDGER ({liveTypeDbStatus.databaseName ?? 'live'})
+                      </span>
+                      <h2 style={{ fontSize: '17px', marginTop: '4px' }}>
+                        Financial &amp; Operational Observations Hydrated from TypeDB ({dataset.observations.length})
+                      </h2>
+                      <p style={{ fontSize: '12px', color: '#425265', marginTop: '4px' }}>
+                        Every observation row below is read directly from live TypeDB{' '}
+                        <code>financial_observation</code> concepts; static repository fixtures are excluded.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="dr-table">
+                      <thead>
+                        <tr>
+                          <th>OBSERVATION ID</th>
+                          <th>SUBJECT</th>
+                          <th>METRIC &amp; KIND</th>
+                          <th>VALUE</th>
+                          <th>PERIOD &amp; BASIS</th>
+                          <th>SOURCE DOCS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataset.observations.map((obs) => (
+                          <tr key={obs.observationId} data-testid={`live-obs-${obs.observationId}`}>
+                            <td>
+                              <code>{obs.observationId}</code>
+                            </td>
+                            <td>{entityNameById.get(obs.subjectOrgId) ?? obs.subjectOrgId}</td>
+                            <td>
+                              <b>{obs.metricName}</b>{' '}
+                              <span className="tag">{obs.observationKind}</span>
+                            </td>
+                            <td>
+                              {obs.metricUnit === 'currency'
+                                ? formatUsdPrincipal(obs.metricValue, obs.currencyCode)
+                                : `${obs.metricValue.toLocaleString('en-US')} ${obs.metricUnit}`}
+                            </td>
+                            <td style={{ fontSize: '11px' }}>
+                              {obs.reportingPeriodLabel} · {obs.accountingBasis}
+                            </td>
+                            <td>
+                              <code>{obs.sourceDocIds.join(', ')}</code>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
               <div
                 data-testid="macro-case-001-workspace"
                 style={{
@@ -2026,6 +2145,7 @@ export default function MacroDataRoom({
                   </div>
                 </div>
               </div>
+              )}
             </section>
           )}
 
@@ -3274,6 +3394,8 @@ export default function MacroDataRoom({
             </span>
           </button>
         </div>
+      )}
+        </>
       )}
     </div>
   );

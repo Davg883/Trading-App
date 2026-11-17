@@ -51,8 +51,9 @@ export async function GET(req: NextRequest) {
   const action = url.searchParams.get('action') ?? 'metadata';
 
   if (action === 'metadata') {
+    const queryTimestampIso = new Date().toISOString();
     const probe = await probeTypeDbServer();
-    let dataset = loadInitialAcceptanceDataset();
+    let dataset: ReturnType<typeof loadInitialAcceptanceDataset> | null = null;
     let graphSourceMode: 'LIVE_GRAPH' | 'HISTORICAL_MIRROR' | 'GRAPH_UNAVAILABLE' =
       'HISTORICAL_MIRROR';
     if (probe.reachable && probe.databaseExists) {
@@ -70,6 +71,7 @@ export async function GET(req: NextRequest) {
             {
               error: err.publicMessage,
               graphSourceMode: 'GRAPH_UNAVAILABLE',
+              queryTimestampIso,
               executionAuthority: 'none',
             },
             { status: 502 },
@@ -77,10 +79,26 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    if (!dataset) {
+      if (process.env.ACI_REQUIRE_LIVE_TYPEDB === '1') {
+        return NextResponse.json(
+          {
+            error: 'Live TypeDB graph is unavailable; static fallback disabled',
+            graphSourceMode: 'GRAPH_UNAVAILABLE',
+            queryTimestampIso,
+            executionAuthority: 'none',
+          },
+          { status: 503 },
+        );
+      }
+      dataset = loadInitialAcceptanceDataset();
+      graphSourceMode = 'HISTORICAL_MIRROR';
+    }
     const benchmark = await runGraphVsConvexBenchmark(dataset);
     return NextResponse.json({
       schemaVersion: dataset.schemaVersion,
       graphSourceMode,
+      queryTimestampIso,
       typedbServer: {
         reachable: probe.reachable,
         authenticated: probe.authenticated,
@@ -100,6 +118,7 @@ export async function GET(req: NextRequest) {
         energyAssets: dataset.energyAssets.length,
         instruments: dataset.instruments.length,
         sources: dataset.sources.length,
+        observations: dataset.observations.length,
         relationships: dataset.relationships.length,
       },
       benchmark,
