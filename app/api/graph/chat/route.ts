@@ -30,6 +30,7 @@ import {
 import { EVIDENCE_RETRIEVAL_LIMITS } from '../../../../lib/graph/evidence-chat-contracts';
 // Server-safe claim validation. Never import auth helpers from the `'use client'` module lib/clerk-convex-auth here.
 import { checkServerClerkToken } from '../../../../lib/auth/clerk-jwt-claims';
+import { classifyConvexError } from '../../../../lib/auth/convex-error-classification';
 
 /** Must match `SHARED_CHAT_TURNS_PER_MINUTE` in convex/evidenceChat.ts. */
 const SHARED_CHAT_TURNS_PER_MINUTE = 10;
@@ -167,16 +168,28 @@ async function handleGet(req: NextRequest) {
     timeoutMs: 6_000,
   });
 
-  let history: unknown[] = [];
-  if (caller.convexToken && process.env.NEXT_PUBLIC_CONVEX_URL) {
-    try {
-      const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
-      client.setAuth(caller.convexToken);
-      const listFn = makeFunctionReference<'query'>('evidenceChat:listChatHistory');
-      history = (await client.query(listFn, { limit: 15 })) as unknown[];
-    } catch {
-      history = [];
-    }
+  // G9.3.4: an empty history is returned only when Convex answered the owner's query successfully with zero rows.
+  // Previously every failure — a token Convex refused, an expired token, an unreachable backend, a missing URL — was
+  // swallowed into `history: []` with HTTP 200, indistinguishable from a user with no history.
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  if (!convexUrl || !caller.convexToken) {
+    return historyUnavailable();
+  }
+  let history: unknown[];
+  try {
+    const client = new ConvexHttpClient(convexUrl);
+    client.setAuth(caller.convexToken);
+    const listFn = makeFunctionReference<'query'>('evidenceChat:listChatHistory');
+    const rows = await client.query(listFn, { limit: 15 });
+    if (!Array.isArray(rows)) throw new Error('listChatHistory returned a non-array result');
+    history = rows;
+  } catch (err) {
+    const kind = classifyConvexError(err);
+    if (kind === 'expired') return invalidAuthentication('expired');
+    if (kind === 'unauthenticated') return invalidAuthentication('invalid_claims');
+    if (kind === 'forbidden') return forbiddenIdentity();
+    logInternalError('GET history', err);
+    return historyUnavailable();
   }
 
   return NextResponse.json(
@@ -295,6 +308,18 @@ function invalidAuthentication(reason: 'invalid_claims' | 'expired') {
       executionAuthority: 'none',
     },
     { status: 401, headers: NO_STORE_HEADERS },
+  );
+}
+
+/** G9.3.4: the owner's history could not be retrieved (backend unreachable, misconfigured or no token). Never 200. */
+function historyUnavailable() {
+  return NextResponse.json(
+    {
+      error: 'Research chat history is temporarily unavailable. Please try again shortly.',
+      code: 'history_unavailable',
+      executionAuthority: 'none',
+    },
+    { status: 503, headers: { ...NO_STORE_HEADERS, 'Retry-After': '30' } },
   );
 }
 
