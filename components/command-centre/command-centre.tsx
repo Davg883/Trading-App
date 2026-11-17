@@ -19,6 +19,7 @@ import {MorningBriefPanel} from './morning-brief-panel';
 import {ExecutiveOverviewSections} from './executive-overview';
 import {DataBadge,age,iso,money,pct,signedMoney} from './shared';
 import {BrokerSyncStatus,type SyncConnection,type SyncSchedule} from '../broker-sync-status';
+import {resolveDisplayedBriefing} from '../../lib/remote-ops/briefing-provenance';
 
 export type EnvData={connection:null|SyncConnection;schedule?:SyncSchedule|null;snapshot:BrokerSyncSnapshot|null;valuations:Valuation[];flows:CashFlow[]};
 export type PortfolioData={live:EnvData;demo:EnvData};
@@ -99,7 +100,17 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
   ...feed.agentOperations,
   ...(operations?.health?.evidenceChat?{evidenceChat:operations.health.evidenceChat}:{}),
  };
- const activeBriefing=operations!==undefined&&operations!==null?(opsHasActivity?operations.latestBriefing:(operations.latestBriefing??feed.morningBriefing??null)):(feed.morningBriefing??null);
+ // Sprint G9.2: the authorised research owner sees their latest stored briefing; any fallback is labelled with its source
+ // and the historical bundled briefing never feeds the executive synthesis or its "last refreshed" time.
+ const {briefing:activeBriefing,source:briefingSource,executiveBriefing}=resolveDisplayedBriefing({
+  fixture,
+  ownerOverviewLoaded:operations!==undefined&&operations!==null,
+  ownerHasActivity:opsHasActivity,
+  ownerBriefing:operations?.latestBriefing,
+  feedBriefing:feed.morningBriefing,
+  feedBriefingSource:feed.morningBriefingSource,
+ });
+ const latestStoredBriefing={date:activeHealth.operationalLayers.briefing.latestBriefingDate??null,generatedAt:activeHealth.operationalLayers.briefing.generatedAt};
  const latestWatchlistAt=effectiveWatchlist.reduce<number|null>((max,w)=>w.closeAt!==null&&(max===null||w.closeAt>max)?w.closeAt:max,feed.marketDataAsOf??null);
  const marketObsAgeMs=latestWatchlistAt!==null?Math.max(0,now-latestWatchlistAt):null;
  const marketObsStale=marketObsAgeMs===null||marketObsAgeMs>4*86_400_000;
@@ -186,14 +197,14 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
   {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
   <AlertsCentre alerts={alerts} links={LINKS}/>
-  <ExecutiveOverviewSections watchlist={effectiveWatchlist} ownedTickers={ownedTickers} now={now} morningBriefing={activeBriefing} reportGeneratedAtMs={activeBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
+  <ExecutiveOverviewSections watchlist={effectiveWatchlist} ownedTickers={ownedTickers} now={now} morningBriefing={executiveBriefing} reportGeneratedAtMs={executiveBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
   <details className="g6-drawer-details" data-testid="technical-evidence-details">
    <summary className="g6-drawer-summary">
     <span>Technical, Operations &amp; Evidence Audit Details (Agent Operations, Morning Brief, Watchlist &amp; Data Boundaries)</span>
     <small>Secondary audit &amp; ingestion telemetry</small>
    </summary>
    <div className="g6-drawer-body">
-    <Collapsible title="Morning intelligence brief" testId="brief-collapsible" wide={wide}><MorningBriefPanel briefing={activeBriefing} fixture={fixture}/></Collapsible>
+    <Collapsible title="Morning intelligence brief" testId="brief-collapsible" wide={wide}><MorningBriefPanel briefing={activeBriefing} fixture={fixture} source={briefingSource} latestStored={latestStoredBriefing}/></Collapsible>
     <Collapsible title="Agent operations & collection health" testId="ops-collapsible" wide={wide}><AgentOperationsPanel health={activeHealth} now={now} fixture={fixture} onToggleJob={onToggleJob}/></Collapsible>
     <Collapsible title="Research intelligence" testId="intel-collapsible" wide={wide}><ResearchIntel events={feed.events} forwardPredictions={operations?.forwardResearchEvents?.length??feed.forwardPredictions} missingEvidenceResolution={operations?.missingEvidenceResolution??feed.missingEvidenceResolution} forwardResearchEvents={operations?.forwardResearchEvents??feed.forwardResearchEvents}/></Collapsible>
     <Collapsible title="Research watchlist (delayed public reference prices)" testId="watch-collapsible" wide={wide}><WatchlistPanel items={effectiveWatchlist} now={now} ownedTickers={ownedTickers}/></Collapsible>

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type {MorningBriefingRecord} from '../../lib/remote-ops/contracts';
+import type {BriefingSource} from '../../lib/remote-ops/briefing-provenance';
 import {iso} from './shared';
 
 /**
@@ -13,10 +14,16 @@ import {iso} from './shared';
 export function MorningBriefPanel({
  briefing,
  fixture,
+ source,
+ latestStored,
 }:{
  briefing:MorningBriefingRecord|null;
  fixture?:boolean;
+ /** Sprint G9.2: provenance of `briefing`; 'bundled_reference' is the static build-time briefing, never current research. */
+ source?:BriefingSource;
+ latestStored?:{date:string|null;generatedAt:number|null};
 }){
+ const bundled=source==='bundled_reference';
  if(!briefing){
   return (
    <section className="cc-panel" id="morning-brief" aria-labelledby="morning-brief-title" data-testid="morning-brief-panel">
@@ -31,14 +38,27 @@ export function MorningBriefPanel({
   );
  }
  return (
-  <section className="cc-panel" id="morning-brief" aria-labelledby="morning-brief-title" data-testid="morning-brief-panel">
+  <section className="cc-panel" id="morning-brief" aria-labelledby="morning-brief-title" data-testid="morning-brief-panel" data-briefing-source={source??'unspecified'}>
    <header className="cc-panel-head">
     <div>
-     <h2 id="morning-brief-title">Morning intelligence brief ({briefing.briefingDate})</h2>
+     <h2 id="morning-brief-title">{bundled?`Historical bundled briefing (${briefing.briefingDate}) — not current research`:`Morning intelligence brief (${briefing.briefingDate})`}</h2>
      <p>
       Scheduled 07:30 {briefing.timezone} on weekdays · generated {iso(briefing.generatedAt)} ·{' '}
       {fixture?'Synthetic fixture brief':'Confirmed facts are strictly separated from AI interpretation, risk deltas and incomplete evidence'}.
      </p>
+     {bundled&&(
+      <p className="cc-note" data-testid="brief-bundled-notice">
+       Historical record: this static briefing ships with the application build and predates the stored evidence; it is shown for reference only.
+       Latest stored briefing: {latestStored?.date?<>{latestStored.date}{latestStored.generatedAt?<> (generated {iso(latestStored.generatedAt)})</>:null}</>:latestStored?.generatedAt?<>generated {iso(latestStored.generatedAt)}</>:'none stored'}.
+       Its content is shown only to the authorised research owner.
+      </p>
+     )}
+     {briefing.withheldFacts&&briefing.withheldFacts.length>0&&(
+      <p className="cc-note" data-testid="brief-withheld-facts">
+       {briefing.withheldFacts.length} confirmed fact(s) in this stored briefing were later quarantined and are withheld:{' '}
+       {briefing.withheldFacts.map(w=><span key={w.id}><code>{w.id}</code> ({w.reason.split(':')[0]}) </span>)}
+      </p>
+     )}
     </div>
     <span className="cc-badge cc-public_reference">Execution authority: {briefing.executionAuthority}</span>
    </header>

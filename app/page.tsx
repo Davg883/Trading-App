@@ -83,7 +83,7 @@ export default async function Home(){
     benchmarks:updatedBenchmarks,
     marketDataAsOf:latestMarketAt,
     agentOperations:reconciledHealth,
-    ...(liveOps.latestBriefing?{morningBriefing:liveOps.latestBriefing}:{}),
+    ...(liveOps.latestBriefing?{morningBriefing:liveOps.latestBriefing,morningBriefingSource:"stored_latest" as const}:{}),
     ...(liveOps.missingEvidenceResolution?{missingEvidenceResolution:liveOps.missingEvidenceResolution}:{}),
     ...(forwardEvents?{forwardResearchEvents:forwardEvents,forwardPredictions:forwardEvents.length}:{}),
   }:baseFeed;

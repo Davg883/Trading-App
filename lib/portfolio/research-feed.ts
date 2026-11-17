@@ -245,6 +245,9 @@ export function researchFeed(){
   forwardResearchEvents:[] as RegisteredForwardResearchEvent[],
   agentOperations,
   morningBriefing,
+  // Sprint G9.2: the static briefing generated at build time from bundled 2026-11-05 evidence. It is a labelled
+  // reference fallback, never presented as the latest research; replaced only by a stored Convex briefing.
+  morningBriefingSource:'bundled_reference' as 'bundled_reference'|'stored_latest',
  };
 }
 export type ResearchFeed=ReturnType<typeof researchFeed>;
