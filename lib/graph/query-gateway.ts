@@ -8,14 +8,18 @@ import {
   type GraphProjectionStatusSummary,
   type GraphQueryRequest,
   type GraphQueryResponse,
+  type GraphSourceMode,
   type MacroGraphDataset,
   type MacroRelationship,
 } from './contracts';
 import { reconstructGraphRelationshipsAtDate } from './identity-governance';
 import { generateBoundedGraphTldr } from './tldr-generator';
 import {
+  TypeDbSchemaOrHydrationError,
   defaultTypeDbConfig,
   executeReadOnlyTypeQlOnLiveServer,
+  hydrateMacroDatasetFromLiveTypeDb,
+  type TypeDbConnectionConfig,
 } from './typedb-driver-adapter';
 import { buildAllowlistedTypeQlQuery } from './typedb-schema';
 
@@ -205,6 +209,23 @@ function buildNodeCatalog(dataset: MacroGraphDataset): Map<string, GraphNodeView
     });
   }
 
+  for (const exec of dataset.executives ?? []) {
+    catalog.set(exec.personId, {
+      id: exec.personId,
+      label: exec.displayName,
+      kind: 'executive_person',
+      subtype: 'executive_officer_or_director',
+      secCik: null,
+      leiCode: null,
+      ticker: null,
+      sectorIds: [],
+      metadata: {
+        fullName: exec.fullName,
+        affiliatedOrgId: exec.affiliatedOrgId ?? null,
+      },
+    });
+  }
+
   return catalog;
 }
 
@@ -356,6 +377,8 @@ export async function executeAllowlistedGraphQuery(
     datasets?: MacroGraphDataset[];
     nowMs?: number;
     preferLiveTypeDb?: boolean;
+    requireLiveGraph?: boolean;
+    typeDbConfig?: TypeDbConnectionConfig;
     projectionCheckpoint?: {
       maxProjectionLagMs?: number;
       projectedCount?: number;
@@ -381,13 +404,122 @@ export async function executeAllowlistedGraphQuery(
     throw new Error('Graph query gateway rate limit exceeded');
   }
 
-  const allDatasets = context.datasets ?? [loadInitialAcceptanceDataset()];
-  for (const ds of allDatasets) {
+  const asOfMs = request.asOfMs ?? nowMs;
+  const { typeql } = buildAllowlistedTypeQlQuery(request, context.callerId);
+
+  let backendMode: 'typedb_live' | 'deterministic_mirror' = 'deterministic_mirror';
+  let graphSourceMode: GraphSourceMode = 'HISTORICAL_MIRROR';
+  let sourceModeDetail = 'Serving deterministic historical mirror dataset';
+  let typedbServerVersion: string | null = null;
+  let liveAnswerCount = 0;
+  let liveQueryLatencyMs: number | null = null;
+  let activeDatasets: MacroGraphDataset[];
+
+  const shouldAttemptLive = Boolean(context.preferLiveTypeDb || context.requireLiveGraph);
+  const resolvedTypeDbConfig = context.typeDbConfig ?? defaultTypeDbConfig();
+
+  if (shouldAttemptLive) {
+    // Note: TypeDbSchemaOrHydrationError intentionally propagates out to fail closed
+    // whenever a live TypeDB database has an unsupported schema or unrecognised concept rows.
+    const hydrated = await hydrateMacroDatasetFromLiveTypeDb(resolvedTypeDbConfig, {
+      callerOwner: context.callerId,
+    });
+    if (hydrated.ok && hydrated.dataset) {
+      if (context.datasets && context.datasets.length > 0) {
+        const seenRelIds = new Set(hydrated.dataset.relationships.map((r) => r.relationshipId));
+        const seenOrgIds = new Set(hydrated.dataset.organisations.map((o) => o.orgId));
+        const seenExecIds = new Set((hydrated.dataset.executives ?? []).map((e) => e.personId));
+        const seenSecIds = new Set(hydrated.dataset.sectors.map((s) => s.sectorId));
+        const seenLocIds = new Set(hydrated.dataset.locations.map((l) => l.locationId));
+        const seenAssetIds = new Set(hydrated.dataset.energyAssets.map((a) => a.assetId));
+        const seenProjIds = new Set(hydrated.dataset.projects.map((p) => p.projectId));
+        const seenInstIds = new Set(hydrated.dataset.instruments.map((i) => i.instrumentId));
+        const seenSrcIds = new Set(hydrated.dataset.sources.map((s) => s.sourceDocId));
+        const seenObsIds = new Set(hydrated.dataset.observations.map((o) => o.observationId));
+
+        const supplemental = context.datasets.map((ds) => ({
+          ...ds,
+          sectors: ds.sectors.filter((x) => !seenSecIds.has(x.sectorId)),
+          organisations: ds.organisations.filter((x) => !seenOrgIds.has(x.orgId)),
+          executives: (ds.executives ?? []).filter((x) => !seenExecIds.has(x.personId)),
+          locations: ds.locations.filter((x) => !seenLocIds.has(x.locationId)),
+          energyAssets: ds.energyAssets.filter((x) => !seenAssetIds.has(x.assetId)),
+          projects: ds.projects.filter((x) => !seenProjIds.has(x.projectId)),
+          instruments: ds.instruments.filter((x) => !seenInstIds.has(x.instrumentId)),
+          sources: ds.sources.filter((x) => !seenSrcIds.has(x.sourceDocId)),
+          observations: ds.observations.filter((x) => !seenObsIds.has(x.observationId)),
+          relationships: ds.relationships.filter((x) => !seenRelIds.has(x.relationshipId)),
+        }));
+        activeDatasets = [hydrated.dataset, ...supplemental];
+      } else {
+        activeDatasets = [hydrated.dataset];
+      }
+      backendMode = 'typedb_live';
+      graphSourceMode = 'LIVE_GRAPH';
+      sourceModeDetail = `Hydrated directly from live TypeDB ${hydrated.serverVersion} (${resolvedTypeDbConfig.databaseName})`;
+      typedbServerVersion = hydrated.serverVersion;
+
+      const liveRes = await executeReadOnlyTypeQlOnLiveServer(typeql, resolvedTypeDbConfig);
+      if (!liveRes.ok) {
+        throw new TypeDbSchemaOrHydrationError(
+          'Live TypeDB allowlisted query execution failed; failing closed',
+        );
+      }
+      liveAnswerCount = liveRes.answerCount;
+      liveQueryLatencyMs = liveRes.latencyMs;
+    } else if (context.requireLiveGraph) {
+      const projectionStatus = evaluateProjectionStaleness({
+        backendMode: 'deterministic_mirror',
+        ...context.projectionCheckpoint,
+      });
+      const emptyTldr = generateBoundedGraphTldr({
+        nodes: [],
+        edges: [],
+        observations: [],
+        conflicts: [],
+        asOfMs,
+        temporalBasis: request.temporalBasis,
+        generatedAtMs: nowMs,
+      });
+      return {
+        queryType: request.queryType,
+        schemaVersion: MACRO_GRAPH_SCHEMA_VERSION,
+        backendMode: 'deterministic_mirror',
+        graphSourceMode: 'GRAPH_UNAVAILABLE',
+        sourceModeDetail:
+          hydrated.error ?? 'Live TypeDB graph is unavailable; static fallback disabled',
+        typedbServerVersion: hydrated.serverVersion,
+        liveAnswerCount: 0,
+        liveQueryLatencyMs: null,
+        projectionStatus,
+        asOfMs,
+        temporalBasis: request.temporalBasis,
+        compiledTypeQl: typeql,
+        nodes: [],
+        edges: [],
+        observations: [],
+        conflicts: [],
+        excludedByCutoffCount: 0,
+        supersededHiddenCount: 0,
+        tldr: emptyTldr,
+        executionAuthority: 'none',
+      };
+    } else {
+      activeDatasets = context.datasets ?? [loadInitialAcceptanceDataset()];
+      graphSourceMode = 'HISTORICAL_MIRROR';
+      sourceModeDetail =
+        'Live TypeDB server unreachable or database uninitialised; serving static historical mirror';
+    }
+  } else {
+    activeDatasets = context.datasets ?? [loadInitialAcceptanceDataset()];
+  }
+
+  for (const ds of activeDatasets) {
     assertNoBrokerOrPrivateAccountData(ds);
   }
 
   // Enforce tenant isolation: include only `public_research` datasets or `private_tenant` datasets owned by `callerId`
-  const visibleDatasets = allDatasets.filter(
+  const visibleDatasets = activeDatasets.filter(
     (ds) => ds.visibility === 'public_research' || ds.owner === context.callerId,
   );
 
@@ -398,6 +530,7 @@ export async function executeAllowlistedGraphQuery(
     visibility: 'public_research',
     sectors: visibleDatasets.flatMap((d) => d.sectors),
     organisations: visibleDatasets.flatMap((d) => d.organisations),
+    executives: visibleDatasets.flatMap((d) => d.executives ?? []),
     locations: visibleDatasets.flatMap((d) => d.locations),
     energyAssets: visibleDatasets.flatMap((d) => d.energyAssets),
     projects: visibleDatasets.flatMap((d) => d.projects),
@@ -406,9 +539,6 @@ export async function executeAllowlistedGraphQuery(
     observations: visibleDatasets.flatMap((d) => d.observations),
     relationships: visibleDatasets.flatMap((d) => d.relationships),
   };
-
-  const asOfMs = request.asOfMs ?? nowMs;
-  const { typeql } = buildAllowlistedTypeQlQuery(request, context.callerId);
 
   const {
     activeRelationships,
@@ -446,6 +576,9 @@ export async function executeAllowlistedGraphQuery(
     currencyCode: rel.currencyCode,
     capacityQuantity: rel.capacityQuantity,
     capacityUnit: rel.capacityUnit,
+    ...(rel.executiveTitle !== undefined ? { executiveTitle: rel.executiveTitle } : {}),
+    ...(rel.governanceAction !== undefined ? { governanceAction: rel.governanceAction } : {}),
+    ...(rel.isInterim !== undefined ? { isInterim: rel.isInterim } : {}),
     conditionsSummary: rel.conditionsSummary,
     bindingObligation: rel.bindingObligation,
     publishedAtMs: rel.publishedAtMs,
@@ -505,24 +638,6 @@ export async function executeAllowlistedGraphQuery(
         (obs.subjectProjectId !== null && nodeIdSet.has(obs.subjectProjectId))),
   );
 
-  let backendMode: 'typedb_live' | 'deterministic_mirror' = 'deterministic_mirror';
-  let typedbServerVersion: string | null = null;
-  let liveAnswerCount = 0;
-  let liveQueryLatencyMs: number | null = null;
-
-  if (context.preferLiveTypeDb) {
-    const liveRes = await executeReadOnlyTypeQlOnLiveServer(
-      typeql,
-      defaultTypeDbConfig(),
-    );
-    if (liveRes.ok) {
-      backendMode = 'typedb_live';
-      typedbServerVersion = liveRes.serverVersion;
-      liveAnswerCount = liveRes.answerCount;
-      liveQueryLatencyMs = liveRes.latencyMs;
-    }
-  }
-
   const projectionStatus = evaluateProjectionStaleness({
     backendMode,
     ...context.projectionCheckpoint,
@@ -553,6 +668,8 @@ export async function executeAllowlistedGraphQuery(
     queryType: request.queryType,
     schemaVersion: MACRO_GRAPH_SCHEMA_VERSION,
     backendMode,
+    graphSourceMode,
+    sourceModeDetail,
     typedbServerVersion,
     liveAnswerCount,
     liveQueryLatencyMs,

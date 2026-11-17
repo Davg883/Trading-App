@@ -157,6 +157,19 @@ export function validateRelationshipGovernance(
     );
   }
 
+  if (
+    relationship.contractualStatus === 'contingent_signed' &&
+    (!hasPrimarySource || !['proposed', 'confirmed'].includes(relationship.epistemicStatus))
+  ) {
+    reasons.push(
+      'Contingent signed status requires a primary source and proposed or confirmed epistemic status.',
+    );
+  }
+
+  if (relationship.epistemicStatus === 'proposed' && relationship.contractualStatus === 'funded') {
+    reasons.push('Proposed investments cannot be mapped to completed funded ownership.');
+  }
+
   if (relationship.supersedesRelationshipId !== null) {
     const prior = allRelationships.find(
       (r) => r.relationshipId === relationship.supersedesRelationshipId,

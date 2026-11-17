@@ -6,6 +6,7 @@ import type {
   EpistemicStatus,
   GraphEdgeView,
   GraphNodeView,
+  GraphSourceMode,
   MacroGraphDataset,
   MacroRelationship,
 } from '../lib/graph/contracts';
@@ -48,7 +49,10 @@ export type TemporalBasis = 'receipt' | 'publication';
 export interface MacroDataRoomProps {
   dataset: MacroGraphDataset;
   benchmark: BenchmarkComparisonReport;
+  graphSourceMode?: GraphSourceMode;
+  sourceModeDetail?: string;
   initialView?: DataRoomViewKey;
+  initialFocalId?: string;
   initialAsOfMs?: number;
   initialTemporalBasis?: TemporalBasis;
   initialSelectedRelationshipId?: string;
@@ -80,6 +84,10 @@ export type ReviewerDecisionRecord = {
 };
 
 const AS_OF_PRESETS = [
+  {
+    label: '2026-11-17 — NVIDIA Case 007 Pre-Earnings Snapshot (20:59 UTC)',
+    asOfMs: 1794949170000,
+  },
   {
     label: '2026-11-08 — Macro Case 001 Discovery & Full Receipt State',
     asOfMs: 1794146400000,
@@ -127,7 +135,10 @@ function formatUtcDate(ms: number): string {
 export default function MacroDataRoom({
   dataset,
   benchmark,
+  graphSourceMode = 'HISTORICAL_MIRROR',
+  sourceModeDetail,
   initialView = 'executive_overview',
+  initialFocalId = 'org-nscale',
   initialAsOfMs = 1794146400000,
   initialTemporalBasis = 'receipt',
   initialSelectedRelationshipId = 'rel-loughton-msft-r2',
@@ -137,7 +148,7 @@ export default function MacroDataRoom({
   const [asOfMs, setAsOfMs] = useState<number>(initialAsOfMs);
   const [temporalBasis, setTemporalBasis] = useState<TemporalBasis>(initialTemporalBasis);
   const [includeSuperseded, setIncludeSuperseded] = useState<boolean>(false);
-  const [focalId, setFocalId] = useState<string>('org-nscale');
+  const [focalId, setFocalId] = useState<string>(initialFocalId);
   const [maxDepth, setMaxDepth] = useState<1 | 2>(2);
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string>(
     initialSelectedRelationshipId,
@@ -367,6 +378,7 @@ export default function MacroDataRoom({
   const entityNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const o of dataset.organisations) map.set(o.orgId, o.displayName);
+    for (const e of dataset.executives ?? []) map.set(e.personId, e.displayName);
     for (const s of dataset.sectors) map.set(s.sectorId, s.sectorName);
     for (const p of dataset.projects) map.set(p.projectId, p.projectName);
     for (const a of dataset.energyAssets) map.set(a.assetId, a.assetName);
@@ -440,6 +452,9 @@ export default function MacroDataRoom({
     currencyCode: rel.currencyCode,
     capacityUnit: rel.capacityUnit,
     capacityQuantity: rel.capacityQuantity,
+    ...(rel.executiveTitle !== undefined ? { executiveTitle: rel.executiveTitle } : {}),
+    ...(rel.governanceAction !== undefined ? { governanceAction: rel.governanceAction } : {}),
+    ...(rel.isInterim !== undefined ? { isInterim: rel.isInterim } : {}),
     conditionsSummary: rel.conditionsSummary,
     bindingObligation: rel.bindingObligation,
     effectiveFromMs: rel.effectiveFromMs,
@@ -480,6 +495,17 @@ export default function MacroDataRoom({
         leiCode: null,
         sectorIds: [],
         metadata: {},
+      })),
+      ...(dataset.executives ?? []).map((e) => ({
+        id: e.personId,
+        kind: 'executive_person' as const,
+        label: e.displayName,
+        subtype: 'executive_officer_or_director',
+        ticker: null,
+        secCik: null,
+        leiCode: null,
+        sectorIds: [],
+        metadata: { fullName: e.fullName },
       })),
     ];
     const edgeViews = temporalSlice.activeRelationships.map(toEdgeView);
@@ -1141,6 +1167,24 @@ export default function MacroDataRoom({
           </div>
         </div>
         <div className="data-room-status-cluster" data-testid="data-room-provenance-bar">
+          <span
+            className={`dr-pill ${graphSourceMode === 'LIVE_GRAPH' ? 'live' : ''}`}
+            data-testid="graph-source-mode-badge"
+            style={
+              graphSourceMode === 'GRAPH_UNAVAILABLE'
+                ? { background: '#fff5f5', color: '#9b2c2c', borderColor: '#feb2b2', fontWeight: 700 }
+                : graphSourceMode === 'HISTORICAL_MIRROR'
+                  ? { background: '#fffaf0', color: '#744210', borderColor: '#f6e05e', fontWeight: 700 }
+                  : { fontWeight: 700 }
+            }
+          >
+            SOURCE MODE:{' '}
+            {graphSourceMode === 'LIVE_GRAPH'
+              ? 'LIVE GRAPH'
+              : graphSourceMode === 'GRAPH_UNAVAILABLE'
+                ? 'GRAPH UNAVAILABLE'
+                : 'HISTORICAL MIRROR'}
+          </span>
           <span className="dr-pill live" data-testid="typedb-live-pill">
             1. TypeDB server probe:{' '}
             {liveTypeDbStatus.reachable
@@ -1154,12 +1198,24 @@ export default function MacroDataRoom({
           <span
             className="dr-pill"
             data-testid="graph-data-source-pill"
-            title="The connectivity probe does not mean the graph on this page was read from TypeDB. Graph views on this page render the static demonstration dataset bundled with the application."
+            title={
+              graphSourceMode === 'LIVE_GRAPH'
+                ? 'Graph nodes, relationships, and observations on this page were hydrated directly from live TypeDB 3.14 concept rows.'
+                : 'The connectivity probe does not mean the graph on this page was read from TypeDB. Graph views on this page render the static demonstration dataset bundled with the application.'
+            }
           >
-            2. Displayed dataset: static repository demonstration fixture (not a live TypeDB read)
+            {graphSourceMode === 'LIVE_GRAPH'
+              ? `2. Displayed dataset: live TypeDB 3.14 graph read (${liveTypeDbStatus.databaseName ?? 'live'})`
+              : graphSourceMode === 'GRAPH_UNAVAILABLE'
+                ? '2. Displayed dataset: GRAPH UNAVAILABLE (fail-closed; no static substitution)'
+                : '2. Displayed dataset: static repository demonstration fixture (not a live TypeDB read)'}
           </span>
           <span className="dr-pill" data-testid="live-retrieval-status-pill">
-            3. Live TypeDB retrieval: inactive on Data Room views (rendered from static mirror)
+            {graphSourceMode === 'LIVE_GRAPH'
+              ? '3. Live TypeDB retrieval: ACTIVE (nodes, edges & observations hydrated from TypeDB)'
+              : graphSourceMode === 'GRAPH_UNAVAILABLE'
+                ? `3. Live TypeDB retrieval: FAILED CLOSED (${sourceModeDetail ?? 'unavailable'})`
+                : '3. Live TypeDB retrieval: inactive on Data Room views (rendered from static mirror)'}
           </span>
           <span className="dr-pill" data-testid="validation-status-pill">
             4. Validation: deterministic local schema &amp; non-double-counting checks
@@ -1168,7 +1224,9 @@ export default function MacroDataRoom({
             5. Audit &amp; outbox status:{' '}
             {simulatedOutboxFailureRelId
               ? 'Browser-local demo simulation (1 retrying / dead_letter)'
-              : `${dataset.relationships.length} bundled static relationships (browser-local demo state; not persisted to Convex)`}
+              : graphSourceMode === 'LIVE_GRAPH'
+                ? `${dataset.relationships.length} live TypeDB relationships hydrated`
+                : `${dataset.relationships.length} bundled static relationships (browser-local demo state; not persisted to Convex)`}
           </span>
           <Link
             href="/"
@@ -1181,25 +1239,60 @@ export default function MacroDataRoom({
         </div>
       </header>
 
-      {/* Static Demonstration & Synthetic Fixture Disclosure Banner */}
-      <div
-        data-testid="static-demo-dataset-banner"
-        style={{
-          background: '#fffaf0',
-          borderBottom: '1px solid #f6e05e',
-          padding: '8px 18px',
-          fontSize: '12px',
-          color: '#744210',
-        }}
-      >
-        <strong>Static Demonstration &amp; Synthetic Stress-Test Dataset Notice:</strong> This
-        Data Room renders bundled static fixture records from{' '}
-        <code>data/graph/initial-acceptance-dataset.json</code> (including future-dated 2026
-        Macro Case 001 stress-test filings, synthetic reviewer allocations, and non-live
-        reference URIs) for staging and governance verification. It does not perform live
-        TypeDB queries on page load or write browser review actions to production Convex
-        tables.
-      </div>
+      {/* Source-Mode Specific Provenance Banner */}
+      {graphSourceMode === 'GRAPH_UNAVAILABLE' ? (
+        <div
+          role="alert"
+          data-testid="graph-unavailable-banner"
+          style={{
+            background: '#fff5f5',
+            borderBottom: '1px solid #feb2b2',
+            padding: '10px 18px',
+            fontSize: '12px',
+            color: '#742a2a',
+          }}
+        >
+          <strong>GRAPH UNAVAILABLE (Fail-Closed Safeguard Active):</strong>{' '}
+          {sourceModeDetail ??
+            'Live TypeDB 3.14 graph could not be verified or returned an unsupported schema/concept payload.'}{' '}
+          Static fixture claims are never substituted as live graph state.
+        </div>
+      ) : graphSourceMode === 'LIVE_GRAPH' ? (
+        <div
+          data-testid="live-graph-dataset-banner"
+          style={{
+            background: '#f0fff4',
+            borderBottom: '1px solid #9ae6b4',
+            padding: '8px 18px',
+            fontSize: '12px',
+            color: '#22543d',
+          }}
+        >
+          <strong>LIVE GRAPH Active:</strong>{' '}
+          {sourceModeDetail ??
+            'Nodes, typed hyperedges, and financial observations are hydrated directly from live TypeDB 3.14 read transactions.'}{' '}
+          Proposed/contingent offerings remain strictly distinguished from completed funded ownership.
+        </div>
+      ) : (
+        <div
+          data-testid="static-demo-dataset-banner"
+          style={{
+            background: '#fffaf0',
+            borderBottom: '1px solid #f6e05e',
+            padding: '8px 18px',
+            fontSize: '12px',
+            color: '#744210',
+          }}
+        >
+          <strong>Static Demonstration &amp; Synthetic Stress-Test Dataset Notice:</strong> This
+          Data Room renders bundled static fixture records from{' '}
+          <code>data/graph/initial-acceptance-dataset.json</code> (including future-dated 2026
+          Macro Case 001 stress-test filings, synthetic reviewer allocations, and non-live
+          reference URIs) for staging and governance verification. It does not perform live
+          TypeDB queries on page load or write browser review actions to production Convex
+          tables.
+        </div>
+      )}
 
       {/* Sub-navigation & Temporal Time Machine */}
       <nav className="data-room-subnav" aria-label="Macro Data Room Views">

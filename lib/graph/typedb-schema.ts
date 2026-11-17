@@ -2,6 +2,7 @@ import {
   MACRO_GRAPH_SCHEMA_VERSION,
   type AllowlistedQueryType,
   type GraphEnergyAsset,
+  type GraphExecutivePerson,
   type GraphInstrument,
   type GraphLocation,
   type GraphObservation,
@@ -12,6 +13,35 @@ import {
   type GraphSourceDocument,
   type MacroRelationship,
 } from './contracts';
+
+export const ADDITIVE_CASE_007_SCHEMA_EXTENSION = `define
+  attribute person_id, value string;
+  attribute full_name, value string;
+  attribute affiliated_org_id, value string;
+  attribute executive_title, value string;
+  attribute governance_action, value string;
+  attribute is_interim, value boolean;
+
+  entity executive_person,
+    owns person_id @key,
+    owns full_name,
+    owns display_name,
+    owns affiliated_org_id,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays leadership_appointment:officer,
+    plays leadership_appointment:predecessor_officer;
+
+  organisation plays leadership_appointment:governed_organisation;
+
+  relation leadership_appointment, sub macro_relationship,
+    owns executive_title,
+    owns governance_action,
+    owns is_interim,
+    relates governed_organisation,
+    relates officer,
+    relates predecessor_officer;
+`;
 
 const EMBEDDED_PINNED_TYPEQL_SCHEMA = `# AI Capital Intelligence — Phase G.1: Macro Intelligence TypeQL 3 Schema
 # Schema Version: macro-intelligence-graph-3.14-v1
@@ -109,6 +139,13 @@ define
   attribute ingested_at_ms, value integer;
   attribute projection_key, value string;
 
+  attribute person_id, value string;
+  attribute full_name, value string;
+  attribute affiliated_org_id, value string;
+  attribute executive_title, value string;
+  attribute governance_action, value string;
+  attribute is_interim, value boolean;
+
   entity organisation,
     owns org_id @key,
     owns legal_name,
@@ -140,7 +177,8 @@ define
     plays project_dependency:dependent_organisation,
     plays sector_participation:participant_organisation,
     plays observation_attribution:subject_organisation,
-    plays observation_attribution:counterparty_organisation;
+    plays observation_attribution:counterparty_organisation,
+    plays leadership_appointment:governed_organisation;
 
   entity public_company, sub organisation;
   entity private_company, sub organisation;
@@ -150,6 +188,16 @@ define
   entity ai_laboratory, sub private_company;
   entity utility_provider, sub organisation;
   entity government_body, sub organisation;
+
+  entity executive_person,
+    owns person_id @key,
+    owns full_name,
+    owns display_name,
+    owns affiliated_org_id,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays leadership_appointment:officer,
+    plays leadership_appointment:predecessor_officer;
 
   entity sector_classification,
     owns sector_id @key,
@@ -321,6 +369,14 @@ define
     relates prerequisite_energy_asset,
     relates impacted_sector,
     relates regulatory_jurisdiction;
+
+  relation leadership_appointment, sub macro_relationship,
+    owns executive_title,
+    owns governance_action,
+    owns is_interim,
+    relates governed_organisation,
+    relates officer,
+    relates predecessor_officer;
 
   relation sector_participation,
     owns relationship_id @key,
@@ -494,6 +550,92 @@ export function compileInstrumentPutTypeQl(inst: GraphInstrument): string {
   return `put\n  $i isa financial_instrument,\n    ${attrs.join(',\n    ')};`;
 }
 
+export function compileExecutivePersonPutTypeQl(
+  person: GraphExecutivePerson,
+  owner: string,
+  visibility: string,
+): string {
+  const attrs: string[] = [
+    `has person_id ${escapeTypeQlString(person.personId)}`,
+    `has full_name ${escapeTypeQlString(person.fullName)}`,
+    `has display_name ${escapeTypeQlString(person.displayName)}`,
+    `has tenant_owner ${escapeTypeQlString(owner)}`,
+    `has visibility_scope ${escapeTypeQlString(visibility)}`,
+  ];
+  if (person.affiliatedOrgId) {
+    attrs.push(`has affiliated_org_id ${escapeTypeQlString(person.affiliatedOrgId)}`);
+  }
+  return `put\n  $ep isa executive_person,\n    ${attrs.join(',\n    ')};`;
+}
+
+export function compileLocationPlacementPutTypeQl(
+  locatedKind: 'energy_asset' | 'infrastructure_project',
+  locatedId: string,
+  locationId: string,
+): string {
+  const keyAttr = locatedKind === 'energy_asset' ? 'asset_id' : 'project_id';
+  const relId = `locplace:${locatedKind}:${locatedId}:${locationId}`;
+  return [
+    'match',
+    `  $asset isa ${locatedKind}, has ${keyAttr} ${escapeTypeQlString(locatedId)};`,
+    `  $loc isa geographical_location, has location_id ${escapeTypeQlString(locationId)};`,
+    'put',
+    `  $lp isa location_placement,`,
+    `    links (located_asset: $asset, host_location: $loc),`,
+    `    has relationship_id ${escapeTypeQlString(relId)};`,
+  ].join('\n');
+}
+
+export function compileObservationAttributionPutTypeQl(obs: GraphObservation): string {
+  const matches: string[] = [
+    `  $obs isa financial_observation, has observation_id ${escapeTypeQlString(obs.observationId)};`,
+    `  $subj isa organisation, has org_id ${escapeTypeQlString(obs.subjectOrgId)};`,
+  ];
+  const links: string[] = ['recorded_observation: $obs', 'subject_organisation: $subj'];
+  if (obs.subjectProjectId) {
+    matches.push(
+      `  $proj isa infrastructure_project, has project_id ${escapeTypeQlString(obs.subjectProjectId)};`,
+    );
+    links.push('subject_project: $proj');
+  }
+  if (obs.counterpartyOrgId) {
+    matches.push(
+      `  $cp isa organisation, has org_id ${escapeTypeQlString(obs.counterpartyOrgId)};`,
+    );
+    links.push('counterparty_organisation: $cp');
+  }
+  const attrId = `obsattr:${obs.observationId}`;
+  return [
+    'match',
+    ...matches,
+    'put',
+    `  $oa isa observation_attribution,`,
+    `    links (${links.join(', ')}),`,
+    `    has relationship_id ${escapeTypeQlString(attrId)};`,
+  ].join('\n');
+}
+
+export function compileObservationEvidentialSupportPutTypeQl(
+  obs: GraphObservation,
+  sourceDocId: string,
+): string {
+  const supId = `obsevsup:${obs.observationId}:${sourceDocId}`;
+  return [
+    'match',
+    `  $obs isa financial_observation, has observation_id ${escapeTypeQlString(obs.observationId)};`,
+    `  $doc isa source_document, has source_doc_id ${escapeTypeQlString(sourceDocId)};`,
+    'put',
+    `  $sup isa evidential_support,`,
+    `    links (supporting_document: $doc, supported_claim: $obs),`,
+    `    has relationship_id ${escapeTypeQlString(supId)},`,
+    `    has contractual_status ${escapeTypeQlString(obs.observationKind === 'reported' ? 'signed' : 'announced')},`,
+    `    has binding_obligation false,`,
+    `    has extraction_status "verified_primary_filing",`,
+    `    has reviewer_status "approved",`,
+    `    has received_at_ms ${formatTypeQlInt(obs.receivedAtMs)};`,
+  ].join('\n');
+}
+
 export function compileSourceDocumentPutTypeQl(
   doc: GraphSourceDocument,
   owner: string,
@@ -547,6 +689,7 @@ const ENTITY_KEY_ATTR_BY_KIND: Record<
   string
 > = {
   organisation: 'org_id',
+  executive_person: 'person_id',
   infrastructure_project: 'project_id',
   financial_instrument: 'instrument_id',
   energy_asset: 'asset_id',
@@ -620,6 +763,15 @@ export function compileRelationshipInsertTypeQl(
   }
   if (rel.capacityQuantity !== null) {
     attrs.push(`has capacity_quantity ${formatTypeQlDouble(rel.capacityQuantity)}`);
+  }
+  if (rel.executiveTitle) {
+    attrs.push(`has executive_title ${escapeTypeQlString(rel.executiveTitle)}`);
+  }
+  if (rel.governanceAction) {
+    attrs.push(`has governance_action ${escapeTypeQlString(rel.governanceAction)}`);
+  }
+  if (rel.isInterim !== null && rel.isInterim !== undefined) {
+    attrs.push(`has is_interim ${rel.isInterim ? 'true' : 'false'}`);
   }
   if (rel.effectiveToMs !== null) {
     attrs.push(`has effective_to_ms ${formatTypeQlInt(rel.effectiveToMs)}`);

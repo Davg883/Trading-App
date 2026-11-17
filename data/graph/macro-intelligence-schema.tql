@@ -100,6 +100,14 @@ define
   attribute ingested_at_ms, value integer;
   attribute projection_key, value string;
 
+  # Case 007 additive leadership attributes (macro-intelligence-graph-3.14-v1 / v1.1)
+  attribute person_id, value string;
+  attribute full_name, value string;
+  attribute affiliated_org_id, value string;
+  attribute executive_title, value string;
+  attribute governance_action, value string;
+  attribute is_interim, value boolean;
+
   # ---------------------------------------------------------------------------
   # 2. Canonical Entities & Organisation Subtype Hierarchy
   # ---------------------------------------------------------------------------
@@ -134,7 +142,8 @@ define
     plays project_dependency:dependent_organisation,
     plays sector_participation:participant_organisation,
     plays observation_attribution:subject_organisation,
-    plays observation_attribution:counterparty_organisation;
+    plays observation_attribution:counterparty_organisation,
+    plays leadership_appointment:governed_organisation;
 
   entity public_company, sub organisation;
   entity private_company, sub organisation;
@@ -144,6 +153,16 @@ define
   entity ai_laboratory, sub private_company;
   entity utility_provider, sub organisation;
   entity government_body, sub organisation;
+
+  entity executive_person,
+    owns person_id @key,
+    owns full_name,
+    owns display_name,
+    owns affiliated_org_id,
+    owns tenant_owner,
+    owns visibility_scope,
+    plays leadership_appointment:officer,
+    plays leadership_appointment:predecessor_officer;
 
   entity sector_classification,
     owns sector_id @key,
@@ -321,6 +340,14 @@ define
     relates prerequisite_energy_asset,
     relates impacted_sector,
     relates regulatory_jurisdiction;
+
+  relation leadership_appointment, sub macro_relationship,
+    owns executive_title,
+    owns governance_action,
+    owns is_interim,
+    relates governed_organisation,
+    relates officer,
+    relates predecessor_officer;
 
   relation sector_participation,
     owns relationship_id @key,

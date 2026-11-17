@@ -5,7 +5,12 @@ import {
   executeAllowlistedGraphQuery,
   loadInitialAcceptanceDataset,
 } from '../../../../lib/graph/query-gateway';
-import { describeTypeDbTransport, probeTypeDbServer } from '../../../../lib/graph/typedb-driver-adapter';
+import {
+  TypeDbSchemaOrHydrationError,
+  describeTypeDbTransport,
+  hydrateMacroDatasetFromLiveTypeDb,
+  probeTypeDbServer,
+} from '../../../../lib/graph/typedb-driver-adapter';
 import { runGraphVsConvexBenchmark } from '../../../../lib/graph/benchmark-evaluator';
 
 export const runtime = 'nodejs';
@@ -46,11 +51,36 @@ export async function GET(req: NextRequest) {
   const action = url.searchParams.get('action') ?? 'metadata';
 
   if (action === 'metadata') {
-    const dataset = loadInitialAcceptanceDataset();
     const probe = await probeTypeDbServer();
+    let dataset = loadInitialAcceptanceDataset();
+    let graphSourceMode: 'LIVE_GRAPH' | 'HISTORICAL_MIRROR' | 'GRAPH_UNAVAILABLE' =
+      'HISTORICAL_MIRROR';
+    if (probe.reachable && probe.databaseExists) {
+      try {
+        const hydrated = await hydrateMacroDatasetFromLiveTypeDb(undefined, {
+          callerOwner: callerId,
+        });
+        if (hydrated.ok && hydrated.dataset) {
+          dataset = hydrated.dataset;
+          graphSourceMode = 'LIVE_GRAPH';
+        }
+      } catch (err) {
+        if (err instanceof TypeDbSchemaOrHydrationError) {
+          return NextResponse.json(
+            {
+              error: err.publicMessage,
+              graphSourceMode: 'GRAPH_UNAVAILABLE',
+              executionAuthority: 'none',
+            },
+            { status: 502 },
+          );
+        }
+      }
+    }
     const benchmark = await runGraphVsConvexBenchmark(dataset);
     return NextResponse.json({
       schemaVersion: dataset.schemaVersion,
+      graphSourceMode,
       typedbServer: {
         reachable: probe.reachable,
         authenticated: probe.authenticated,
@@ -64,6 +94,7 @@ export async function GET(req: NextRequest) {
       },
       counts: {
         organisations: dataset.organisations.length,
+        executives: dataset.executives?.length ?? 0,
         sectors: dataset.sectors.length,
         projects: dataset.projects.length,
         energyAssets: dataset.energyAssets.length,
@@ -95,13 +126,30 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
-    const result = await executeAllowlistedGraphQuery(body, {
+    const rawBody = (await req.json()) as Record<string, unknown>;
+    const requireLiveGraph =
+      typeof rawBody === 'object' && rawBody !== null && rawBody.requireLiveGraph === true;
+    const queryBody =
+      typeof rawBody === 'object' && rawBody !== null && 'requireLiveGraph' in rawBody
+        ? Object.fromEntries(Object.entries(rawBody).filter(([k]) => k !== 'requireLiveGraph'))
+        : rawBody;
+    const result = await executeAllowlistedGraphQuery(queryBody, {
       callerId,
       preferLiveTypeDb: true,
+      requireLiveGraph,
     });
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
+    if (err instanceof TypeDbSchemaOrHydrationError) {
+      return NextResponse.json(
+        {
+          error: err.publicMessage,
+          graphSourceMode: 'GRAPH_UNAVAILABLE',
+          executionAuthority: 'none',
+        },
+        { status: 502 },
+      );
+    }
     if (err instanceof ZodError) {
       return NextResponse.json(
         {

@@ -10,8 +10,12 @@ import { validateRelationshipGovernance } from './identity-governance';
 import {
   compileEnergyAssetPutTypeQl,
   compileEvidentialSupportInsertTypeQl,
+  compileExecutivePersonPutTypeQl,
   compileInstrumentPutTypeQl,
+  compileLocationPlacementPutTypeQl,
   compileLocationPutTypeQl,
+  compileObservationAttributionPutTypeQl,
+  compileObservationEvidentialSupportPutTypeQl,
   compileObservationPutTypeQl,
   compileOrganisationPutTypeQl,
   compileProjectPutTypeQl,
@@ -81,7 +85,7 @@ export function computeDeterministicProjectionKey(
   visibility: VisibilityScope,
   relationship: MacroRelationship,
 ): string {
-  const payload = canonicalJson({
+  const basePayload: Record<string, unknown> = {
     schemaVersion: MACRO_GRAPH_SCHEMA_VERSION,
     owner,
     visibility,
@@ -97,7 +101,13 @@ export function computeDeterministicProjectionKey(
     sourceDocIds: relationship.sourceDocIds,
     publishedAtMs: relationship.publishedAtMs,
     receivedAtMs: relationship.receivedAtMs,
-  });
+  };
+  if (relationship.relationType === 'leadership_appointment') {
+    basePayload.executiveTitle = relationship.executiveTitle ?? null;
+    basePayload.governanceAction = relationship.governanceAction ?? null;
+    basePayload.isInterim = relationship.isInterim ?? null;
+  }
+  const payload = canonicalJson(basePayload);
   return `proj:${sha256Hex(payload)}`;
 }
 
@@ -113,6 +123,11 @@ export function compileDatasetEntityBootstrapStatements(dataset: MacroGraphDatas
   const parsed = macroGraphDatasetSchema.parse(dataset);
   const statements: string[] = [];
 
+  const knownLocationIds = new Set(parsed.locations.map((l) => l.locationId));
+  const knownOrgIds = new Set(parsed.organisations.map((o) => o.orgId));
+  const knownProjectIds = new Set(parsed.projects.map((p) => p.projectId));
+  const knownSourceIds = new Set(parsed.sources.map((s) => s.sourceDocId));
+
   for (const sector of parsed.sectors) {
     statements.push(compileSectorPutTypeQl(sector));
   }
@@ -121,6 +136,11 @@ export function compileDatasetEntityBootstrapStatements(dataset: MacroGraphDatas
   }
   for (const asset of parsed.energyAssets) {
     statements.push(compileEnergyAssetPutTypeQl(asset));
+    if (knownLocationIds.has(asset.locationId)) {
+      statements.push(
+        compileLocationPlacementPutTypeQl('energy_asset', asset.assetId, asset.locationId),
+      );
+    }
   }
   for (const org of parsed.organisations) {
     statements.push(compileOrganisationPutTypeQl(org, parsed.owner, parsed.visibility));
@@ -145,8 +165,16 @@ export function compileDatasetEntityBootstrapStatements(dataset: MacroGraphDatas
       );
     }
   }
+  for (const exec of parsed.executives) {
+    statements.push(compileExecutivePersonPutTypeQl(exec, parsed.owner, parsed.visibility));
+  }
   for (const proj of parsed.projects) {
     statements.push(compileProjectPutTypeQl(proj, parsed.owner, parsed.visibility));
+    if (knownLocationIds.has(proj.locationId)) {
+      statements.push(
+        compileLocationPlacementPutTypeQl('infrastructure_project', proj.projectId, proj.locationId),
+      );
+    }
   }
   for (const inst of parsed.instruments) {
     statements.push(compileInstrumentPutTypeQl(inst));
@@ -156,6 +184,18 @@ export function compileDatasetEntityBootstrapStatements(dataset: MacroGraphDatas
   }
   for (const obs of parsed.observations) {
     statements.push(compileObservationPutTypeQl(obs, parsed.owner, parsed.visibility));
+    if (
+      knownOrgIds.has(obs.subjectOrgId) &&
+      (!obs.subjectProjectId || knownProjectIds.has(obs.subjectProjectId)) &&
+      (!obs.counterpartyOrgId || knownOrgIds.has(obs.counterpartyOrgId))
+    ) {
+      statements.push(compileObservationAttributionPutTypeQl(obs));
+    }
+    for (const srcId of obs.sourceDocIds) {
+      if (knownSourceIds.has(srcId)) {
+        statements.push(compileObservationEvidentialSupportPutTypeQl(obs, srcId));
+      }
+    }
   }
 
   return statements;

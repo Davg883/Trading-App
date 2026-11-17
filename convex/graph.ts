@@ -32,11 +32,13 @@ import {
   loadInitialAcceptanceDataset,
 } from '../lib/graph/query-gateway';
 import {
+  TypeDbSchemaOrHydrationError,
   assertCanRecreateTypeDbDatabase,
   defaultTypeDbConfig,
   describeTypeDbTransport,
   executeReadOnlyTypeQlOnLiveServer,
   executeWriteStatementsOnLiveServer,
+  hydrateMacroDatasetFromLiveTypeDb,
   inspectLiveTypeDbGraphCounts,
   inspectLiveTypeDbReconciliationDetails,
   probeTypeDbServer,
@@ -45,6 +47,7 @@ import {
   STAGING_TYPEDB_DATABASE,
 } from '../lib/graph/typedb-driver-adapter';
 import { runMacroCase001GraphInvestigations } from '../lib/graph/macro-case-001';
+import { runCase007PreEarningsPipeline } from '../lib/remote-ops/case-007-nvidia-ingestor';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalAction: ActionBuilder<DataModel, 'internal'> = internalActionGeneric;
@@ -1101,10 +1104,8 @@ export const executeAllowlistedCloudGraphQuery = action({
       throw new Error('Model or automated actors cannot query the research graph');
     }
     const rawInput = JSON.parse(args.requestJson);
-    const dataset = loadInitialAcceptanceDataset();
     return await executeAllowlistedGraphQuery(rawInput, {
       callerId: identity.tokenIdentifier,
-      datasets: [dataset],
       preferLiveTypeDb: true,
     });
   },
@@ -1134,6 +1135,135 @@ export const executeReadOnlyCloudTypeQl = action({
     }
     const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
     return await executeReadOnlyTypeQlOnLiveServer(trimmed, config);
+  },
+});
+
+export const hydrateHostedTypeDbCloud = action({
+  args: {
+    bridgeKey: v.optional(v.string()),
+    callerOwner: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    assertBridgeKey(args.bridgeKey);
+    const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    try {
+      const res = await hydrateMacroDatasetFromLiveTypeDb(config, {
+        callerOwner: args.callerOwner ?? 'public_research',
+      });
+      return { ...res, schemaError: null, executionAuthority: 'none' as const };
+    } catch (err) {
+      if (err instanceof TypeDbSchemaOrHydrationError) {
+        return {
+          ok: false,
+          reachable: true,
+          databaseMissing: false,
+          serverVersion: null,
+          dataset: null,
+          latencyMs: 0,
+          error: err.publicMessage,
+          schemaError: err.publicMessage,
+          executionAuthority: 'none' as const,
+        };
+      }
+      throw new Error('Hosted TypeDB hydration failed closed');
+    }
+  },
+});
+
+/**
+ * Internal Case 007 pre-earnings validation and outbox staging mutation.
+ * Supports `dryRun: true` (default) to compute deterministic staging, validation, quarantine,
+ * and idempotency results without writing to Convex, or `dryRun: false` to persist validated
+ * Case 007 relationships into `graphProjectionOutbox` idempotently.
+ */
+export const stageAndEnqueueCase007Internal = internalMutation({
+  args: {
+    owner: v.string(),
+    dryRun: v.optional(v.boolean()),
+    nowMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun ?? true;
+    const owner = requireExplicitOwner(args.owner);
+    const pipeline = runCase007PreEarningsPipeline({
+      owner: 'public_research',
+      nowMs: args.nowMs,
+    });
+    const nowMs = args.nowMs ?? pipeline.capturedAtMs;
+
+    const existingOutbox = await ctx.db
+      .query('graphProjectionOutbox')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .collect();
+    const existingKeys = new Set(existingOutbox.map((i) => i.projectionKey));
+
+    let enqueuedCount = 0;
+    let deduplicatedCount = 0;
+    const itemSummaries: Array<{
+      relationshipId: string;
+      projectionKey: string;
+      deduplicated: boolean;
+      epistemicStatus: string;
+      contractualStatus: string;
+    }> = [];
+
+    if (dryRun) {
+      for (const item of pipeline.outboxItems) {
+        const isDup = existingKeys.has(item.projectionKey);
+        if (isDup) deduplicatedCount += 1;
+        else enqueuedCount += 1;
+        const rel = pipeline.dataset.relationships.find(
+          (r) => r.relationshipId === item.relationshipId,
+        )!;
+        itemSummaries.push({
+          relationshipId: item.relationshipId,
+          projectionKey: item.projectionKey,
+          deduplicated: isDup,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+        });
+      }
+    } else {
+      for (const rel of pipeline.dataset.relationships) {
+        const res = await insertOrDeduplicateOutboxRelationship(ctx, {
+          owner,
+          visibility: 'public_research',
+          sourceTable: 'researchStagingItems',
+          sourceRecordId: `case007:${rel.relationshipId}`,
+          parsedRel: rel,
+          reviewedAtMs: nowMs,
+          reviewNote:
+            'Case 007 deterministic primary SEC filing verification (pre-Q3 FY27 snapshot)',
+          nowMs,
+        });
+        if (res.deduplicated) deduplicatedCount += 1;
+        else enqueuedCount += 1;
+        itemSummaries.push({
+          relationshipId: rel.relationshipId,
+          projectionKey: res.projectionKey,
+          deduplicated: res.deduplicated,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+        });
+      }
+    }
+
+    return {
+      dryRun,
+      bundleId: pipeline.bundleId,
+      capturedAtMs: pipeline.capturedAtMs,
+      validatedRelationshipCount: pipeline.dataset.relationships.length,
+      quarantinedCandidateCount: pipeline.quarantinedCandidates.length,
+      quarantinedCandidates: pipeline.quarantinedCandidates,
+      enqueuedCount,
+      deduplicatedCount,
+      beforeOutboxRowCount: existingOutbox.length,
+      afterOutboxRowCount: dryRun
+        ? existingOutbox.length
+        : existingOutbox.length + enqueuedCount,
+      itemSummaries,
+      executionAuthority: 'none' as const,
+    };
   },
 });
 

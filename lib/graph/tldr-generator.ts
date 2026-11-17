@@ -65,7 +65,9 @@ export function generateBoundedGraphTldr(params: {
         ? formatMoneyUsd(edge.principalAmount, edge.currencyCode)
         : edge.capacityQuantity !== null && edge.capacityUnit !== null
           ? `${edge.capacityQuantity} ${edge.capacityUnit}`
-          : 'undisclosed financial terms';
+          : edge.executiveTitle
+            ? edge.executiveTitle
+            : 'undisclosed financial terms';
 
     whatChanged.push({
       id: `chg:${edge.relationshipId}`,
@@ -106,6 +108,22 @@ export function generateBoundedGraphTldr(params: {
       relationshipIds: cancelledOrDiscussion.map((e) => e.relationshipId),
       sourceDocIds: [
         ...new Set(cancelledOrDiscussion.flatMap((e) => e.sources.map((s) => s.sourceDocId))),
+      ],
+    });
+  }
+
+  const contingentProposed = edges.filter(
+    (e) => e.contractualStatus === 'contingent_signed' || e.epistemicStatus === 'proposed',
+  );
+  if (contingentProposed.length > 0) {
+    whyItMatters.push({
+      id: 'why:contingent-proposed-commitments',
+      text: `${contingentProposed.length} proposed or contingent-signed capital commitment(s) remain subject to IPO effectiveness, stockholder approval, or closing conditions and are strictly distinguished from completed funded ownership.`,
+      epistemicStatus: 'proposed',
+      contractualStatus: contingentProposed[0]!.contractualStatus,
+      relationshipIds: contingentProposed.map((e) => e.relationshipId),
+      sourceDocIds: [
+        ...new Set(contingentProposed.flatMap((e) => e.sources.map((s) => s.sourceDocId))),
       ],
     });
   }

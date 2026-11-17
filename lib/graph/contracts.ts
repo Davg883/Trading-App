@@ -1,10 +1,23 @@
 import { z } from 'zod';
 
 export const MACRO_GRAPH_SCHEMA_VERSION = 'macro-intelligence-graph-3.14-v1' as const;
+export const SUPPORTED_MACRO_GRAPH_SCHEMA_VERSIONS = [
+  'macro-intelligence-graph-3.14-v1',
+  'macro-intelligence-graph-3.14-v1.1',
+] as const;
+export type SupportedMacroGraphSchemaVersion =
+  (typeof SUPPORTED_MACRO_GRAPH_SCHEMA_VERSIONS)[number];
 export const MACRO_GRAPH_DATASET_VERSION = 'macro-graph-dataset-g1-v1' as const;
 export const PINNED_TYPEDB_SERVER_VERSION = '3.14.2' as const;
 export const PINNED_TYPEDB_HTTP_DRIVER_VERSION = '3.14.0' as const;
 export const PINNED_TYPEDB_PYTHON_DRIVER_VERSION = '3.14.0' as const;
+
+export const GRAPH_SOURCE_MODES = [
+  'LIVE_GRAPH',
+  'HISTORICAL_MIRROR',
+  'GRAPH_UNAVAILABLE',
+] as const;
+export type GraphSourceMode = (typeof GRAPH_SOURCE_MODES)[number];
 
 export const ORGANISATION_SUBTYPES = [
   'public_company',
@@ -26,6 +39,7 @@ export const MACRO_RELATION_TYPES = [
   'operational_control',
   'leasing_agreement',
   'project_dependency',
+  'leadership_appointment',
 ] as const;
 
 export const EPISTEMIC_STATUSES = [
@@ -40,6 +54,7 @@ export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 export const CONTRACTUAL_STATUSES = [
   'reported_discussion',
   'announced',
+  'contingent_signed',
   'signed',
   'funded',
   'cancelled',
@@ -162,6 +177,16 @@ export const financialInstrumentSchema = z
   .strict();
 export type GraphInstrument = z.infer<typeof financialInstrumentSchema>;
 
+export const executivePersonSchema = z
+  .object({
+    personId: nonEmptyId,
+    fullName: safeText,
+    displayName: safeText,
+    affiliatedOrgId: nonEmptyId.nullable().default(null),
+  })
+  .strict();
+export type GraphExecutivePerson = z.infer<typeof executivePersonSchema>;
+
 export const sourceDocumentSchema = z
   .object({
     sourceDocId: nonEmptyId,
@@ -231,6 +256,7 @@ export const relationshipParticipantSchema = z
     entityId: nonEmptyId,
     entityKind: z.enum([
       'organisation',
+      'executive_person',
       'infrastructure_project',
       'financial_instrument',
       'energy_asset',
@@ -267,8 +293,11 @@ export const macroRelationshipSchema = z
       .string()
       .regex(/^[A-Z]{3}$/)
       .nullable(),
-    capacityUnit: z.enum(['MW', 'GPU']).nullable(),
+    capacityUnit: z.enum(['MW', 'GPU', 'SHARES']).nullable(),
     capacityQuantity: z.number().finite().nonnegative().nullable(),
+    executiveTitle: safeText.nullable().optional(),
+    governanceAction: safeText.nullable().optional(),
+    isInterim: z.boolean().nullable().optional(),
     conditionsSummary: safeText,
     bindingObligation: z.boolean(),
     effectiveFromMs: timestampMs,
@@ -313,6 +342,16 @@ export const macroRelationshipSchema = z
         message: 'Signed or funded contractual status cannot be inferred from news speculation',
       });
     }
+    if (
+      rel.contractualStatus === 'contingent_signed' &&
+      (!['proposed', 'confirmed'].includes(rel.epistemicStatus) ||
+        !['verified_primary_filing', 'verified_company_release'].includes(rel.extractionStatus))
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Contingent signed agreements require primary filing/company disclosure and proposed/confirmed epistemic status',
+      });
+    }
   });
 export type MacroRelationship = z.infer<typeof macroRelationshipSchema>;
 
@@ -323,11 +362,12 @@ export const macroGraphDatasetSchema = z
     owner: nonEmptyId,
     visibility: z.enum(VISIBILITY_SCOPES),
     sectors: z.array(sectorSchema).min(1).max(50),
-    organisations: z.array(organisationSchema).min(6).max(200),
-    locations: z.array(locationSchema).min(1).max(200),
+    organisations: z.array(organisationSchema).min(1).max(200),
+    executives: z.array(executivePersonSchema).max(200).default([]),
+    locations: z.array(locationSchema).max(200),
     energyAssets: z.array(energyAssetSchema).max(200),
-    projects: z.array(infrastructureProjectSchema).min(1).max(200),
-    instruments: z.array(financialInstrumentSchema).min(1).max(200),
+    projects: z.array(infrastructureProjectSchema).max(200),
+    instruments: z.array(financialInstrumentSchema).max(200),
     sources: z.array(sourceDocumentSchema).min(1).max(500),
     observations: z.array(financialObservationSchema).max(1000),
     relationships: z.array(macroRelationshipSchema).min(1).max(1000),
@@ -358,6 +398,7 @@ export type GraphNodeView = {
   label: string;
   kind:
     | 'organisation'
+    | 'executive_person'
     | 'infrastructure_project'
     | 'sector_classification'
     | 'energy_asset'
@@ -386,7 +427,10 @@ export type GraphEdgeView = {
   principalAmount: number | null;
   currencyCode: string | null;
   capacityQuantity: number | null;
-  capacityUnit: 'MW' | 'GPU' | null;
+  capacityUnit: 'MW' | 'GPU' | 'SHARES' | null;
+  executiveTitle?: string | null;
+  governanceAction?: string | null;
+  isInterim?: boolean | null;
   conditionsSummary: string;
   bindingObligation: boolean;
   publishedAtMs: number;
@@ -434,6 +478,8 @@ export type GraphQueryResponse = {
   queryType: AllowlistedQueryType;
   schemaVersion: typeof MACRO_GRAPH_SCHEMA_VERSION;
   backendMode: 'typedb_live' | 'deterministic_mirror';
+  graphSourceMode: GraphSourceMode;
+  sourceModeDetail: string;
   typedbServerVersion: string | null;
   liveAnswerCount?: number;
   liveQueryLatencyMs?: number | null;
