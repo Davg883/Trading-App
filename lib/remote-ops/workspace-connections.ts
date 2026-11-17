@@ -140,20 +140,24 @@ export function buildWorkspaceConnectionsReport(
 
   if (health) {
     convexVerifiedAt = health.evaluatedAt;
-    const enabledCount = health.jobs.filter((j) => j.enabled).length;
+    const scheduledCount = health.jobs.filter((j) => j.scheduled ?? j.enabled).length;
     const promotedTotal = health.operationalLayers.evidence.promotedTotal;
     const obsCount = options.liveOps?.marketData?.totalObservationsStored ?? 0;
-    convexCheckpoint = `${promotedTotal} promoted facts · ${obsCount} EOD observations · ${enabledCount}/${health.jobs.length} cloud schedules enabled`;
+    const scheduler = health.operationalLayers.scheduler;
+    convexCheckpoint = `${promotedTotal} promoted facts · ${obsCount} EOD observations · ${scheduledCount}/${health.jobs.length} jobs actually scheduled · scheduler: ${scheduler.label}`;
     if (health.operationalLayers.collector.status === 'failed') {
       convexStatus = 'Failed';
       convexDetail = `Convex reachable, but one or more scheduled collectors reported errors (${health.operationalLayers.collector.failedJobsCount} failing).`;
     } else if (!health.systemEnabled) {
       convexStatus = 'Intentionally disabled';
       convexDetail = health.operationalLayers.scheduler.detail;
+    } else if (health.operationalLayers.scheduler.status !== 'working') {
+      // Sprint G9.2: the database being reachable never implies the cron is executing.
+      convexStatus = 'Connected but stale';
+      convexDetail = `Evidence store reachable, but the unattended scheduler is not executing: ${health.operationalLayers.scheduler.detail}`;
     } else {
       convexStatus = 'Connected and healthy';
-      convexDetail =
-        'Authoritative evidence store, provenance ledger, and 15-minute unattended cloud scheduler verified.';
+      convexDetail = `Evidence store reachable; ${health.operationalLayers.scheduler.detail}`;
     }
   } else if (convexUrlConfigured) {
     convexStatus = 'Configured, not yet verified';
@@ -393,9 +397,13 @@ export function buildWorkspaceConnectionsReport(
   if (briefingJob) {
     briefingEnv = briefingJob.environment === 'remote' ? 'Production' : 'Staging';
     briefingVerifiedAt = briefingJob.lastSuccessAt;
-    const briefDate = options.liveOps?.latestBriefing?.briefingDate ?? health?.operationalLayers.briefing.ukDate ?? 'latest';
-    const factCount = options.liveOps?.latestBriefing?.confirmedFacts.length ?? briefingJob.evidenceAdded;
-    briefingCheckpoint = `Briefing ${briefDate} (${factCount} confirmed facts) · schedule 07:30 Europe/London`;
+    // Sprint G9.2: never substitute today's date for a briefing that does not exist, or invent a fact count.
+    const briefDate =
+      options.liveOps?.latestBriefing?.briefingDate ?? health?.operationalLayers.briefing.latestBriefingDate ?? null;
+    const factCount = options.liveOps?.latestBriefing?.confirmedFacts.length ?? null;
+    briefingCheckpoint = briefDate
+      ? `Latest stored briefing ${briefDate}${factCount === null ? ' (content visible to the research owner only)' : ` (${factCount} confirmed facts)`} · schedule 07:30 Europe/London`
+      : 'No briefing stored · schedule 07:30 Europe/London';
     if (!briefingJob.enabled) {
       briefingStatus = 'Intentionally disabled';
       briefingDetail = briefingJob.pausedReason ?? 'Daily intelligence briefing schedule is disabled by the owner.';

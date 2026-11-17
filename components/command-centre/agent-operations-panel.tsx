@@ -91,23 +91,27 @@ export function AgentOperationsPanel({
 
    <div className="cc-widgets" style={{marginBottom:'12px'}} data-testid="agent-ops-layers">
     <article className={`cc-widget cc-${layerTone(layers.scheduler.status)}`} data-testid="layer-scheduler">
-     <h3>1. Scheduler working</h3>
+     <h3>1. Scheduler</h3>
      <p><strong>{layers.scheduler.label}</strong> — {layers.scheduler.detail}</p>
+     <small data-testid="layer-scheduler-env">
+      RESEARCH_SCHEDULER_ENV: {layers.scheduler.schedulerEnv??'unset'} · last tick {layers.scheduler.lastTickAt?iso(layers.scheduler.lastTickAt):'never'}
+      {layers.scheduler.nextExpectedTickAt?<> · next expected {iso(layers.scheduler.nextExpectedTickAt)}</>:<> · no tick expected</>}
+     </small>
     </article>
     <article className={`cc-widget cc-${layerTone(layers.collector.status)}`} data-testid="layer-collector">
-     <h3>2. Collector working</h3>
+     <h3>2. Collectors</h3>
      <p><strong>{layers.collector.label}</strong> — {layers.collector.detail}</p>
     </article>
     <article className={`cc-widget cc-${layerTone(layers.source.status)}`} data-testid="layer-source">
-     <h3>3. Source available</h3>
+     <h3>3. Sources</h3>
      <p><strong>{layers.source.label}</strong> — {layers.source.detail}</p>
     </article>
     <article className={`cc-widget cc-${layerTone(layers.evidence.status)}`} data-testid="layer-evidence">
-     <h3>4. Valid evidence imported</h3>
+     <h3>4. Evidence import</h3>
      <p><strong>{layers.evidence.label}</strong> — {layers.evidence.detail}</p>
     </article>
     <article className={`cc-widget cc-${layerTone(layers.briefing.status)}`} data-testid="layer-briefing">
-     <h3>5. Research briefing generated</h3>
+     <h3>5. Research briefing</h3>
      <p><strong>{layers.briefing.label}</strong> — {layers.briefing.detail}</p>
     </article>
    </div>
@@ -135,8 +139,8 @@ export function AgentOperationsPanel({
          <small>{CATEGORY_LABELS[job.category]} — {job.purpose}</small>
         </th>
         <td>
-         <span className={`cc-status ${job.enabled&&!job.pausedReason&&!job.lastErrorCode?'cc-delayed':'cc-stale'}`} data-testid={`job-status-${job.jobKey}`}>
-          {job.pausedReason?`Paused (${job.pausedReason})`:!job.enabled?'Disabled':job.lastErrorCode?'Failed':'Enabled'}
+         <span className={`cc-status ${job.enabled&&job.scheduled!==false&&!job.pausedReason&&!job.lastErrorCode?'cc-delayed':'cc-stale'}`} data-testid={`job-status-${job.jobKey}`}>
+          {job.pausedReason?`Paused (${job.pausedReason})`:!job.enabled?'Disabled':job.lastErrorCode?'Failed':job.scheduled===false?'Enabled · not scheduled (cron disabled)':'Enabled'}
          </span>
          <small data-testid={`job-env-${job.jobKey}`}>Env: {job.environment}</small>
          {onToggleJob&&(
@@ -154,6 +158,8 @@ export function AgentOperationsPanel({
         <td data-testid={`job-last-success-${job.jobKey}`}>
          {job.lastSuccessAt?iso(job.lastSuccessAt):'No completed run yet'}
          {job.lastSuccessAt&&<small>{age(now-job.lastSuccessAt)}</small>}
+         <small data-testid={`job-last-attempt-${job.jobKey}`}>Last attempt: {job.lastRunAt?iso(job.lastRunAt):'never'}</small>
+         <small data-testid={`job-source-observed-${job.jobKey}`}>Source observed: {job.latestSourceObservationAt?iso(job.latestSourceObservationAt):'none stored'}</small>
         </td>
         <td data-testid={`job-last-failure-${job.jobKey}`}>
          {job.lastErrorCode?(
@@ -167,7 +173,7 @@ export function AgentOperationsPanel({
           <span>{fixture?'Synthetic fixture healthy':'None · No provider errors'}</span>
          )}
         </td>
-        <td data-testid={`job-next-run-${job.jobKey}`}>{iso(job.nextRunAt)}</td>
+        <td data-testid={`job-next-run-${job.jobKey}`}>{job.scheduled===false?<>Not scheduled<small>stored value {iso(job.nextRunAt)} will not run while the cron is disabled</small></>:job.nextRunOverdue?<>Overdue<small>was due {iso(job.nextRunAt)}</small></>:iso(job.nextRunAt)}</td>
         <td>
          <span className={`cc-fresh cc-${job.freshness==='fresh'?'fresh':job.freshness==='stale'?'stale':'unavailable'}`} data-testid={`job-freshness-${job.jobKey}`}>
           {job.freshness==='fresh'?'Fresh':job.freshness==='delayed'?'Delayed':job.freshness==='stale'?'Stale':'Unavailable'}
@@ -191,6 +197,9 @@ export function AgentOperationsPanel({
     </table>
    </div>
 
+   {health.externalNewsIngestion&&(
+    <p className="cc-note" data-testid="external-news-ingestion" data-status={health.externalNewsIngestion.status}><strong>{health.externalNewsIngestion.label}</strong> — {health.externalNewsIngestion.detail}</p>
+   )}
    {health.graphProjection&&(
     <div className="cc-strip" style={{marginTop:'12px'}} data-testid="agent-ops-graph-projection">
      <dl>
