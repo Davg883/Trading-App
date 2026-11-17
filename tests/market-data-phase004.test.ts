@@ -17,6 +17,7 @@ import {
  evaluateForwardResearchEvent,
  type FrozenForwardEvidenceItem,
 } from '../lib/market-data/forward-research';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={
  './_generated/server.ts':async()=>({}),
@@ -504,7 +505,7 @@ describe('Phase 004 Stage 5 — Convex Cloud Persistence, Missing Evidence & For
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   const t=convexTest(schema,modules);
-  const ownerClient=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER});
+  const ownerClient=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER});
 
   const collected=await collectUniverseMarketObservations({
    now:NOW,

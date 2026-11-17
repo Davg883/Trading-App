@@ -1,4 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 // Legacy execution-path tests. This build is research-only (see lib/trading/execution-boundary.ts and
 // tests/security-research-only-boundary.test.ts). The boundary is replaced here, through the test runner's module
 // mock only, to keep the retained order workflow gates covered for a future separately deployed execution service.
@@ -20,7 +21,7 @@ const brokerOrder=(o:Record<string,unknown>={})=>JSON.stringify({id:555,ticker:'
 afterEach(()=>vi.useRealTimers());
 
 async function setup({reviewer=true,optIn=true,key=true}={}){
- vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules),owner=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER}),other=t.withIdentity({subject:'user_other',tokenIdentifier:OTHER});
+ vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules),owner=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER}),other=t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:OTHER});
  if(reviewer)await grantReviewers(t,[OWNER]);
  if(optIn)await owner.mutation(m('recordOptIn'),{statement:OPT_IN_STATEMENT});
  if(key)await t.mutation(m('saveTradingKeyInternal'),{owner:OWNER,environment:'demo',maskedKey:'••••ABCD',encryptedPayload:'{"test":"envelope"}'});
@@ -41,7 +42,7 @@ const state=async(owner:Awaited<ReturnType<typeof setup>>['owner'],orderId:unkno
 
 describe('Trading proposals, approvals and confirmations',()=>{
  it('refuses model actors and keeps orders owner-scoped',async()=>{
-  const {t,owner,other}=await setup();const model=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER,actorType:'model'});
+  const {t,owner,other}=await setup();const model=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER,actorType:'model'});
   await expect(model.mutation(m('createDraft'),{draftJson:draft()})).rejects.toThrow('Model or automated actors');
   const orderId=await owner.mutation(m('createDraft'),{draftJson:draft()});
   await expect(other.mutation(m('withdraw'),{orderId,reason:'x'})).rejects.toThrow('Order unavailable');await expect(other.query(q('orderEvents'),{orderId})).rejects.toThrow('Order unavailable');
@@ -78,7 +79,7 @@ describe('Submission gates and duplicate prevention',()=>{
   const {t,owner}=await setup();await t.mutation(m('saveTradingKeyInternal'),{owner:OWNER,environment:'live',maskedKey:'••••LIVE',encryptedPayload:'{}'});
   const orderId=await toConfirmed(t,owner,draft({environment:'live'}));
   await expect(t.mutation(m('claimSubmissionInternal'),claim(orderId))).rejects.toThrow('emergency switch');
-  const plain=t.withIdentity({subject:'user_other',tokenIdentifier:OTHER});await expect(plain.mutation(m('setLiveKillSwitch'),{engaged:false,reason:'try'})).rejects.toThrow('Reviewer role required');
+  const plain=t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:OTHER});await expect(plain.mutation(m('setLiveKillSwitch'),{engaged:false,reason:'try'})).rejects.toThrow('Reviewer role required');
   await owner.mutation(m('setLiveKillSwitch'),{engaged:false,reason:'Owner activation review completed'});
   expect(await t.mutation(m('claimSubmissionInternal'),claim(orderId))).toEqual({ok:true});
   await owner.mutation(m('setLiveKillSwitch'),{engaged:true,reason:'Emergency stop'});
@@ -135,7 +136,7 @@ describe('Trading keys, limits and ledger independence',()=>{
  it('stores a trading key only after explicit opt-in and never touches read-only connections',async()=>{
   const {t}=await setup({optIn:false,key:false});
   await expect(t.mutation(m('saveTradingKeyInternal'),{owner:OWNER,environment:'demo',maskedKey:'••••ABCD',encryptedPayload:'{}'})).rejects.toThrow('opt-in');
-  const owner=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER});await expect(owner.mutation(m('recordOptIn'),{statement:'yes'})).rejects.toThrow('exact opt-in statement');
+  const owner=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER});await expect(owner.mutation(m('recordOptIn'),{statement:'yes'})).rejects.toThrow('exact opt-in statement');
   await owner.mutation(m('recordOptIn'),{statement:OPT_IN_STATEMENT});await t.mutation(m('saveTradingKeyInternal'),{owner:OWNER,environment:'demo',maskedKey:'••••ABCD',encryptedPayload:'{}'});
   await t.run(async ctx=>{expect(await ctx.db.query('brokerConnections').collect()).toEqual([]);expect(await ctx.db.query('brokerCredentials').collect()).toEqual([]);expect(await ctx.db.query('tradingCredentials').collect()).toHaveLength(1);});
   const overview=await owner.query(q('overview'),{}) as {tradingKeys:Record<string,unknown>[]};expect(Object.keys(overview.tradingKeys[0]).sort()).toEqual(['createdAt','environment','maskedKey']);
@@ -144,7 +145,7 @@ describe('Trading keys, limits and ledger independence',()=>{
  it('lets only a reviewer change limits, and not while an order is approved',async()=>{
   const {t,owner}=await setup();const limits=JSON.stringify({maxOrderValue:50,maxPositionExposurePct:20,maxDailyLoss:10,maxPriceAgeSeconds:60,fxFeeBps:15,allowedInstrumentTypes:['STOCK'],version:'v2'});
   await owner.mutation(m('updateLimits'),{limitsJson:limits});await toApproved(t,owner);await expect(owner.mutation(m('updateLimits'),{limitsJson:limits})).rejects.toThrow('outstanding');
-  const plain=t.withIdentity({subject:'user_other',tokenIdentifier:OTHER});await expect(plain.mutation(m('updateLimits'),{limitsJson:limits})).rejects.toThrow('Reviewer role required');
+  const plain=t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:OTHER});await expect(plain.mutation(m('updateLimits'),{limitsJson:limits})).rejects.toThrow('Reviewer role required');
  });
  it('never writes the internal paper ledger and exposes no broker calls from Convex',async()=>{
   const {t,owner}=await setup();const orderId=await toConfirmed(t,owner);await t.mutation(m('claimSubmissionInternal'),claim(orderId));

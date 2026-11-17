@@ -353,7 +353,7 @@ async function gatewayOwner(
     ...('azp' in pay?{azp:pay.azp}:{}),
     ...(actorType!==undefined?{actorType}:{}),
    } as unknown as import('convex/server').UserIdentity;
-   const checked=verifyIdentityClaims(candidateIdentity,{requireApplicationContext:true});
+   const checked=verifyIdentityClaims(candidateIdentity);
    if(checked.actorType!==undefined&&checked.actorType!=='human')throw new Error('automated actor');
   }catch{
    return {ok:false,response:forbiddenIdentityResponse()};

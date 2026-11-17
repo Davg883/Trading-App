@@ -3,6 +3,7 @@ import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
 import {runNewsResearchAgentWorkflow} from '../lib/remote-ops/news-agent';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={
  './_generated/server.ts':async()=>({}),
@@ -27,10 +28,10 @@ function setup(){
  const t=convexTest(schema,modules);
  return {
   t,
-  owner:t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER}),
-  other:t.withIdentity({subject:'user_other',tokenIdentifier:OTHER}),
-  agent:t.withIdentity({subject:'remote_agent',tokenIdentifier:'https://issuer.test|remote_agent',actorType:'agent'}),
-  model:t.withIdentity({subject:'model_runner',tokenIdentifier:'https://issuer.test|model_runner',actorType:'model'}),
+  owner:t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER}),
+  other:t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:OTHER}),
+  agent:t.withIdentity({...APP_SESSION,subject:'remote_agent',tokenIdentifier:'https://issuer.test|remote_agent',actorType:'agent'}),
+  model:t.withIdentity({...APP_SESSION,subject:'model_runner',tokenIdentifier:'https://issuer.test|model_runner',actorType:'model'}),
  };
 }
 

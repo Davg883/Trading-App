@@ -3,6 +3,7 @@ import {evidenceTurnFields} from './helpers/turn-fixture';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * Pre-merge risk H1. A signed-in user could call the public `recordEvidenceChatTurn` mutation with a fabricated
@@ -18,7 +19,7 @@ function setup(){
  for(const k of ['GEMINI_API_KEY','GOOGLE_API_KEY','GOOGLE_GEMINI_API_KEY','GOOGLE_GENERATIVE_AI_API_KEY','EVIDENCE_CHAT_GEMINI_ENABLED','GEMINI_MODEL_ID','OPENAI_API_KEY','ANTHROPIC_API_KEY'])vi.stubEnv(k,'');
  vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);
  const t=convexTest(schema,modules);
- return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS})};
+ return {t,asA:t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISS})};
 }
 let EV_A:Awaited<ReturnType<typeof evidenceTurnFields>>;
 beforeAll(async()=>{EV_A=await evidenceTurnFields('Which hyperscalers fund the Irish data-centre build-out?',A);});

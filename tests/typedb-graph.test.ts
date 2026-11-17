@@ -40,6 +40,7 @@ import {
   runMacroCase001GraphInvestigations,
 } from '../lib/graph/macro-case-001';
 import type { MacroGraphDataset } from '../lib/graph/contracts';
+import {APP_SESSION} from './helpers/app-identity';
 
 beforeEach(() => {
   resetGraphGatewayRateLimitsForTests();
@@ -488,8 +489,8 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     const t = convexTest(schema, modules);
     await grantReviewers(t, [OWNER]);
 
-    const owner = t.withIdentity({ subject: 'user_owner', tokenIdentifier: OWNER });
-    const other = t.withIdentity({ subject: 'user_other', tokenIdentifier: OTHER });
+    const owner = t.withIdentity({...APP_SESSION,subject: 'user_owner', tokenIdentifier: OWNER });
+    const other = t.withIdentity({...APP_SESSION,subject: 'user_other', tokenIdentifier: OTHER });
 
     const dataset = loadInitialAcceptanceDataset();
     const rel = dataset.relationships[0]!;
@@ -619,7 +620,7 @@ describe('Phase G.1: TypeDB 3.14 Macro Intelligence Engine & Acceptance Suite', 
     const OWNER = 'https://clerk.capital.aiguides.co.uk|user_owner';
     const t = convexTest(schema, modules);
     await grantReviewers(t, [OWNER]);
-    const owner = t.withIdentity({ subject: 'user_owner', tokenIdentifier: OWNER });
+    const owner = t.withIdentity({...APP_SESSION,subject: 'user_owner', tokenIdentifier: OWNER });
 
     const dataset = loadInitialAcceptanceDataset();
     const monarchCreditRel = dataset.relationships.find(

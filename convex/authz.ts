@@ -38,19 +38,21 @@ function allowedAzpOrigins():Set<string>{
  return new Set(configured.length>0?configured:DEFAULT_ALLOWED_AZP_ORIGINS);
 }
 
-export type VerifyIdentityClaimsOptions={
- requireApplicationContext?:boolean;
-};
-
 /**
  * Verifies issuer, audience (`aud`), and authorized party (`azp`) application binding
  * across both OIDC (`template: "convex"`, `aud: "convex"`) and `customJwt` (Clerk default
  * RS256 session token with `azp: "<origin>"`) verification paths.
+ *
+ * Application context is mandatory (G9.3.5). Every identity must carry an approved `azp` (a Clerk session token
+ * issued to an allowed browser origin) or an approved `aud` (`convex`, or an allowed origin). A token with neither
+ * can only be minted outside the application (for example with the Clerk secret through the Backend API) and is
+ * refused. A present-but-untrusted `azp` or `aud` is refused even when the other claim is valid.
+ *
+ * There is deliberately no opt-out: the G9.3.5 compatibility audit found no legitimate caller that sends a token
+ * without both claims (browser and server routes forward Clerk session tokens; machine paths use admin keys against
+ * internal functions or shared secrets on HTTP actions, never a Clerk identity). Adding an exception requires review.
  */
-export function verifyIdentityClaims(
- user:UserIdentity,
- options?:VerifyIdentityClaimsOptions,
-):UserIdentity{
+export function verifyIdentityClaims(user:UserIdentity):UserIdentity{
  const issuers=configuredIssuers();
  if(issuers.length>0){
   const tokenPrefix=typeof user.tokenIdentifier==='string'&&user.tokenIdentifier.includes('|')
@@ -101,7 +103,7 @@ export function verifyIdentityClaims(
   hasValidAzp=true;
  }
 
- if(options?.requireApplicationContext&&!hasValidAud&&!hasValidAzp){
+ if(!hasValidAud&&!hasValidAzp){
   throw new Error('Missing token application context');
  }
 

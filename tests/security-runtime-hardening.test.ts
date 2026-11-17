@@ -7,6 +7,7 @@ import {grantReviewers} from './helpers/roles';
 import * as graphModule from '../convex/graph';
 import {createTypeDbDriver,defaultTypeDbConfig,describeTypeDbTransport,probeTypeDbServer,TypeDbConfigurationError} from '../lib/graph/typedb-driver-adapter';
 import {authenticationUnavailableResponse,isSessionDependentApiPath} from '../lib/auth/proxy-policy';
+import {APP_SESSION} from './helpers/app-identity';
 
 /** MVP hardening — work package 4: authentication and runtime configuration. No test here contacts a real service. */
 const modules={'./_generated/server.ts':async()=>({}),'./graph.ts':()=>import('../convex/graph'),'./roles.ts':()=>import('../convex/roles'),'./operations.ts':()=>import('../convex/operations')};
@@ -63,7 +64,7 @@ describe('WP4 — graph actions are no longer anonymous',()=>{
   for(const [name,args] of [['executeReadOnlyCloudTypeQl',{typeql:'match $x isa organisation;'}],['probeHostedTypeDbCloud',{}],['verifyHostedTypeDbCloud',{}]] as const){
    await expect(t.action(act(name),args)).rejects.toThrow('TypeDB bridge credential required');
    await expect(t.action(act(name),{...args,bridgeKey:'x'.repeat(48)})).rejects.toThrow('TypeDB bridge credential required');
-   await expect(t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).action(act(name),args)).rejects.toThrow('TypeDB bridge credential required');
+   await expect(t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).action(act(name),args)).rejects.toThrow('TypeDB bridge credential required');
   }
   vi.stubEnv('TYPEDB_BRIDGE_SECRET','');
   await expect(t.action(act('executeReadOnlyCloudTypeQl'),{typeql:'match $x isa organisation;',bridgeKey:BRIDGE})).rejects.toThrow('not configured');
@@ -79,18 +80,18 @@ describe('WP4 — graph actions are no longer anonymous',()=>{
  it('the allowlisted query action requires a verified human identity and takes no caller-supplied identity',async()=>{
   const t=setup(),req={requestJson:JSON.stringify({queryType:'not_allowlisted'})};
   await expect(t.action(act('executeAllowlistedCloudGraphQuery'),req)).rejects.toThrow('Sign in required');
-  await expect(t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'}).action(act('executeAllowlistedCloudGraphQuery'),req)).rejects.toThrow('automated actors');
-  await expect(t.withIdentity({subject:'x',tokenIdentifier:'https://evil.test|x',issuer:'https://evil.test'}).action(act('executeAllowlistedCloudGraphQuery'),req)).rejects.toThrow('Untrusted token issuer');
-  await expect(t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).action(act('executeAllowlistedCloudGraphQuery'),{...req,callerId:'someone-else'} as never)).rejects.toThrow();
+  await expect(t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'}).action(act('executeAllowlistedCloudGraphQuery'),req)).rejects.toThrow('automated actors');
+  await expect(t.withIdentity({...APP_SESSION,subject:'x',tokenIdentifier:'https://evil.test|x',issuer:'https://evil.test'}).action(act('executeAllowlistedCloudGraphQuery'),req)).rejects.toThrow('Untrusted token issuer');
+  await expect(t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).action(act('executeAllowlistedCloudGraphQuery'),{...req,callerId:'someone-else'} as never)).rejects.toThrow();
  });
  it('projection sync requires an explicit reviewer grant, a human actor and a trusted issuer',async()=>{
   const t=setup();
   await expect(t.action(act('projectPendingOutboxNow'),{})).rejects.toThrow('Authentication required');
-  const human=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER});
+  const human=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER});
   await expect(human.action(act('projectPendingOutboxNow'),{})).rejects.toThrow('Reviewer role required');
   await grantReviewers(t,[A]);
-  await expect(t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'agent'}).action(act('projectPendingOutboxNow'),{})).rejects.toThrow('automated actors');
-  await expect(t.withIdentity({subject:'user_a',tokenIdentifier:'https://evil.test|user_a',issuer:'https://evil.test'}).action(act('projectPendingOutboxNow'),{})).rejects.toThrow('Untrusted token issuer');
+  await expect(t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'agent'}).action(act('projectPendingOutboxNow'),{})).rejects.toThrow('automated actors');
+  await expect(t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:'https://evil.test|user_a',issuer:'https://evil.test'}).action(act('projectPendingOutboxNow'),{})).rejects.toThrow('Untrusted token issuer');
   const ok=await human.action(act('projectPendingOutboxNow'),{}) as {ok:boolean;stage?:string};
   expect(ok).toMatchObject({ok:false,stage:'probe_or_auth_failed'});
  });
@@ -102,7 +103,7 @@ describe('WP4 — graph actions are no longer anonymous',()=>{
   await expect(t.action(act('reconcileAndVerifyProductionIsolationCloud'),{})).rejects.toThrow('explicit owner');
  });
  it('model actors cannot record projection outcomes or query audits',async()=>{
-  const t=setup(),model=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
+  const t=setup(),model=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
   await expect(model.mutation(makeFunctionReference<'mutation'>('graph:recordGraphQueryAudit'),{queryType:'q',parametersJson:'{}',asOfMs:0,nodeCount:0,edgeCount:0,backendMode:'deterministic_mirror',latencyMs:1})).rejects.toThrow('Model or automated actors');
  });
 });
@@ -142,7 +143,7 @@ describe('WP4 — status rows do not assert unverified facts',()=>{
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.parse('2026-11-10T12:00:00Z'));
   vi.stubEnv('TYPEDB_HTTP_ADDRESS','http://cluster.example.test:80');vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISSUER);
   const t=convexTest(schema,modules);
-  const o=await t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).query(makeFunctionReference<'query'>('operations:overview'),{}) as {health:{environmentAudit:Array<{serviceId:string;lastVerifiedAt:number|null;detail:string;environmentTarget:string}>}};
+  const o=await t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER}).query(makeFunctionReference<'query'>('operations:overview'),{}) as {health:{environmentAudit:Array<{serviceId:string;lastVerifiedAt:number|null;detail:string;environmentTarget:string}>}};
   const row=(id:string)=>o.health.environmentAudit.find(s=>s.serviceId===id)!;
   for(const id of ['vercel_production','clerk_production','live_demo_execution'])expect(row(id).lastVerifiedAt,id).toBeNull();
   expect(row('typedb_cloud').detail).toContain('no TLS configured');expect(row('typedb_cloud').detail).not.toContain('TLS enabled');

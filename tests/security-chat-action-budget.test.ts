@@ -1,4 +1,5 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 const h=vi.hoisted(()=>({generate:vi.fn(),get:vi.fn()}));
 vi.mock('@google/genai',async orig=>({...(await orig<typeof import('@google/genai')>()),GoogleGenAI:class{models={generateContent:h.generate,get:h.get,list:vi.fn(async()=>({page:[]}))};}}));
 import {convexTest} from 'convex-test';
@@ -13,7 +14,7 @@ const liveReply={text:JSON.stringify({shortAnswer:'Not covered by approved evide
 let n=0;
 beforeEach(()=>{h.generate.mockReset();h.get.mockReset();h.get.mockResolvedValue({});vi.stubEnv('GEMINI_API_KEY','test-key-not-real');vi.stubEnv('EVIDENCE_CHAT_GEMINI_ENABLED','true');vi.stubEnv('TYPEDB_HTTP_ADDRESS','');vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);});
 afterEach(()=>vi.unstubAllEnvs());
-function setup(){const owner=`${ISS}|user_action_${++n}`;const t=convexTest(schema,modules);return {t,owner,user:t.withIdentity({subject:`user_action_${n}`,tokenIdentifier:owner,issuer:ISS})};}
+function setup(){const owner=`${ISS}|user_action_${++n}`;const t=convexTest(schema,modules);return {t,owner,user:t.withIdentity({...APP_SESSION,subject:`user_action_${n}`,tokenIdentifier:owner,issuer:ISS})};}
 
 describe('H2 — Convex action reserves before calling the provider',()=>{
  it('records a live turn only by settling its reservation',async()=>{

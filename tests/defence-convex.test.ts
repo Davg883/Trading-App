@@ -4,13 +4,14 @@ import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
 import {DEFENCE_VERSION,type DefenceCase,type DefenceInstrument} from '../lib/portfolio-defence';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./defence.ts':()=>import('../convex/defence')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`defence:${name}`);
 const query=(name:string)=>makeFunctionReference<'query'>(`defence:${name}`);
 const owner='test|alice';
 function fixture():DefenceCase{const now=Date.now();return {version:DEFENCE_VERSION,id:'defence-pilot',name:'Synthetic capital preservation research',mode:'synthetic',sources:[{id:'fixture-source',title:'Synthetic test data',url:'https://example.test/synthetic',publishedAt:now-2000,receivedAt:now-1000,mode:'synthetic',verified:true,role:'evidence'}],instruments:[{id:'cash',name:'Synthetic GBP reserve',symbol:'DEMO-CASH',isin:null,currency:'GBP',company:'Demo institution',sector:'Cash',country:'GB',aiLayer:'Outside AI',aiRelated:false,product:'cash',paperEligible:true,availability:'Synthetic test only',structure:'Fully funded cash reserve',annualFeeBps:0,sourceIds:['fixture-source'],restrictions:['No execution permission'],risks:['Inflation and institution risk'],protectsAgainst:['Equity loss on cash allocation'],cannotProtectAgainst:['Inflation'],lossConditions:['Purchasing power declines']}],funds:[],portfolios:[{id:'reserve',name:'Synthetic cash comparison',initialCapital:10000,currency:'GBP',horizonSessions:20,priceBasis:'total-return',calendarId:'synthetic-calendar',session:'regular',mode:'synthetic',allocations:[{instrumentId:'cash',weight:1}],costs:{fees:0,slippage:0,financing:0}}],scenarios:[],histories:[]};}
-async function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({subject:'alice',tokenIdentifier:owner,actorType:'human'});await grantReviewers(t,[owner,'test|bob']);return {t,alice};}
+async function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({...APP_SESSION,subject:'alice',tokenIdentifier:owner,actorType:'human'});await grantReviewers(t,[owner,'test|bob']);return {t,alice};}
 async function imported(t:ReturnType<typeof convexTest>,data=fixture(),externalId='case-v1'){return t.mutation(mutation('importCase'),{owner,externalId,caseJson:JSON.stringify(data)});}
 const review=(snapshotId:string,patch:Record<string,unknown>={})=>({snapshotId,portfolioId:'reserve',decision:'approve',reason:'Reviewed the fully funded capital reserve and remaining risks',acknowledgedRisks:['Cash does not protect purchasing power'],reviewBy:Date.now()+86400000,...patch});
 afterEach(()=>vi.useRealTimers());
@@ -18,7 +19,7 @@ afterEach(()=>vi.useRealTimers());
 describe('portfolio defence evidence and human review storage',()=>{
   it('keeps ingestion internal and scopes reads, snapshots and reviews to the authenticated owner',async()=>{
     const backend=await import('../convex/defence');expect(backend.importCase.isInternal).toBe(true);
-    const {t,alice}=await setup(),bob=t.withIdentity({subject:'bob',tokenIdentifier:'test|bob',actorType:'human'}),caseId=await imported(t);
+    const {t,alice}=await setup(),bob=t.withIdentity({...APP_SESSION,subject:'bob',tokenIdentifier:'test|bob',actorType:'human'}),caseId=await imported(t);
     await expect(t.query(query('list'),{})).rejects.toThrow('Sign in required');expect(await bob.query(query('list'),{})).toEqual([]);
     await expect(bob.query(query('detail'),{caseId})).rejects.toThrow('Record unavailable');
     await expect(bob.mutation(mutation('freezeSnapshot'),{caseId,cutoff:Date.now()})).rejects.toThrow('Record unavailable');
@@ -49,7 +50,7 @@ describe('portfolio defence evidence and human review storage',()=>{
   });
   it('requires a signed human claim rather than accepting an AI model or ordinary session as reviewer',async()=>{
     const {t,alice}=await setup(),caseId=await imported(t),snapshotId=await alice.mutation(mutation('freezeSnapshot'),{caseId,cutoff:Date.now()});
-    const model=t.withIdentity({subject:'model',tokenIdentifier:owner,actorType:'model'}),ordinary=t.withIdentity({subject:'carol',tokenIdentifier:'test|carol'});
+    const model=t.withIdentity({...APP_SESSION,subject:'model',tokenIdentifier:owner,actorType:'model'}),ordinary=t.withIdentity({...APP_SESSION,subject:'carol',tokenIdentifier:'test|carol'});
     await expect(model.mutation(mutation('reviewAllocation'),review(snapshotId))).rejects.toThrow('Model or automated actors cannot act as researchers or reviewers');
     await expect(ordinary.mutation(mutation('reviewAllocation'),review(snapshotId))).rejects.toThrow('Reviewer role required');
     await t.run(async ctx=>{expect(await ctx.db.query('defenceAllocationReviews').collect()).toHaveLength(0);});

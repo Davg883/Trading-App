@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { describe, expect, it } from 'vitest';
 import schema from '../convex/schema';
 import type { GenericId } from 'convex/values';
+import {APP_SESSION} from './helpers/app-identity';
 const modules = { './_generated/server.ts':async()=>({}), './research.ts':()=>import('../convex/research') };
 const query=makeFunctionReference<'query'>('research:dashboard');
 const create=makeFunctionReference<'mutation'>('research:createPortfolio');
@@ -12,9 +13,9 @@ const review=makeFunctionReference<'mutation'>('research:review');
 const execute=makeFunctionReference<'mutation'>('research:executePaper');
 describe('Convex authorization and atomic ledger',()=>{
   it('rejects unauthenticated reads and writes',async()=>{const t=convexTest(schema,modules);await expect(t.query(query,{})).rejects.toThrow('Sign in required');await expect(t.mutation(create,{name:'Pilot',capitalGbp:10000})).rejects.toThrow('Sign in required');});
-  it('isolates owners and rejects cross-owner proposals',async()=>{const t=convexTest(schema,modules);const alice=t.withIdentity({subject:'alice'}),bob=t.withIdentity({subject:'bob'});const id=await alice.mutation(create,{name:'Alice',capitalGbp:10000});expect((await bob.query(query,{})).portfolios).toHaveLength(0);await expect(bob.mutation(propose,{portfolioId:id,symbol:'MSFT',quantity:1,reason:'Test'})).rejects.toThrow('Record unavailable');});
+  it('isolates owners and rejects cross-owner proposals',async()=>{const t=convexTest(schema,modules);const alice=t.withIdentity({...APP_SESSION,subject:'alice'}),bob=t.withIdentity({...APP_SESSION,subject:'bob'});const id=await alice.mutation(create,{name:'Alice',capitalGbp:10000});expect((await bob.query(query,{})).portfolios).toHaveLength(0);await expect(bob.mutation(propose,{portfolioId:id,symbol:'MSFT',quantity:1,reason:'Test'})).rejects.toThrow('Record unavailable');});
   it('requires approval, post-approval price and fills only once',async()=>{
-    const t=convexTest(schema,modules);await grantReviewers(t,['test|alice']);const alice=t.withIdentity({subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});
+    const t=convexTest(schema,modules);await grantReviewers(t,['test|alice']);const alice=t.withIdentity({...APP_SESSION,subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});
     const portfolioId=await alice.mutation(create,{name:'Pilot',capitalGbp:10000});
     const proposalId=await alice.mutation(propose,{portfolioId,symbol:'MSFT',quantity:1,reason:'Evidence-backed hypothesis'});
     await expect(alice.mutation(execute,{proposalId})).rejects.toThrow('Human approval required');
@@ -24,9 +25,9 @@ describe('Convex authorization and atomic ledger',()=>{
     const first=await alice.mutation(execute,{proposalId});const second=await alice.mutation(execute,{proposalId});expect(second).toBe(first);
     await t.run(async ctx=>{const fills=await ctx.db.query('fills').collect();expect(fills).toHaveLength(1);const portfolio=await ctx.db.get(portfolioId as GenericId<'portfolios'>);expect(portfolio?.cashGbp).toBeCloseTo(10000+fills[0].cashDeltaGbp);});
   });
-  it('rejects future evidence at snapshot time',async()=>{const t=convexTest(schema,modules);await grantReviewers(t,['test|alice']);const alice=t.withIdentity({subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});const cutoff=Date.now()-1000;const id=await t.run(ctx=>ctx.db.insert('evidence',{owner:'test|alice',source:'test',symbol:'MSFT',metric:'revenue',value:10,unit:'USD',period:'Q1',definition:'reported revenue',status:'reported',publishedAt:cutoff-1,receivedAt:cutoff+1}));await expect(alice.mutation(makeFunctionReference<'mutation'>('research:freezeExperiment'),{name:'Pilot',cutoff,evidenceIds:[id],protocol:'fixed'})).rejects.toThrow('unavailable at cutoff');});
+  it('rejects future evidence at snapshot time',async()=>{const t=convexTest(schema,modules);await grantReviewers(t,['test|alice']);const alice=t.withIdentity({...APP_SESSION,subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});const cutoff=Date.now()-1000;const id=await t.run(ctx=>ctx.db.insert('evidence',{owner:'test|alice',source:'test',symbol:'MSFT',metric:'revenue',value:10,unit:'USD',period:'Q1',definition:'reported revenue',status:'reported',publishedAt:cutoff-1,receivedAt:cutoff+1}));await expect(alice.mutation(makeFunctionReference<'mutation'>('research:freezeExperiment'),{name:'Pilot',cutoff,evidenceIds:[id],protocol:'fixed'})).rejects.toThrow('unavailable at cutoff');});
   it('keeps synthetic and observed paper accounts separate',async()=>{
-    const t=convexTest(schema,modules),alice=t.withIdentity({subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});await grantReviewers(t,['test|alice']);
+    const t=convexTest(schema,modules),alice=t.withIdentity({...APP_SESSION,subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});await grantReviewers(t,['test|alice']);
     const portfolioId=await alice.mutation(create,{name:'Observed only',capitalGbp:10000,synthetic:false});
     const proposalId=await alice.mutation(propose,{portfolioId,symbol:'MSFT',quantity:1,reason:'Test'});
     await alice.mutation(review,{proposalId,decision:'approve',note:'Review'});
@@ -44,7 +45,7 @@ describe('Convex authorization and atomic ledger',()=>{
 
 describe('quote selection and immutable retries',()=>{
   it('selects eligible observed quotes even when a newer synthetic quote exists',async()=>{
-    const t=convexTest(schema,modules),alice=t.withIdentity({subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});await grantReviewers(t,['test|alice']);
+    const t=convexTest(schema,modules),alice=t.withIdentity({...APP_SESSION,subject:'alice',issuer:'test',tokenIdentifier:'test|alice'});await grantReviewers(t,['test|alice']);
     const portfolioId=await alice.mutation(create,{name:'Observed',capitalGbp:10000,synthetic:false});
     const proposalId=await alice.mutation(propose,{portfolioId,symbol:'MSFT',quantity:1,reason:'Source checked'});
     await alice.mutation(review,{proposalId,decision:'approve',note:'Approved'});

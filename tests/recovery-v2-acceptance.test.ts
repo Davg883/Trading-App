@@ -1,4 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 vi.mock('server-only',()=>({}));
 vi.mock('@clerk/nextjs/server',()=>({auth:vi.fn()}));
 import {mkdtempSync,mkdirSync,copyFileSync,appendFileSync,readFileSync} from 'node:fs';
@@ -42,7 +43,7 @@ describe('Case 006 v2 acceptance: pinned packages',()=>{
 
 describe('Case 006 v2 acceptance: Convex import',()=>{
  it('imports v2 under a new source identifier beside an unchanged v1, preserving later receipt times',async()=>{
-  vi.useFakeTimers();vi.setSystemTime(Date.parse('2026-11-05T16:00:00Z'));const t=convexTest(schema,modules),owner='test|alice',alice=t.withIdentity({tokenIdentifier:owner,subject:'alice',actorType:'human'});
+  vi.useFakeTimers();vi.setSystemTime(Date.parse('2026-11-05T16:00:00Z'));const t=convexTest(schema,modules),owner='test|alice',alice=t.withIdentity({...APP_SESSION,tokenIdentifier:owner,subject:'alice',actorType:'human'});
   expect(await alice.query(q('viewer'),{})).toEqual({owner});await expect(t.query(q('viewer'),{})).rejects.toThrow('Sign in required');
   const v1=preparePackage('recovery-006-2026-11-03-source-v1'),v2=preparePackage('recovery-006-2026-11-03-source-v2');
   const id1=await t.mutation(m('importCase'),{owner,externalId:v1.externalId,caseJson:v1.caseJson}),id2=await t.mutation(m('importCase'),{owner,externalId:v2.externalId,caseJson:v2.caseJson});

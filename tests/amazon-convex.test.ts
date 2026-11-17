@@ -4,6 +4,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import schema from '../convex/schema';
 import {AMAZON_CASH_VERSION,type AmazonCashCase} from '../lib/amazon-cash-conversion';
 import {AMAZON_INTERPRETATION_VERSION,canonicalAmazonEvidence,validateAmazonInterpretationManifest,type AmazonInterpretationManifest,type AmazonInterpretationResult} from '../lib/amazon-interpretation';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./earnings.ts':()=>import('../convex/earnings')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`earnings:${name}`);
@@ -12,7 +13,7 @@ const owner='test|alice',url='https://ir.aboutamazon.com/test-q3-2026';
 const publishedAt=Date.parse('2026-10-29T21:00:00Z'),receivedAt=Date.parse('2026-10-31T12:00:00Z'),now=Date.parse('2026-10-31T18:00:00Z');
 const models=[{provider:'openai',modelVersion:'test-model-a-2026'},{provider:'anthropic',modelVersion:'test-model-b-2026'}];
 function fixture():AmazonCashCase{return {version:AMAZON_CASH_VERSION,id:'amazon-cash-test',name:'Retrospective cash-conversion test',mode:'retrospective',sources:[{id:'official',title:'Official statement test fixture',url,kind:'company',publishedAt,publicationDate:'2026-10-29',receivedAt,verified:true}],observations:[{id:'sales-q3',metric:'revenue',scope:'company',period:{scope:'quarter',label:'2026-Q3',start:'2026-07-01',end:'2026-09-30'},value:201944,currency:'USD',unit:'million',basis:'amazon-reported-v1',kind:'reported',qualifier:'exact',sourceId:'official',receivedAt,supersedes:null},{id:'guidance-2026',metric:'cash_capex_guidance',scope:'company',period:{scope:'calendar_year',label:'2026',start:'2026-01-01',end:'2026-12-31'},value:220000,currency:'USD',unit:'million',basis:'amazon-reported-v1',kind:'guidance',qualifier:'approximately',sourceId:'official',receivedAt,supersedes:null},{id:'aws-expectation-2027',metric:'aws_growth_forecast',scope:'AWS',period:{scope:'calendar_year',label:'2027',start:'2027-01-01',end:'2027-12-31'},value:.4,currency:'USD',unit:'ratio',basis:'amazon-reported-v1',kind:'management_expectation',qualifier:'greater_than',sourceId:'official',receivedAt,supersedes:null}],bedrock:[],articleClaim:{description:'User-described unverified gross/net discrepancy',amountMillions:77300,sourceUrl:null,verified:false}};}
-function setup(){vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules);return {t,alice:t.withIdentity({tokenIdentifier:owner,subject:'alice'})};}
+function setup(){vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules);return {t,alice:t.withIdentity({...APP_SESSION,tokenIdentifier:owner,subject:'alice'})};}
 async function imported(t:ReturnType<typeof convexTest>,data=fixture(),externalId='amazon-v1'){
   const eventId=await t.mutation(mutation('importEvent'),{owner,eventKey:'AMZN_Q3_2026',ticker:'AMZN',period:'2026-Q3',releaseAt:publishedAt,sources:[{id:'official',title:'Official statement test fixture',url,publishedAt,receivedAt,verification:'verified',note:'Test fixture'}]});
   const caseId=await t.mutation(mutation('importInterpretationCase'),{owner,eventId,externalId,caseJson:JSON.stringify(data)});vi.setSystemTime(Date.now()+1000);return {caseId,eventId};
@@ -33,7 +34,7 @@ function append(t:ReturnType<typeof convexTest>,experimentId:string,record:Amazo
 describe('Amazon interpretation preserves the earnings persistence boundary',()=>{
   it('keeps authoritative ingestion internal and private cases owner scoped',async()=>{
     const backend=await import('../convex/earnings');expect(backend.importInterpretationCase.isInternal).toBe(true);
-    const {t,alice}=setup(),{caseId}=await imported(t),bob=t.withIdentity({tokenIdentifier:'test|bob'});
+    const {t,alice}=setup(),{caseId}=await imported(t),bob=t.withIdentity({...APP_SESSION,tokenIdentifier:'test|bob'});
     await expect(t.query(query('listInterpretationCases'),{})).rejects.toThrow('Sign in required');
     expect(await bob.query(query('listInterpretationCases'),{})).toEqual([]);
     await expect(bob.query(query('interpretationCaseDetail'),{caseId})).rejects.toThrow('Record unavailable');
@@ -83,7 +84,7 @@ describe('Amazon interpretation preserves the earnings persistence boundary',()=
     const id=await append(t,experimentId,record);expect(await append(t,experimentId,record)).toBe(id);
     await expect(append(t,experimentId,{...record,inputTokens:101})).rejects.toThrow('Immutable interpretation attempt conflicts');
     const details=await alice.query(query('interpretationCaseDetail'),{caseId});expect(details.experiments[0].results).toHaveLength(1);expect(details.experiments[0].results[0].resultId).toBe(id);
-    await expect(t.withIdentity({tokenIdentifier:'test|bob'}).query(query('interpretationCaseDetail'),{caseId})).rejects.toThrow('Record unavailable');
+    await expect(t.withIdentity({...APP_SESSION,tokenIdentifier:'test|bob'}).query(query('interpretationCaseDetail'),{caseId})).rejects.toThrow('Record unavailable');
   });
   it('rejects another snapshot, a wrong participant and citations outside frozen evidence',async()=>{
     const {t,alice}=setup(),{experimentId,manifest}=await registered(t,alice),record=result(manifest);

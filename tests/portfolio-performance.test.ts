@@ -4,6 +4,7 @@ import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
 import {accountKpis,performance,todayInvestmentPnl,benchmarkReturnGbp,benchmarkSeries,flowEvents,maxDrawdown,concentration,aiSectorExposure,freshness,type Valuation,type CashFlow,type Snapshot,type Position} from '../lib/portfolio/performance';
+import {APP_SESSION} from './helpers/app-identity';
 
 const DAY=86_400_000,now=Date.parse('2026-11-06T15:00:00Z');
 const v=(daysAgo:number,total:number|null,currency='GBP'):Valuation=>({observedAt:now-daysAgo*DAY,currency,totalValue:total,cash:null,investedCost:null,investmentsValue:null,realisedProfitLoss:null,unrealisedProfitLoss:null});
@@ -80,7 +81,7 @@ describe('Chart markers and benchmark preparation',()=>{
 describe('Valuation history is append-only and owner-scoped',()=>{
  it('records each sync valuation and classifies deposits as external cash flows, once',async()=>{
   const t=convexTest(schema,{'./_generated/server.ts':async()=>({}),'./brokers.ts':()=>import('../convex/brokers'),'./portfolio.ts':()=>import('../convex/portfolio')});
-  const OWNER='https://issuer.test|user_owner',owner=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER});
+  const OWNER='https://issuer.test|user_owner',owner=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER});
   const envelope=JSON.stringify({version:'broker-vault-v1',keyVersion:'v1',iv:'AAAAAAAAAAAAAAAA',tag:'AAAAAAAAAAAAAAAAAAAAAA==',ciphertext:'AAAA'});
   const {connectionId}=await t.mutation(makeFunctionReference<'mutation'>('brokers:saveInternal'),{owner:OWNER,environment:'live',maskedKey:'••••TEST',encryptedPayload:envelope}) as {connectionId:string};
   const base='https://live.trading212.com/api/v0';
@@ -96,7 +97,7 @@ describe('Valuation history is append-only and owner-scoped',()=>{
   expect(data.live.valuations).toHaveLength(2);expect(data.live.flows).toEqual([expect.objectContaining({type:'DEPOSIT',amount:250})]);expect(data.demo.valuations).toEqual([]);
   expect(JSON.stringify(data)).not.toMatch(/encryptedPayload|ciphertext|leaseToken/);
   await expect(t.query(makeFunctionReference<'query'>('portfolio:overview'),{})).rejects.toThrow('Sign in required');
-  const other=t.withIdentity({subject:'user_other',tokenIdentifier:'https://issuer.test|user_other'});expect(((await other.query(makeFunctionReference<'query'>('portfolio:overview'),{})) as {live:{valuations:unknown[]}}).live.valuations).toEqual([]);
+  const other=t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:'https://issuer.test|user_other'});expect(((await other.query(makeFunctionReference<'query'>('portfolio:overview'),{})) as {live:{valuations:unknown[]}}).live.valuations).toEqual([]);
  });
  it('keeps the redesign display-only: no trading permission is changed by the homepage',()=>{
   const files=['app/page.tsx','components/command-centre/command-centre.tsx','components/command-centre/risk-panel.tsx','integrations/connected-command-centre.tsx'].map(f=>readFileSync(f,'utf8')).join('\n');

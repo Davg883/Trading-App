@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * Pre-merge blockers C1 and C2 (docs/mvp-hardening-fable-52/11-pre-merge-security-review.md).
@@ -31,7 +32,7 @@ function setup(){
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(NOW);
  vi.stubEnv('EVIDENCE_CHAT_GATEWAY_SECRET',G);vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);
  const t=convexTest(schema,modules);
- return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS})};
+ return {t,asA:t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISS})};
 }
 let EV_A:Awaited<ReturnType<typeof evidenceTurnFields>>;
 beforeAll(async()=>{EV_A=await evidenceTurnFields(Q,A);});

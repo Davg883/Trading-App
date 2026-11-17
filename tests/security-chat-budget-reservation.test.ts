@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * Budget reservation accounting (pre-merge risk H2; durable state model, Correction 2).
@@ -25,7 +26,7 @@ function setup(){
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(NOW);
  vi.stubEnv('EVIDENCE_CHAT_GATEWAY_SECRET',G);vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISS);
  const t=convexTest(schema,modules);
- return {t,asA:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS}),asB:t.withIdentity({subject:'user_b',tokenIdentifier:B,issuer:ISS})};
+ return {t,asA:t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISS}),asB:t.withIdentity({...APP_SESSION,subject:'user_b',tokenIdentifier:B,issuer:ISS})};
 }
 const live={generationMode:'gemini_live',providerStatus:'succeeded',inputTokens:3000,outputTokens:500,estimatedCostGbp:0.002,actualCostGbp:0.002};
 const errorResponse={generationMode:'abstention_only',providerStatus:'provider_error',providerFailureKind:'error_response'};
@@ -181,7 +182,7 @@ describe('Correction 2 — concurrency, rate limit and outage behaviour',()=>{
   expect((await t.fetch('/api/evidence-chat/budget/reserve',{method:'POST',headers:H,body:'{}'})).status).toBe(401);
   expect((await asA.fetch('/api/evidence-chat/budget/reserve',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status).toBe(401);
   expect((await t.fetch('/api/evidence-chat/budget/start',{method:'POST',headers:H,body:JSON.stringify({budgetReservation:'a'.repeat(64)})})).status).toBe(401);
-  const model=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISS,actorType:'model'});
+  const model=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISS,actorType:'model'});
   expect((await reserve(model)).status).toBe(403);
   expect(await reservations(t)).toHaveLength(0);
  });

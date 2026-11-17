@@ -9,6 +9,7 @@ import * as nonceModule from '../convex/acceptanceNonces';
 import * as chatModule from '../convex/evidenceChat';
 import {consumeAcceptanceNonce,resolveGatewayBaseUrl,gatewayConfigured} from '../lib/graph/evidence-chat-gateway';
 import {POST as chatRoutePost} from '../app/api/graph/chat/route';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * MVP hardening — work package 2: acceptance nonce and chat audit security.
@@ -131,7 +132,7 @@ describe('WP2 — gateway authentication',()=>{
   expect((await consume(t,m.token,QUESTION,{'x-aci-gateway-authorization':`Bearer ${old}`})).status).toBe(200);
  });
  it('the gateway secret alone never establishes a user: /turn also needs a verified user JWT, and vice versa',async()=>{
-  const t=setup(),asA=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER});
+  const t=setup(),asA=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER});
   expect((await gateway(t,'/api/evidence-chat/turn',{turn:turn()})).status).toBe(401);
   expect((await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({turn:turn()})})).status).toBe(401);
   expect(await chatRows(t)).toHaveLength(0);
@@ -140,7 +141,7 @@ describe('WP2 — gateway authentication',()=>{
   const ok=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn(nonLive)})});
   expect(ok.status).toBe(200);
   expect(await chatRows(t)).toMatchObject([{owner:A,recordedVia:'server_gateway'}]);
-  const model=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
+  const model=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
   expect((await model.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({turn:turn({turnId:'t2'})})})).status).toBe(403);
   const forged=await asA.fetch('/api/evidence-chat/turn',{method:'POST',headers:{'content-type':'application/json','x-aci-gateway-authorization':`Bearer ${GATEWAY}`},body:JSON.stringify({owner:B,turn:turn({turnId:'t3'})})});
   expect(forged.status).toBe(400);
@@ -283,7 +284,7 @@ describe('WP2 — audit recording',()=>{
 describe('WP2 — signed-in compatibility path',()=>{
  const recRef=makeFunctionReference<'mutation'>('evidenceChat:recordEvidenceChatTurn');
  it('denies anonymous writes, scopes writes to the verified caller and validates telemetry',async()=>{
-  const t=setup(),asB=t.withIdentity({subject:'user_b',tokenIdentifier:B,issuer:ISSUER});
+  const t=setup(),asB=t.withIdentity({...APP_SESSION,subject:'user_b',tokenIdentifier:B,issuer:ISSUER});
   await expect(t.mutation(recRef,turnB())).rejects.toThrow('Sign in required');
   await expect(asB.mutation(recRef,{...turnB(),owner:A} as never)).rejects.toThrow();
   // Since the H1 correction the caller's own credential cannot record live inference or provider cost at all.

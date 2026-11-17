@@ -8,6 +8,7 @@ import {AgentOperationsPanel} from '../components/command-centre/agent-operation
 import {iso} from '../components/command-centre/shared';
 import {describeJobSchedule} from '../lib/remote-ops/job-schedule-display';
 import type {CollectionHealthReport} from '../lib/remote-ops/health-monitor';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * Sprint G9.3.1 — scheduler health reporting correction.
@@ -78,7 +79,7 @@ async function views(schedulerEnv:string,over:Record<string,JobOverrides>={}){
  vi.stubEnv('RESEARCH_SCHEDULER_ENV',schedulerEnv);
  const t=convexTest(schema,modules);
  await seed(t,over);
- const owner=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER});
+ const owner=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER});
  const pub=await t.query(opsQ('publicOperationsOverview'),{}) as {health:CollectionHealthReport;latestBriefing:unknown};
  const own=await owner.query(opsQ('overview'),{}) as {health:CollectionHealthReport};
  return {pub,own};

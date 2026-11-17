@@ -7,9 +7,10 @@ import {verifyIdentityClaims} from '../convex/authz';
  * malicious and conflicting `aud`/`azp` combinations. This is a characterisation suite: it documents behaviour so a
  * future policy change is deliberate and reviewed. It does not change the policy.
  *
- * Known gap (design decision pending, see the G9.3.4 report): with the default options, a valid-issuer token carrying
- * neither `aud` nor `azp` is ACCEPTED. Only convex/http.ts (the chat gateway) passes requireApplicationContext:true.
- * Browser and server-route tokens always carry `azp`; a token without it can only be minted with the Clerk secret.
+ * G9.3.5 closed the gap this suite originally pinned: a valid-issuer token carrying neither `aud` nor `azp` is now
+ * REJECTED by the default helper used by every module, not only by the chat gateway. The former
+ * `requireApplicationContext` option no longer exists. Browser and server-route tokens always carry `azp` (or
+ * `aud: "convex"` with the template); a token without either can only be minted with the Clerk secret.
  */
 const ISSUER='https://complete-bunny-8662.clerk.accounts.dev';
 const ALLOWED='https://trading-app-git-verify-combined-864cea-david-grannums-projects.vercel.app';
@@ -28,7 +29,6 @@ describe('accepted combinations',()=>{
   ['aud array of only trusted values',{aud:['convex',ALLOWED]}],
  ])('%s',(_n,claims)=>{
   expect(verifyIdentityClaims(id(claims)).subject).toBe('user_a');
-  expect(verifyIdentityClaims(id(claims),{requireApplicationContext:true}).subject).toBe('user_a');
  });
 });
 
@@ -47,7 +47,6 @@ describe('malicious or conflicting combinations are rejected',()=>{
   ['azp scheme downgrade',{azp:ALLOWED.replace('https://','http://')},'Untrusted token authorized party'],
  ])('%s',(_n,claims,message)=>{
   expect(()=>verifyIdentityClaims(id(claims))).toThrow(message);
-  expect(()=>verifyIdentityClaims(id(claims),{requireApplicationContext:true})).toThrow(message);
  });
 
  it('an untrusted issuer is rejected before any application-context check',()=>{
@@ -56,10 +55,7 @@ describe('malicious or conflicting combinations are rejected',()=>{
 });
 
 describe('missing application context (neither aud nor azp)',()=>{
- it('is REJECTED where requireApplicationContext is set (the chat HTTP gateway)',()=>{
-  expect(()=>verifyIdentityClaims(id({}),{requireApplicationContext:true})).toThrow('Missing token application context');
- });
- it('KNOWN GAP — is ACCEPTED by the default helper used by signedIn()/researcher(); change only via the reviewed G9.3.4 design',()=>{
-  expect(verifyIdentityClaims(id({})).subject).toBe('user_a');
+ it('is REJECTED by the default helper used by signedIn()/researcher() and the chat gateway alike (G9.3.5)',()=>{
+  expect(()=>verifyIdentityClaims(id({}))).toThrow('Missing token application context');
  });
 });

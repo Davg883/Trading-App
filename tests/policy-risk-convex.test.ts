@@ -5,6 +5,7 @@ import schema from '../convex/schema';
 import request from '../data/policy-risk/midterm-2026-11-03-request.json';
 import {readFileSync} from 'node:fs';
 import type {PolicyObservationSet} from '../lib/policy-risk';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./policyRisk.ts':()=>import('../convex/policyRisk')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`policyRisk:${name}`),query=(name:string)=>makeFunctionReference<'query'>(`policyRisk:${name}`);
@@ -19,7 +20,7 @@ function observationSet(capturedAt:number,extra:Partial<PolicyObservationSet>={}
  const prices=tickers.flatMap(ticker=>['2026-11-05','2026-11-06','2026-11-09','2026-11-10'].map((day,i)=>({id:`fixture-${ticker}-${day}`,ticker,eventAt:close(day),close:100+i,currency:'USD' as const,priceBasis:'unadjusted_close' as const,provider,sourceIds:['test-fixture-closes'],publishedAt:null,receivedAt:capturedAt,mode:'retrospective' as const})));
  return {id:'fixture-set',capturedAt,sources:[source],prices,...extra};
 }
-function setup(){vi.useFakeTimers();vi.setSystemTime(ingest);const t=convexTest(schema,modules);return {t,alice:t.withIdentity({tokenIdentifier:owner,subject:'alice',actorType:'human'}),bob:t.withIdentity({tokenIdentifier:'test|bob',subject:'bob',actorType:'human'})};}
+function setup(){vi.useFakeTimers();vi.setSystemTime(ingest);const t=convexTest(schema,modules);return {t,alice:t.withIdentity({...APP_SESSION,tokenIdentifier:owner,subject:'alice',actorType:'human'}),bob:t.withIdentity({...APP_SESSION,tokenIdentifier:'test|bob',subject:'bob',actorType:'human'})};}
 afterEach(()=>vi.useRealTimers());
 
 describe('Benchmark 001.2 Convex persistence',()=>{

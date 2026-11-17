@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 vi.mock('server-only', () => ({}));
 import { convexTest } from 'convex-test';
 import { makeFunctionReference } from 'convex/server';
@@ -398,8 +399,8 @@ describe('Sprint G9 — End-to-End Data Freshness, News Ingestion and Broker Con
     };
     const ownerA = 'https://complete-bunny-8662.clerk.accounts.dev|user_owner_A';
     const ownerB = 'https://complete-bunny-8662.clerk.accounts.dev|user_owner_B';
-    const clientA = t.withIdentity({ tokenIdentifier: ownerA, subject: 'user_owner_A' });
-    const clientB = t.withIdentity({ tokenIdentifier: ownerB, subject: 'user_owner_B' });
+    const clientA = t.withIdentity({...APP_SESSION,tokenIdentifier: ownerA, subject: 'user_owner_A' });
+    const clientB = t.withIdentity({...APP_SESSION,tokenIdentifier: ownerB, subject: 'user_owner_B' });
 
     const encrypted = encryptCredentials(
       { apiKey: 'live-key-owner-a', apiSecret: 'live-secret-owner-a' },

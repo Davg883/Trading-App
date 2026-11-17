@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 
 const h = vi.hoisted(() => ({
   generate: vi.fn(),
@@ -128,7 +129,7 @@ function setupConvex() {
   const t = convexTest(schema, modules);
   return {
     t,
-    asA: t.withIdentity({ subject: 'user_a', tokenIdentifier: OWNER_A, issuer: ISS }),
+    asA: t.withIdentity({...APP_SESSION,subject: 'user_a', tokenIdentifier: OWNER_A, issuer: ISS }),
   };
 }
 
@@ -924,7 +925,7 @@ describe('Work Package B — Server-Enforced Safe Maintenance Gate (RESEARCH_CHA
   it('Task B & Task C Complete Gateway & Maintenance Lifecycle: positive/negative gateway secret, Clerk identity, cross-owner rejection, nonce replay, reconciliation, and maintenance entry -> in-flight settlement -> normal resumption', async () => {
     const { t, asA } = setupConvex();
     const OWNER_B = `${ISS}|user_b`;
-    const asB = t.withIdentity({ subject: 'user_b', tokenIdentifier: OWNER_B, issuer: ISS });
+    const asB = t.withIdentity({...APP_SESSION,subject: 'user_b', tokenIdentifier: OWNER_B, issuer: ISS });
     await setCeiling(t, OWNER_A, 0.15);
 
     const all7GatewayPaths = [

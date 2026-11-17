@@ -15,6 +15,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {AgentOperationsPanel} from '../components/command-centre/agent-operations-panel';
 import {MorningBriefPanel} from '../components/command-centre/morning-brief-panel';
 import {resolveDisplayedBriefing} from '../lib/remote-ops/briefing-provenance';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * Sprint G9.2 — research integrity & environment recovery regression suite.
@@ -169,8 +170,8 @@ describe('Quarantine ledger and auditable re-ingestion of previously seen filing
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   const t=convexTest(schema,modules);
-  const owner=t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER});
-  const other=t.withIdentity({subject:'user_other',tokenIdentifier:OTHER});
+  const owner=t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER});
+  const other=t.withIdentity({...APP_SESSION,subject:'user_other',tokenIdentifier:OTHER});
 
   // Seed the exact legacy record shape as it exists in the dev deployment (promoted before the integrity rule existed).
   const seeded=await t.run(async ctx=>{

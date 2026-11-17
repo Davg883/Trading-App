@@ -177,7 +177,6 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
           aud: 'convex',
           azp: 'https://attacker.example.com',
         } as unknown as UserIdentity,
-        { requireApplicationContext: true },
       ),
     ).toThrow('Untrusted token authorized party');
 
@@ -198,7 +197,6 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
           aud: 'foreign-relying-party',
           azp: 'https://capital.aiguides.co.uk',
         } as unknown as UserIdentity,
-        { requireApplicationContext: true },
       ),
     ).toThrow('Untrusted token audience');
 
@@ -215,7 +213,6 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
           issuer: 'https://clerk.capital.aiguides.co.uk',
           subject: 'user_prod_1',
         } as unknown as UserIdentity,
-        { requireApplicationContext: true },
       ),
     ).toThrow('Missing token application context');
 

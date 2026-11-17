@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import {APP_SESSION} from './helpers/app-identity';
 vi.mock('server-only', () => ({}));
 import { convexTest } from 'convex-test';
 import { makeFunctionReference } from 'convex/server';
@@ -148,8 +149,8 @@ describe('Phase G.8.2: Final Live Connection Gate & Privacy Audit Suite', () => 
         t,
         aliceOwner,
         bobOwner,
-        alice: t.withIdentity({ subject: 'alice', tokenIdentifier: aliceOwner }),
-        bob: t.withIdentity({ subject: 'bob', tokenIdentifier: bobOwner }),
+        alice: t.withIdentity({...APP_SESSION,subject: 'alice', tokenIdentifier: aliceOwner }),
+        bob: t.withIdentity({...APP_SESSION,subject: 'bob', tokenIdentifier: bobOwner }),
       };
     }
 

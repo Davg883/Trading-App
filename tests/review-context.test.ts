@@ -4,11 +4,12 @@ import {validateReviewContext} from '../lib/review-context';
 import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 const context={thesis:'Cash conversion requires investigation',supportingEvidence:['Reported revenue growth'],challengingEvidence:['Reported negative FCF'],valuationRisks:['Authoritative EPS consensus absent'],financialRisks:['Capex commitments'],dataFreshness:'Historical filing only',uncertainty:'No licensed quote',modelDisagreement:'Models not run',suggestedNotionalGbp:null,plannedLossGbp:null,stopPriceUsd:null,portfolioExposureGbp:null};
 it('keeps missing monetary assumptions unavailable and requires counterevidence',()=>{expect(validateReviewContext(context).plannedLossGbp).toBeNull();expect(()=>validateReviewContext({...context,challengingEvidence:[]})).toThrow();expect(()=>validateReviewContext({...context,stopPriceUsd:100})).toThrow();});
 it('a model-style research draft cannot bypass human approval or the deterministic risk gate',async()=>{
   const modules={'./_generated/server.ts':async()=>({}),'./research.ts':()=>import('../convex/research')};
-  const t=convexTest(schema,modules),human=t.withIdentity({subject:'reviewer',tokenIdentifier:'reviewer-id'});await grantReviewers(t,['reviewer-id']);
+  const t=convexTest(schema,modules),human=t.withIdentity({...APP_SESSION,subject:'reviewer',tokenIdentifier:'reviewer-id'});await grantReviewers(t,['reviewer-id']);
   const portfolioId=await human.mutation(makeFunctionReference<'mutation'>('research:createPortfolio'),{name:'Stress review',capitalGbp:10000});
   const proposalId=await human.mutation(makeFunctionReference<'mutation'>('research:propose'),{portfolioId,symbol:'INTC',quantity:1000,reason:'Research draft',reviewContext:context});
   await expect(t.mutation(makeFunctionReference<'mutation'>('research:review'),{proposalId,decision:'approve',note:'Model approval'})).rejects.toThrow('Sign in required');

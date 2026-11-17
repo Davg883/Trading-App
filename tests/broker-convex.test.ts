@@ -4,13 +4,14 @@ import type {GenericId} from 'convex/values';
 import {describe,it,expect} from 'vitest';
 import schema from '../convex/schema';
 import {BROKER_BASE_URLS,type BrokerSyncSnapshot} from '../lib/brokers/contracts';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./brokers.ts':()=>import('../convex/brokers')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`brokers:${name}`);
 const query=(name:string)=>makeFunctionReference<'query'>(`brokers:${name}`);
 const owner='test|alice';
 const payload=JSON.stringify({version:'broker-vault-v1',keyVersion:'v1',iv:'AAAAAAAAAAAAAAAA',tag:'AAAAAAAAAAAAAAAAAAAAAA==',ciphertext:'QUJDREVGRw=='});
-function setup(){const t=convexTest(schema,modules);return {t,alice:t.withIdentity({subject:'alice',tokenIdentifier:owner}),bob:t.withIdentity({subject:'bob',tokenIdentifier:'test|bob'})};}
+function setup(){const t=convexTest(schema,modules);return {t,alice:t.withIdentity({...APP_SESSION,subject:'alice',tokenIdentifier:owner}),bob:t.withIdentity({...APP_SESSION,subject:'bob',tokenIdentifier:'test|bob'})};}
 async function saved(environment:'demo'|'live'='demo'){const all=setup();const result=await all.t.mutation(mutation('saveInternal'),{owner,environment,maskedKey:'••••1234',encryptedPayload:payload}) as {connectionId:GenericId<'brokerConnections'>;revision:number};return {...all,...result,environment};}
 function snapshot(environment:'demo'|'live'='demo',scope:'test'|'sync'='sync'):BrokerSyncSnapshot{
   const base={provider:'trading212' as const,environment,retrievedAt:Date.now()-10};

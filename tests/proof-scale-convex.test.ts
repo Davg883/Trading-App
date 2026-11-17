@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { describe,it,expect,vi } from 'vitest';
 import schema from '../convex/schema';
 import { GATE_TYPES,type IntegrityEvidence,type ProofGate } from '../lib/proof-scale';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./proofScale.ts':()=>import('../convex/proofScale')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`proofScale:${name}`);
@@ -11,7 +12,7 @@ const query=(name:string)=>makeFunctionReference<'query'>(`proofScale:${name}`);
 const owner='test|alice',day=86400000;
 function evidence(patch:Partial<IntegrityEvidence>={}):IntegrityEvidence{const now=Date.now();return {id:'source-v1',sourceId:'metered-workflow',authoritativeSource:'Signed workload and invoice ledger',sourceUrl:'https://example.test/ledger',dataOwner:'Operations owner',lastVerifiedAt:now-500,permittedUses:['research'],reconciliation:'matched',exceptionPolicy:'Block critical exceptions; independent review required',revision:1,supersedes:null,publishedAt:now-2000,receivedAt:now-1000,mode:'forward',critical:true,content:'Measured workload and complete cost entries',...patch};}
 function gate(type:typeof GATE_TYPES[number]):ProofGate{return {id:type,type,owner:'Named reviewer',state:'passed',evidenceIds:['source-v1'],thresholds:[{metric:'quality',operator:'gte',value:.9,unit:'ratio'}],measurements:[],evaluatedAt:null,revalidateAt:null,decisionBy:'forged-model',decisionActor:'model',audit:[]};}
-async function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({subject:'alice',tokenIdentifier:owner,actorType:'human'});await grantReviewers(t,[owner,'test|bob']);return {t,alice};}
+async function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({...APP_SESSION,subject:'alice',tokenIdentifier:owner,actorType:'human'});await grantReviewers(t,[owner,'test|bob']);return {t,alice};}
 async function pilotAndSource(){const {t,alice}=await setup();const pilotId=await alice.mutation(mutation('createPilot'),{name:'Forward workload pilot',domain:'vectis',mode:'forward',permittedUse:'research'});const source=evidence();const sourceId=await t.mutation(mutation('importEvidence'),{owner,pilotId,recordJson:JSON.stringify(source)});return {t,alice,pilotId,source,sourceId};}
 async function readyPilot(){const fixture=await pilotAndSource();const gateIds=[];for(const type of GATE_TYPES){const gateId=await fixture.alice.mutation(mutation('defineGate'),{pilotId:fixture.pilotId,gateJson:JSON.stringify(gate(type))});gateIds.push(gateId);await fixture.t.mutation(mutation('recordMeasurement'),{owner,pilotId:fixture.pilotId,type,externalId:`measured-${type}`,record:{metric:'quality',value:.95,unit:'ratio',evidenceIds:['source-v1'],kind:'measured',observedAt:Date.now()-1000,receivedAt:Date.now()-500}});const result=await fixture.alice.mutation(mutation('reviewGate'),{pilotId:fixture.pilotId,gateId,decision:'pass',revalidateAt:Date.now()+day,reason:'Independent reviewer checked original evidence and measured thresholds'});expect(result.decision).toBe('pass');}return {...fixture,gateIds};}
 function scope(){return {users:['pilot-user'],workflows:['one defined workflow'],sourceIds:['metered-workflow'],capexCeilingGbp:100,operatingBudgetGbp:50,nextReviewAt:Date.now()+day};}
@@ -20,7 +21,7 @@ describe('Proof & Scale authenticated evidence gates',()=>{
   it('requires a signed human claim; model and missing-claim identities cannot authorize or alter gates',async()=>{
     const {t,alice}=await setup();const args={name:'Pilot',domain:'investment' as const,mode:'historical' as const,permittedUse:'research'};
     await expect(t.mutation(mutation('createPilot'),args)).rejects.toThrow('Sign in required');
-    const model=t.withIdentity({subject:'model',tokenIdentifier:owner,actorType:'model'}),untyped=t.withIdentity({subject:'carol',tokenIdentifier:'test|carol'});
+    const model=t.withIdentity({...APP_SESSION,subject:'model',tokenIdentifier:owner,actorType:'model'}),untyped=t.withIdentity({...APP_SESSION,subject:'carol',tokenIdentifier:'test|carol'});
     await expect(model.mutation(mutation('createPilot'),args)).rejects.toThrow('Model or automated actors cannot act as researchers or reviewers');
     const pilotId=await alice.mutation(mutation('createPilot'),args);
     await expect(model.mutation(mutation('defineGate'),{pilotId,gateJson:JSON.stringify(gate('business_value'))})).rejects.toThrow('Model or automated actors cannot act as researchers or reviewers');
@@ -29,7 +30,7 @@ describe('Proof & Scale authenticated evidence gates',()=>{
     const list=await alice.query(query('list'),{});expect(list).toHaveLength(1);
   });
   it('isolates ownership and records immutable source revisions with actual application receipt',async()=>{
-    const {t,alice,pilotId,source,sourceId}=await pilotAndSource();const bob=t.withIdentity({subject:'bob',tokenIdentifier:'test|bob',actorType:'human'});
+    const {t,alice,pilotId,source,sourceId}=await pilotAndSource();const bob=t.withIdentity({...APP_SESSION,subject:'bob',tokenIdentifier:'test|bob',actorType:'human'});
     expect(await bob.query(query('list'),{})).toEqual([]);await expect(bob.query(query('detail'),{pilotId})).rejects.toThrow('Record unavailable');
     expect(await t.mutation(mutation('importEvidence'),{owner,pilotId,recordJson:JSON.stringify(source)})).toBe(sourceId);
     await expect(t.mutation(mutation('importEvidence'),{owner,pilotId,recordJson:JSON.stringify({...source,content:'Rewritten'})})).rejects.toThrow('Immutable integrity');

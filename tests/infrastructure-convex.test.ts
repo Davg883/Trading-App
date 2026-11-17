@@ -3,6 +3,7 @@ import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
 import {INFRASTRUCTURE_VERSION,type InfrastructureCase,type InfrastructureSource,type FinancingEvent} from '../lib/infrastructure-financing';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./infrastructure.ts':()=>import('../convex/infrastructure')};
 const mutation=(name:string)=>makeFunctionReference<'mutation'>(`infrastructure:${name}`);
@@ -11,13 +12,13 @@ const owner='test|alice';
 function source(patch:Partial<InfrastructureSource>={}):InfrastructureSource{const now=Date.now();return {id:'report-1',title:'Reported financing discussion',url:'https://example.test/financing',kind:'news',publishedAt:now-2000,receivedAt:now-1000,verification:'corroborated',mode:'historical',role:'evidence',supports:[{eventId:'guarantee',status:'reported_discussion',binding:false}],...patch};}
 function event(patch:Partial<FinancingEvent>={}):FinancingEvent{const now=Date.now();return {id:'guarantee-r1',eventId:'guarantee',revision:1,supersedes:null,issuer:'NVIDIA',borrower:'Nscale',guarantor:'NVIDIA',customer:'Anthropic',projectId:'monarch',type:'guarantee',principal:50,currency:'USD',maturityAt:null,status:'reported_discussion',claimType:'discussion',publishedAt:now-2000,receivedAt:now-1000,sourceIds:['report-1'],mode:'historical',economicGroupId:'potential-loan',...patch};}
 function fixture():InfrastructureCase{return {version:INFRASTRUCTURE_VERSION,id:'reported-case',name:'Reported financing case',mode:'historical',sources:[source()],events:[event()],relationships:[],metrics:[]};}
-function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({subject:'alice',tokenIdentifier:owner});return {t,alice};}
+function setup(){const t=convexTest(schema,modules),alice=t.withIdentity({...APP_SESSION,subject:'alice',tokenIdentifier:owner});return {t,alice};}
 afterEach(()=>vi.useRealTimers());
 
 describe('infrastructure financing evidence storage',()=>{
   it('keeps ingestion internal and scopes all reads and snapshots to the authenticated owner',async()=>{
     const backend=await import('../convex/infrastructure');expect(backend.importCase.isInternal).toBe(true);
-    const {t,alice}=setup(),bob=t.withIdentity({subject:'bob',tokenIdentifier:'test|bob'});
+    const {t,alice}=setup(),bob=t.withIdentity({...APP_SESSION,subject:'bob',tokenIdentifier:'test|bob'});
     const caseId=await t.mutation(mutation('importCase'),{owner,externalId:'case-v1',caseJson:JSON.stringify(fixture())});
     await expect(t.query(query('list'),{})).rejects.toThrow('Sign in required');expect(await bob.query(query('list'),{})).toEqual([]);
     await expect(bob.query(query('detail'),{caseId})).rejects.toThrow('Record unavailable');

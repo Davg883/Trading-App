@@ -43,6 +43,7 @@ import {
   projectDatasetIntoLiveTypeDb,
 } from '../lib/graph/typedb-driver-adapter';
 import type { MacroGraphDataset, MacroRelationship } from '../lib/graph/contracts';
+import {APP_SESSION} from './helpers/app-identity';
 
 const convexModules = {
   './_generated/server.ts': async () => ({}),
@@ -535,8 +536,8 @@ describe('Phase G.4: Evidence-Locked AI Chat & Knowledge Graph Demonstration (Te
 
     // 3. Convex owner isolation: User B cannot read User A's chat history or EvidenceBundleV1
     const t = convexTest(schema, convexModules);
-    const userA = t.withIdentity({ subject: 'user_owner_a', tokenIdentifier: OWNER_A });
-    const userB = t.withIdentity({ subject: 'user_owner_b', tokenIdentifier: OWNER_B });
+    const userA = t.withIdentity({...APP_SESSION,subject: 'user_owner_a', tokenIdentifier: OWNER_A });
+    const userB = t.withIdentity({...APP_SESSION,subject: 'user_owner_b', tokenIdentifier: OWNER_B });
 
     const recordTurnRef = makeFunctionReference<'mutation'>(
       'evidenceChat:recordEvidenceChatTurnInternal',

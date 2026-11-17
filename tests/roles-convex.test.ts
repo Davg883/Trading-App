@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./roles.ts':()=>import('../convex/roles'),'./research.ts':()=>import('../convex/research')};
 const roles=(n:string)=>makeFunctionReference<'mutation'>(`roles:${n}`),research=(n:string)=>makeFunctionReference<'mutation'>(`research:${n}`);
@@ -13,7 +14,7 @@ afterEach(()=>vi.useRealTimers());
 
 function setup(){
  vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules);
- return {t,alice:t.withIdentity({subject:'user_alice',tokenIdentifier:ALICE}),bob:t.withIdentity({subject:'user_bob',tokenIdentifier:BOB}),admin:t.withIdentity({subject:'user_admin',tokenIdentifier:ADMIN})};
+ return {t,alice:t.withIdentity({...APP_SESSION,subject:'user_alice',tokenIdentifier:ALICE}),bob:t.withIdentity({...APP_SESSION,subject:'user_bob',tokenIdentifier:BOB}),admin:t.withIdentity({...APP_SESSION,subject:'user_admin',tokenIdentifier:ADMIN})};
 }
 const bootstrap=(t:ReturnType<typeof setup>['t'],subject:string,role:'reviewer'|'administrator',days=30)=>t.mutation(roles('grantRoleInternal'),{subject,role,reason:`Explicit ${role} assignment for test`,expiresAt:Date.now()+days*day,operator:'deployment-owner'});
 async function pendingProposal(user:ReturnType<typeof setup>['alice']){
@@ -75,7 +76,7 @@ describe('Server-validated research roles',()=>{
  });
  it('refuses model actors even when their token identifier holds a grant',async()=>{
   const {t,alice}=setup();await bootstrap(t,ALICE,'reviewer');const proposalId=await pendingProposal(alice);
-  const model=t.withIdentity({subject:'user_alice',tokenIdentifier:ALICE,actorType:'model'});
+  const model=t.withIdentity({...APP_SESSION,subject:'user_alice',tokenIdentifier:ALICE,actorType:'model'});
   await expect(model.mutation(research('review'),approve(proposalId))).rejects.toThrow('Model or automated actors');
  });
  it('keeps rejected approvals terminal and leaves independent risk enforcement in force after approval',async()=>{

@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {convexTest} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 const modules={'./_generated/server.ts':async()=>({}),'./brokers.ts':()=>import('../convex/brokers')};
 const m=(n:string)=>makeFunctionReference<'mutation'>(`brokers:${n}`),q=(n:string)=>makeFunctionReference<'query'>(`brokers:${n}`);
@@ -11,7 +12,7 @@ const envelope=JSON.stringify({version:'broker-vault-v1',keyVersion:'v1',iv:'AAA
 const base=(e:string)=>`https://${e}.trading212.com/api/v0`;
 const snap=(e:'live'|'demo',at:number,total=250)=>JSON.stringify({scope:'sync',summary:{provider:'trading212',environment:e,sourceUrl:`${base(e)}/equity/account/summary`,retrievedAt:at,data:{accountId:'1',currency:'GBP',totalValue:total,cash:{availableToTrade:total,reservedForOrders:0,inPies:0},investments:{currentValue:0,totalCost:0,realizedProfitLoss:0,unrealizedProfitLoss:0}}},positions:{provider:'trading212',environment:e,sourceUrl:`${base(e)}/equity/positions`,retrievedAt:at,data:[]},transactions:null,historyErrorCode:null});
 afterEach(()=>vi.useRealTimers());
-function setup(){vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules);return {t,owner:t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER})};}
+function setup(){vi.useFakeTimers();vi.setSystemTime(now);const t=convexTest(schema,modules);return {t,owner:t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER})};}
 async function save(t:ReturnType<typeof setup>['t'],environment:'live'|'demo',maskedKey='••••FVft'){return (await t.mutation(m('saveInternal'),{owner:OWNER,environment,maskedKey,encryptedPayload:envelope}) as {connectionId:string}).connectionId;}
 async function lease(t:ReturnType<typeof setup>['t'],connectionId:string,environment:'live'|'demo'){return await t.mutation(m('acquireSyncInternal'),{owner:OWNER,connectionId,environment,operation:'sync'}) as {ok:boolean;leaseToken:string;revision:number;code?:string;retryAfterAt?:number};}
 const record=(t:ReturnType<typeof setup>['t'],id:string,e:'live'|'demo',l:{leaseToken:string;revision:number},extra:Record<string,unknown>)=>t.mutation(m('recordSyncInternal'),{owner:OWNER,connectionId:id,environment:e,leaseToken:l.leaseToken,revision:l.revision,...extra}) as Promise<{stored:boolean;errorCode?:string}>;
@@ -52,7 +53,7 @@ describe('Owner opt-in schedules',()=>{
  it('requires an owner and a saved connection, and can be disabled',async()=>{
   const {t,owner}=setup();await expect(t.mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:15})).rejects.toThrow('Sign in required');
   await expect(owner.mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:15})).rejects.toThrow('Save a read-only connection');
-  await save(t,'live');await expect(t.withIdentity({subject:'m',tokenIdentifier:OWNER,actorType:'model'}).mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:15})).rejects.toThrow('Only the account owner');
+  await save(t,'live');await expect(t.withIdentity({...APP_SESSION,subject:'m',tokenIdentifier:OWNER,actorType:'model'}).mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:15})).rejects.toThrow('Only the account owner');
   await expect(owner.mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:1})).rejects.toThrow('Interval');
   await owner.mutation(m('setAutoSync'),{environment:'live',enabled:true,intervalMinutes:15});expect(await t.mutation(m('claimDueInternal'),{limit:5})).toHaveLength(1);
   await owner.mutation(m('setAutoSync'),{environment:'live',enabled:false,intervalMinutes:15});advance(3*60_000);expect(await t.mutation(m('claimDueInternal'),{limit:5})).toHaveLength(0);

@@ -1,6 +1,7 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {readFileSync,readdirSync,statSync} from 'node:fs';
 import {join} from 'node:path';
+import {APP_SESSION} from './helpers/app-identity';
 vi.mock('server-only',()=>({}));
 const h=vi.hoisted(()=>({authMock:vi.fn(),convexCalls:[] as string[]}));
 vi.mock('@clerk/nextjs/server',()=>({auth:h.authMock}));
@@ -98,7 +99,7 @@ describe('WP3 — Convex refuses execution-enabling state changes',()=>{
    return await ctx.db.insert('tradeOrders',{owner:OWNER,state:'confirmed',environment:'live',ticker:'AAPL_US_EQ',draftJson:JSON.stringify(draft),createdAt:now,updatedAt:now,version:TRADING_VERSION,riskPassed:true,riskEvaluatedAt:now,confirmationTokenHash:HASH,confirmationPayloadHash:HASH,confirmationExpiresAt:now+60_000,confirmationUsedAt:now,confirmedAt:now});
   });
   const approvedId=await t.run(ctx=>ctx.db.insert('tradeOrders',{owner:OWNER,state:'approved',environment:'demo',ticker:'AAPL_US_EQ',draftJson:JSON.stringify({...draft,environment:'demo'}),createdAt:now,updatedAt:now,version:TRADING_VERSION,riskPassed:true,riskEvaluatedAt:now}));
-  return {t,owner:t.withIdentity({subject:'user_owner',tokenIdentifier:OWNER}),orderId,approvedId};
+  return {t,owner:t.withIdentity({...APP_SESSION,subject:'user_owner',tokenIdentifier:OWNER}),orderId,approvedId};
  }
  it('refuses a submission claim for a fully confirmed order with executionFlagEnabled: true',async()=>{
   const {t,orderId}=await setup();

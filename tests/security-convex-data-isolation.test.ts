@@ -2,6 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {convexTest,type TestConvex} from 'convex-test';
 import {makeFunctionReference} from 'convex/server';
 import schema from '../convex/schema';
+import {APP_SESSION} from './helpers/app-identity';
 
 /**
  * MVP hardening — work package 1: Convex private-data isolation.
@@ -45,9 +46,9 @@ async function setup(researchOwner:string|undefined){
  await seedOwner(t,B,MARK_B,2222);
  return {
   t,
-  a:t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER}),
-  b:t.withIdentity({subject:'user_b',tokenIdentifier:B,issuer:ISSUER}),
-  c:t.withIdentity({subject:'user_c',tokenIdentifier:C,issuer:ISSUER}),
+  a:t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER}),
+  b:t.withIdentity({...APP_SESSION,subject:'user_b',tokenIdentifier:B,issuer:ISSUER}),
+  c:t.withIdentity({...APP_SESSION,subject:'user_c',tokenIdentifier:C,issuer:ISSUER}),
  };
 }
 
@@ -178,18 +179,18 @@ describe('WP1 — authenticated owners see only their own records',()=>{
  it('an identity from an untrusted issuer, or with an untrusted audience or authorised party, is denied',async()=>{
   const {t}=await setup(A);
   vi.stubEnv('CLERK_JWT_ISSUER_DOMAIN',ISSUER);
-  const forgedIssuer=t.withIdentity({subject:'user_a',tokenIdentifier:'https://evil.test|user_a',issuer:'https://evil.test'});
+  const forgedIssuer=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:'https://evil.test|user_a',issuer:'https://evil.test'});
   await expect(forgedIssuer.query(chatQ('getChatOperationsTelemetry'),{})).rejects.toThrow('Untrusted token issuer');
   await expect(forgedIssuer.query(opsQ('overview'),{})).rejects.toThrow('Untrusted token issuer');
-  const wrongAud=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,aud:'some-other-app'});
+  const wrongAud=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,aud:'some-other-app'});
   await expect(wrongAud.query(chatQ('getChatOperationsTelemetry'),{})).rejects.toThrow('Untrusted token audience');
-  const wrongAzp=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,azp:'https://evil.test'});
+  const wrongAzp=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,azp:'https://evil.test'});
   await expect(wrongAzp.query(chatQ('getChatOperationsTelemetry'),{})).rejects.toThrow('Untrusted token authorized party');
  });
 
  it('model and automation actors cannot read owner chat telemetry',async()=>{
   const {t}=await setup(A);
-  const model=t.withIdentity({subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
+  const model=t.withIdentity({...APP_SESSION,subject:'user_a',tokenIdentifier:A,issuer:ISSUER,actorType:'model'});
   await expect(model.query(chatQ('getChatOperationsTelemetry'),{})).rejects.toThrow('Model or automated actors');
  });
 });
