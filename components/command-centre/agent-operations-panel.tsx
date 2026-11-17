@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type {CollectionHealthReport,JobHealthSummary} from '../../lib/remote-ops/health-monitor';
+import {describeJobSchedule,schedulerIdle} from '../../lib/remote-ops/job-schedule-display';
 import {age,iso} from './shared';
 
 const CATEGORY_LABELS:Record<JobHealthSummary['category'],string>={
@@ -18,7 +19,7 @@ function costText(job:JobHealthSummary):string{
 
 function layerTone(status:string):'ok'|'warn'|'alert'{
  if(status==='working'||status==='available'||status==='imported'||status==='generated')return 'ok';
- if(status==='partial'||status==='unchanged_cursor'||status==='awaiting_uk_0730'||status==='degraded')return 'warn';
+ if(status==='partial'||status==='unchanged_cursor'||status==='awaiting_uk_0730'||status==='degraded'||status==='idle')return 'warn';
  return 'alert';
 }
 
@@ -48,6 +49,8 @@ export function AgentOperationsPanel({
  onToggleJob?:(jobKey:string,enabled:boolean)=>Promise<void>;
 }){
  const layers=health.operationalLayers;
+ // Sprint G9.3.1: a globally disabled scheduler means no unattended run happens, whatever the job toggles say.
+ const idle=schedulerIdle(layers.scheduler);
  return (
   <section className="cc-panel" id="agent-operations" aria-labelledby="agent-ops-title" data-testid="agent-operations-panel">
    <header className="cc-panel-head">
@@ -58,8 +61,8 @@ export function AgentOperationsPanel({
       A healthy scheduler does not automatically imply healthy upstream data ingestion.
      </p>
     </div>
-    <span className={`cc-status ${health.systemEnabled?'cc-delayed':'cc-stale'}`} data-testid="agent-ops-env">
-     {health.systemEnabled?`Active authority: ${health.activeEnvironment}`:'Centrally disabled'}
+    <span className={`cc-status ${health.systemEnabled&&!idle?'cc-delayed':'cc-stale'}`} data-testid="agent-ops-env">
+     {health.systemEnabled?`Active authority: ${health.activeEnvironment}${idle?' · scheduler disabled':''}`:'Centrally disabled'}
     </span>
    </header>
 
@@ -67,7 +70,7 @@ export function AgentOperationsPanel({
     <dl>
      <div className="cc-strip-item">
       <dt>System status</dt>
-      <dd>{health.systemEnabled?'Enabled (unattended)':'Disabled centrally'}</dd>
+      <dd data-testid="agent-ops-system-status">{!health.systemEnabled?'Disabled centrally':idle?'Enabled · scheduler disabled (no unattended runs)':'Enabled (unattended)'}</dd>
      </div>
      <div className="cc-strip-item">
       <dt>Pending verification</dt>
@@ -132,16 +135,19 @@ export function AgentOperationsPanel({
       </tr>
      </thead>
      <tbody>
-      {health.jobs.map(job=>(
-       <tr key={job.jobKey} data-job={job.jobKey}>
+      {health.jobs.map(job=>{
+       const schedule=describeJobSchedule(job,layers.scheduler,now,iso);
+       return (
+       <tr key={job.jobKey} data-job={job.jobKey} data-effective-state={schedule.effective}>
         <th scope="row">
          {job.name}
          <small>{CATEGORY_LABELS[job.category]} — {job.purpose}</small>
         </th>
         <td>
-         <span className={`cc-status ${job.enabled&&job.scheduled!==false&&!job.pausedReason&&!job.lastErrorCode?'cc-delayed':'cc-stale'}`} data-testid={`job-status-${job.jobKey}`}>
-          {job.pausedReason?`Paused (${job.pausedReason})`:!job.enabled?'Disabled':job.lastErrorCode?'Failed':job.scheduled===false?'Enabled · not scheduled (cron disabled)':'Enabled'}
+         <span className={`cc-status ${schedule.active?'cc-delayed':'cc-stale'}`} data-testid={`job-status-${job.jobKey}`}>
+          {schedule.effectiveLabel}
          </span>
+         <small data-testid={`job-configured-${job.jobKey}`}>Configured: {schedule.configured}</small>
          <small data-testid={`job-env-${job.jobKey}`}>Env: {job.environment}</small>
          {onToggleJob&&(
           <small>
@@ -173,7 +179,7 @@ export function AgentOperationsPanel({
           <span>{fixture?'Synthetic fixture healthy':'None · No provider errors'}</span>
          )}
         </td>
-        <td data-testid={`job-next-run-${job.jobKey}`}>{job.scheduled===false?<>Not scheduled<small>stored value {iso(job.nextRunAt)} will not run while the cron is disabled</small></>:job.nextRunOverdue?<>Overdue<small>was due {iso(job.nextRunAt)}</small></>:iso(job.nextRunAt)}</td>
+        <td data-testid={`job-next-run-${job.jobKey}`}>{schedule.nextRunLabel}{schedule.nextRunDetail&&<small>{schedule.nextRunDetail}</small>}</td>
         <td>
          <span className={`cc-fresh cc-${job.freshness==='fresh'?'fresh':job.freshness==='stale'?'stale':'unavailable'}`} data-testid={`job-freshness-${job.jobKey}`}>
           {job.freshness==='fresh'?'Fresh':job.freshness==='delayed'?'Delayed':job.freshness==='stale'?'Stale':'Unavailable'}
@@ -192,7 +198,8 @@ export function AgentOperationsPanel({
         </td>
         <td>{costText(job)}</td>
        </tr>
-      ))}
+       );
+      })}
      </tbody>
     </table>
    </div>

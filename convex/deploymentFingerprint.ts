@@ -3,7 +3,7 @@
 // in; the deployed backend returns it from `release:fingerprint`. They must match for a release to be accepted.
 export const CONVEX_DEPLOYMENT_FINGERPRINT = {
   contractVersion: 'aci-convex-fingerprint-v1',
-  sourceSha256: '764ccc52a03349a24bff68ce7d17f03d25a5b41600f4cb7966e6f385f3a0a717',
+  sourceSha256: '2231bc060038945e445f12ba318273224ecc704d38c466c469ccd1718fcd28aa',
   fileCount: 89,
   packageCount: 4,
 } as const;

@@ -1,4 +1,5 @@
 import type { CollectionHealthReport } from './health-monitor';
+import { schedulerIdle } from './job-schedule-display';
 import type { MorningBriefingRecord } from './contracts';
 import type { AuthorisedMarketObservation } from '../market-data/provider-adapter';
 import type { MissingEvidenceResolverReport } from '../market-data/missing-evidence-resolver';
@@ -140,10 +141,11 @@ export function buildWorkspaceConnectionsReport(
 
   if (health) {
     convexVerifiedAt = health.evaluatedAt;
-    const scheduledCount = health.jobs.filter((j) => j.scheduled ?? j.enabled).length;
+    const scheduler = health.operationalLayers.scheduler;
+    // Sprint G9.3.1: fail safe — a job counts as scheduled only when the backend says so and the scheduler is not idle.
+    const scheduledCount = schedulerIdle(scheduler) ? 0 : health.jobs.filter((j) => j.scheduled === true).length;
     const promotedTotal = health.operationalLayers.evidence.promotedTotal;
     const obsCount = options.liveOps?.marketData?.totalObservationsStored ?? 0;
-    const scheduler = health.operationalLayers.scheduler;
     convexCheckpoint = `${promotedTotal} promoted facts · ${obsCount} EOD observations · ${scheduledCount}/${health.jobs.length} jobs actually scheduled · scheduler: ${scheduler.label}`;
     if (health.operationalLayers.collector.status === 'failed') {
       convexStatus = 'Failed';

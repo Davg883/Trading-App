@@ -801,6 +801,11 @@ function toPublicOperationsStatus(full:Awaited<ReturnType<typeof buildOperations
     conditionalSkipLastRun:j.conditionalSkipLastRun,
     lastOutcome:null,
     lastErrorCode:j.lastErrorCode,
+    // Sprint G9.3.1: non-sensitive scheduling state. Without these the public panel cannot tell an idle job from a
+    // scheduled one and showed collectors as "Enabled" with stale next-run times while the scheduler was disabled.
+    latestSourceObservationAt:j.latestSourceObservationAt,
+    scheduled:j.scheduled,
+    nextRunOverdue:j.nextRunOverdue,
    })),
    providers:h.providers.map(p=>({
     providerId:p.providerId,
@@ -815,6 +820,7 @@ function toPublicOperationsStatus(full:Awaited<ReturnType<typeof buildOperations
    alerts:h.alerts.filter(a=>a.providerOrJob!=='ai_budget'&&a.providerOrJob!=='evidence_chat'),
    environmentAudit:(h.environmentAudit??[]).filter(svc=>svc.serviceId!=='trading212_readonly'),
    graphProjection:h.graphProjection?{...h.graphProjection,humanReviewCount:0}:undefined,
+   externalNewsIngestion:h.externalNewsIngestion,
   },
   marketData:full.marketData,
   missingEvidenceResolution:full.missingEvidenceResolution,

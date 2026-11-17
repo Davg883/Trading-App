@@ -294,7 +294,7 @@ describe('Scheduler health never reports active when disabled or overdue',()=>{
 
  it.each([
   ['enabled',{schedulerEnv:'remote' as const,jobs:[job()]},['Scheduler working','RESEARCH_SCHEDULER_ENV: remote','Last attempt: 2026-11-16','Source observed: 2026-11-12'],['Not scheduled','Overdue']],
-  ['disabled',{schedulerEnv:'disabled' as const,jobs:[job()]},['Scheduler disabled (RESEARCH_SCHEDULER_ENV=disabled)','RESEARCH_SCHEDULER_ENV: disabled','no tick expected','Enabled · not scheduled (cron disabled)','Not scheduled'],['Scheduler working']],
+  ['disabled',{schedulerEnv:'disabled' as const,jobs:[job()]},['Scheduler disabled (RESEARCH_SCHEDULER_ENV=disabled)','RESEARCH_SCHEDULER_ENV: disabled','no tick expected','Not scheduled — scheduler disabled','Configured: Enabled','Not scheduled'],['Scheduler working']],
   ['overdue',{schedulerEnv:'remote' as const,jobs:[job({lastSuccessAt:stale,lastRunAt:stale,nextRunAt:stale+15*60_000})]},['Scheduler overdue','the cron is configured but not executing','Overdue'],['Scheduler working']],
   ['failed',{schedulerEnv:'remote' as const,jobs:[job({lastErrorCode:'sec_edgar_unreachable',lastOutcome:'failed:sec_edgar_unreachable',lastFailureAt:recent})]},['Scheduler working','Failed','sec_edgar_unreachable','Collectors failing'],['All collectors working']],
   ['unchanged source',{schedulerEnv:'remote' as const,jobs:[job({lastConditionalSkip:true,lastOutcome:'succeeded:cursor_unchanged',lastProviderRequests:7})]},['Scheduler working','cursor unchanged (0 model calls)','7 reqs','latest cycle skipped unchanged sources via cursor'],['Failed','Overdue']],

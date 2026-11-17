@@ -103,7 +103,10 @@ describe('WP1 — anonymous callers never inherit an owner or reach private reco
   const {t}=await setup(A);
   const res=await t.query(opsQ('publicOperationsOverview'),{}) as NonNullable<PublicOverview>;
   expect(Object.keys(res).sort()).toEqual(['audience','executionAuthority','health','latestBriefing','marketData','missingEvidenceResolution']);
-  expect(Object.keys(res.health).sort()).toEqual(['activeEnvironment','aiResearchHealthy','alerts','dailyCostGbp','deterministicCollectionHealthy','environmentAudit','evaluatedAt','executionPaths','graphProjection','jobs','modelFailureIsolated','monthlyCostGbp','operationalLayers','pendingVerificationCount','providers','systemEnabled']);
+  // Sprint G9.3.1: externalNewsIngestion added deliberately — a fixed status/label/detail with no user data, needed so the
+  // signed-out panel states that external news ingestion is not implemented.
+  expect(Object.keys(res.health).sort()).toEqual(['activeEnvironment','aiResearchHealthy','alerts','dailyCostGbp','deterministicCollectionHealthy','environmentAudit','evaluatedAt','executionPaths','externalNewsIngestion','graphProjection','jobs','modelFailureIsolated','monthlyCostGbp','operationalLayers','pendingVerificationCount','providers','systemEnabled']);
+  expect(Object.keys(res.health.externalNewsIngestion as object).sort()).toEqual(['detail','label','status']);
  });
 
  it('getChatOperationsTelemetry: anonymous caller is denied whichever owner RESEARCH_OWNER_ID names',async()=>{

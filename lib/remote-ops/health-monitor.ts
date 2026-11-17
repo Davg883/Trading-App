@@ -112,7 +112,8 @@ export type OperationalLayerStatus={
   nextExpectedTickAt:number|null;
  };
  collector:{
-  status:'working'|'partial'|'failed';
+  /** Sprint G9.3.1: 'idle' when the cron gate is closed — no collector runs, whatever the last results were. */
+  status:'working'|'partial'|'failed'|'idle';
   label:string;
   detail:string;
   healthyJobsCount:number;
@@ -560,8 +561,10 @@ export function evaluateCollectionHealth(input:{
  const healthyJobsCount=jobs.filter(j=>!j.lastErrorCode&&j.pausedReason===null&&j.lastSuccessAt!==null).length;
  const failedJobsCount=jobs.filter(j=>Boolean(j.lastErrorCode)||j.pausedReason!==null).length;
  const collectorStatus:OperationalLayerStatus['collector']['status']=
+  !cronGateOpen?'idle':
   failedJobsCount===0&&healthyJobsCount>0?'working':
   healthyJobsCount>0?'partial':'failed';
+ const idleReason=schedulerEnv==='disabled'?'scheduler disabled':'operations disabled';
 
  const availableProvidersCount=providers.filter(p=>p.status==='connected'||p.status==='delayed_public').length;
  const unavailableProvidersCount=providers.filter(p=>p.status!=='connected'&&p.status!=='delayed_public').length;
@@ -612,8 +615,10 @@ export function evaluateCollectionHealth(input:{
   },
   collector:{
    status:collectorStatus,
-   label:collectorStatus==='working'?'All collectors working':collectorStatus==='partial'?`Partial (${healthyJobsCount}/${jobs.length} healthy)`:'Collectors failing',
-   detail:failedJobsCount>0
+   label:collectorStatus==='idle'?`Collectors idle (${idleReason})`:collectorStatus==='working'?'All collectors working':collectorStatus==='partial'?`Partial (${healthyJobsCount}/${jobs.length} healthy)`:'Collectors failing',
+   detail:collectorStatus==='idle'
+    ?`No collector runs while the ${idleReason==='scheduler disabled'?'scheduler is':'operations are'} disabled. Last recorded results: ${healthyJobsCount} succeeded, ${failedJobsCount} reported an error or pause.`
+    :failedJobsCount>0
     ?`${healthyJobsCount} collector(s) succeeded; ${failedJobsCount} reported an upstream error (${jobs.filter(j=>j.lastErrorCode).map(j=>`${j.jobKey}:${j.lastErrorCode}`).join(', ')}).`
     :`All ${healthyJobsCount} scheduled collector(s) completed without error.`,
    healthyJobsCount,
