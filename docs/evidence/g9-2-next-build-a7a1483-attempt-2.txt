@@ -1,0 +1,128 @@
+
+> ai-capital-intelligence@0.1.0 build
+> next build
+
+▲ Next.js 16.4.3 (Turbopack)
+- Environments: .env.local
+✓ Running next.config.ts took 64ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 1919ms
+  Running TypeScript ...
+⚠ Your version of Next.js is affected by a known security vulnerability. This command is continuing after the upgrade reminder.
+Reference: https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
+  Finished TypeScript in 6.9s ...
+  Collecting page data using 15 workers ...
+  Generating static pages using 15 workers (0/15) ...
+  Generating static pages using 15 workers (3/15) 
+  Generating static pages using 15 workers (7/15) 
+  Generating static pages using 15 workers (11/15) 
+✓ Generating static pages using 15 workers (15/15) in 1660ms
+Turbopack build encountered 2 warnings:
+./lib/research-packages.ts:26:60
+Warning: Dynamic filesystem access causes tracing of the whole project
+  24 | ...tring,root=process.cwd()){
+  25 | ...S,id))throw new Error('Unknown research package');
+> 26 | ... ResearchPackageId],raw=readFileSync(path.join(root,spec.file));
+     |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  27 | ...ha256!==spec.sha256)throw new Error('Package bytes do not match the pinned hash; regist...
+  28 | ...'?parseRecoveryCase(JSON.parse(raw.toString('utf8'))):parsePolicyCase(JSON.parse(raw.to...
+  29 | ...rd),canonical=canonicalJson(record);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: fs.readFileSync(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  App Route:
+    ./lib/research-packages.ts
+    ./lib/research-import-server.ts
+    ./app/api/research/import/route.ts
+
+  Server Component:
+    ./lib/research-packages.ts
+    ./lib/research-import-server.ts
+    ./lib/remote-ops/server.ts
+    ./app/workspace/page.tsx
+
+
+./lib/research-packages.ts:26:73
+Warning: Dynamic filesystem access causes tracing of the whole project
+  24 | ...root=process.cwd()){
+  25 | ...throw new Error('Unknown research package');
+> 26 | ...rchPackageId],raw=readFileSync(path.join(root,spec.file));
+     |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  27 | ...==spec.sha256)throw new Error('Package bytes do not match the pinned hash; register a n...
+  28 | ...eRecoveryCase(JSON.parse(raw.toString('utf8'))):parsePolicyCase(JSON.parse(raw.toString...
+  29 | ...nonical=canonicalJson(record);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: path.join(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  App Route:
+    ./lib/research-packages.ts
+    ./lib/research-import-server.ts
+    ./app/api/research/import/route.ts
+
+  Server Component:
+    ./lib/research-packages.ts
+    ./lib/research-import-server.ts
+    ./lib/remote-ops/server.ts
+    ./app/workspace/page.tsx
+
+
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /api/brokers
+├ ƒ /api/brokers/auto-sync
+├ ƒ /api/brokers/schedule
+├ ƒ /api/brokers/scheduled
+├ ƒ /api/brokers/sync
+├ ƒ /api/graph/chat
+├ ƒ /api/graph/query
+├ ƒ /api/health/release
+├ ƒ /api/operations/scheduled
+├ ƒ /api/operations/settings
+├ ƒ /api/research/import
+├ ƒ /api/research/staging
+├ ƒ /api/trading
+├ ○ /consensus
+├ ƒ /data-room
+├ ○ /defence
+├ ƒ /dev/command-centre
+├ ○ /earnings
+├ ○ /earnings/amazon
+├ ○ /icon.svg
+├ ○ /infrastructure
+├ ○ /manifest.webmanifest
+├ ○ /policy-risk
+├ ƒ /portfolio
+├ ○ /proof-scale
+├ ○ /recovery
+├ ƒ /research-chat
+├ ƒ /settings/brokers
+├ ƒ /stress
+├ ƒ /trading
+└ ƒ /workspace
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

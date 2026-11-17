@@ -2,7 +2,7 @@
 
 **Document reference:** `docs/phase-g9-2-research-integrity-and-environment-recovery.md`
 **Baseline:** G9.1 report, candidate `9e58c85`; branch `verify/combined-release-candidate` at `091a1bb`
-**Status of this document:** pre-deployment report. **Nothing has been committed, pushed or deployed**, and no
+**Status of this document:** pre-deployment report. Committed locally on 2026-11-17 (§9.2); **nothing has been pushed or deployed**, and no
 development or production data, credential, Clerk issuer, scheduler setting or WAF rule has been changed. The
 quarantine, re-ingestion, issuer and scheduler actions below are prepared and tested but await explicit owner
 authorisation (§9).
@@ -15,7 +15,7 @@ authorisation (§9).
 | Scope | Verdict | Reason |
 | :- | :-: | :- |
 | **Preview** | **NO-GO** | The development Convex backend still runs pre-G9 functions (release gate: `BACKEND_UNVERSIONED`), still holds seven promoted invalid SEC facts, rejects the Clerk identity that owns all data, and has its scheduler disabled. All four are fixed in code and tooling here but need the authorised deployment and data steps in §9. |
-| **Production** | **NO-GO** | Not assessed for promotion; Production is untouched. Production must not be promoted until Preview passes the release gate and owner acceptance. |
+| **Production** | **NO-GO** | Not assessed for promotion; Production is untouched. The Next.js security-advisory build gate is unresolved (§5.1). Production must not be promoted until Preview passes the release gate and owner acceptance. |
 
 ---
 
@@ -110,7 +110,21 @@ All changes are in the working tree of `verify/combined-release-candidate` (base
 | `npx tsc --noEmit -p convex/tsconfig.json` | **PASS** |
 | `npm run test:python` | **PASS** — 219 tests, 1 skipped |
 | `npx vitest run` (full, parallel) | **PASS** on every full run after the timeout fix: 804/804, 804/804, then 813/813 three times with the extended suite (4 skipped), the last after the final edits. |
-| `next build` | **PASS** on retry. Two different failures occurred: (1) Next.js's **security-advisory gate** (`SecurityFatalError: Your version of Next.js is affected by a known security vulnerability`), which stops one build and lets the retry through; this caused the first G9.2 build failure. (2) The test typing error above, which `next build` also catches because tests are in the TypeScript scope. |
+| `next build` | **PASS ON RETRY — SECURITY GATE UNRESOLVED.** Final build at HEAD `a7a1483`: attempt 1 exited **1** (`SecurityFatalError`, Next.js security-advisory gate); attempt 2 exited **0**. See §5.1. During the sprint, two different failures occurred: (1) the same security-advisory gate, which caused the first G9.2 build failure; (2) the test typing error above, which `next build` also catches because tests are in the TypeScript scope. |
+
+### 5.1 Final production build at HEAD `a7a1483` (corrected record, 2026-11-17)
+
+The earlier wording in this section recorded the build as "PASS on retry". A build stopped by the security gate is a **failed** build attempt, so the record is corrected here. Both attempts ran `npm run build` (`next build`, Next.js 16.4.3, Turbopack) on an unchanged tree.
+
+| Attempt | Started (UTC) | Finished (UTC) | Exit code | Result |
+| :-: | :- | :- | :-: | :- |
+| 1 | 2026-11-17 11:54:39 | 2026-11-17 11:54:59 | **1** | **FAILED.** Compiled, TypeScript passed and all 15 pages were generated, then the build stopped with `Error [SecurityFatalError]: Your version of Next.js is affected by a known security vulnerability`, the Next.js security-advisory gate. |
+| 2 | 2026-11-17 11:55:09 | 2026-11-17 11:55:27 | **0** | **PASSED.** Same tree, same command; the gate did not fire. |
+
+**Overall classification: PASS ON RETRY — SECURITY GATE UNRESOLVED.** The advisory that triggers the gate is not resolved or assessed by this sprint. Both attempts reported the same two Turbopack warnings (whole-project file tracing from `lib/research-packages.ts`, a file this sprint did not change). Build output: `docs/evidence/g9-2-next-build-a7a1483-attempt-1.txt` and `…-attempt-2.txt` (ANSI colour codes removed, otherwise verbatim).
+
+- **Production release remains NO-GO.**
+- **The next Preview deployment remains subject to resolving or explicitly assessing the security gate**, because a single-attempt build (as on Vercel) may stop at the gate. The investigation of the gate is reported separately for owner approval.
 
 **Flaky tests.** In G9.1, 2–4 convex-test security suites timed out at the 5 s default under 81 parallel workers and passed alone. Cause: each suite's first test cold-imports the whole Convex module graph. With the 30 s budget in `vitest.config.ts`, five consecutive full parallel runs had **zero** timeouts and zero failures. No other flaky test was observed.
 
@@ -194,10 +208,12 @@ Both real instances publish JWKS (`complete-bunny-8662`: kid `ins_3LmnLPim2bLQJQ
 | 3 | Owner identity not accepted by the backend | Choose option 1, 2 or 3 in §8 |
 | 4 | Scheduler disabled on dev (`RESEARCH_SCHEDULER_ENV=disabled`) | Decide whether to run a controlled cron window (enable, observe one cycle, restore) |
 | 5 | Preview vault key missing | Decide whether Preview should support broker tests |
-| 6 | Next.js `16.4.3` security advisory | Decide whether to upgrade Next.js (separate change) |
+| 6 | Next.js `16.4.3` security advisory; build gate fired on attempt 1 at HEAD `a7a1483` (exit 1), retry exit 0 (§5.1) | Resolve or explicitly assess the security gate before the next Preview deployment; any Next.js upgrade is a separate, separately authorised change |
 | 7 | Production unchanged and not assessed | Promotion only after the Preview passes the gate with `--require-compatible` and owner acceptance |
 
-### 9.2 Proposed commits (none made yet)
+### 9.2 Proposed commits
+
+**Status (2026-11-17):** made locally as `33a931a`, `02fbe24`, `1c7359d`, `6ffd022`, `2657c7a`, `a7a1483`, followed by a documentation-only commit correcting the build record (§5.1). The health-monitor file moved from commit 2 into commit 1 so that each commit typechecks on its own. Nothing has been pushed or deployed.
 
 1. `fix(research-integrity): reject comparative and misattributed SEC facts; add quarantine ledger with auditable re-ingestion` — `lib/remote-ops/evidence-integrity.ts`, `lib/remote-ops/staging-validator.ts`, `convex/schema.ts`, `convex/operations.ts`, `convex/remoteOpsCloud.ts`, `lib/remote-ops/contracts.ts`.
 2. `fix(ops-health): report scheduler from the real cron gate and observed ticks; show per-job attempts and source times; state external news NOT IMPLEMENTED` — `lib/remote-ops/health-monitor.ts`, `lib/remote-ops/workspace-connections.ts`, `components/command-centre/agent-operations-panel.tsx`.
