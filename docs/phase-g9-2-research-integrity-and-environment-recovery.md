@@ -226,9 +226,17 @@ Because commits 1 and 4 both touch Convex sources, `npm run convex:fingerprint` 
 
 ### 9.3 Proposed deployment sequence (each step needs your go-ahead)
 
-1. Push the branch; Vercel builds a new Preview.
-2. `npx convex deploy` of the same commit to `prestigious-dragon-8`, then set `CONVEX_DEPLOYED_GIT_SHA` and `CONVEX_DEPLOYED_AT`.
-3. `npm run release:check` and `/api/health/release` on the Preview must both report **COMPATIBLE**.
+> **Correction (2026-11-17, G9.3 preflight).** An earlier version of this sequence said to run `npx convex deploy`. **Do not use a plain `npx convex deploy` for this development release: it may target Production.** With `CONVEX_DEPLOYMENT` set (as in `.env.local`), the Convex CLI sends `npx convex deploy` to the project's default **Production** deployment (`benevolent-magpie-921`), as its own `--help` states. The verified development-only command is:
+>
+> ```bash
+> CONVEX_DEPLOYMENT=dev:prestigious-dragon-8 npx convex dev --once --typecheck enable --codegen disable
+> ```
+>
+> `npx convex dev --once` pushes functions, indexes and schema to the configured **dev** deployment only, then exits. `--codegen disable` keeps the committed `convex/_generated/` files unchanged (they are type declarations and are not part of the release fingerprint). Before running it, confirm that no `CONVEX_DEPLOY_KEY` is set in the shell. The backend is deployed before the branch is pushed, because the existing Preview frontend keeps working against the additive new backend.
+
+1. Deploy the Convex functions of the release commit to `prestigious-dragon-8` with the development-only command above (never `npx convex deploy`), then set `CONVEX_DEPLOYED_GIT_SHA` and `CONVEX_DEPLOYED_AT`.
+2. `npm run release:check` must report **RELEASE GATE PASS** before the branch is pushed.
+3. Push the branch; Vercel builds a new Preview (build command `next build`; Convex is not deployed by the Vercel build). `/api/health/release` on the Preview must report **COMPATIBLE**.
 4. Run `operations:quarantineStagedEvidenceInternal` with `dryRun:true`, review, then for real (seven items, prepared with exact reasons).
 5. Run the cloud cycle on demand (`forceOnDemand`) for SEC, discovery and briefing jobs; verify four replacement facts (NVDA 4.434, AMZN 77.259, AMD 1.845, INTC 10.216) and a new 2026-11-17 briefing without quarantined facts.
 6. Apply the chosen identity option; test two accepted principals; owner verifies the latest briefing in the browser.
