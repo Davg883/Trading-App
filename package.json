@@ -26,7 +26,10 @@
     "test:browser:command-centre:signed-in": "node scripts/command-centre-signed-in-check.mjs",
     "lint:baseline": "node scripts/eslint-baseline-check.mjs",
     "test:integration:typedb": "ACI_LIVE_TYPEDB_TESTS=1 vitest run tests/typedb-graph.test.ts tests/evidence-locked-chat.test.ts",
-    "eval:live": "vitest run tests/live/live-evaluation.test.ts"
+    "eval:live": "vitest run tests/live/live-evaluation.test.ts",
+    "convex:fingerprint": "node scripts/write-convex-fingerprint.mjs",
+    "release:check": "node scripts/release-fingerprint-check.mjs",
+    "test:serial": "vitest run --no-file-parallelism"
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.22",
