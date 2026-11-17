@@ -1,0 +1,446 @@
+{
+  "generatedAt": "2026-11-17T00:14:37.988Z",
+  "sprint": "G9.2",
+  "convexDeployment": "prestigious-dragon-8 (development)",
+  "owner": "https://harmless-akita-9211.clerk.accounts.dev|user_3LjSsuJX398YIJRdss5Q7PqsSH9",
+  "backup": {
+    "file": "backups/convex-dev/prestigious-dragon-8-pre-g9-2-20261116T234609Z.zip",
+    "sha256": "b78eba25b67553d3ea6e63c719c633042b4dca000ac4246b4386a695a697d64a",
+    "note": "Full snapshot export taken before any data change; kept out of git (backups/ is untracked)."
+  },
+  "method": "Every SEC-derived researchStagingItems row was re-evaluated by running the committed selector (lib/remote-ops/sec-xbrl-fact-selector.ts at 9e58c85+) on the live data.sec.gov companyfacts of the filing named in its own sourceUrl, then cross-checked against the raw XBRL rows that carry the claimed value.",
+  "primaryFilingVerification": [
+    {
+      "ticker": "NVDA",
+      "filing": "10-Q 0001045810-26-000075",
+      "filed": "2026-08-26",
+      "acceptance": "2026-08-26T20:36:00Z",
+      "issuer": "NVIDIA CORP, CIK 0001045810 (dei)",
+      "dei": {
+        "DocumentType": "10-Q",
+        "DocumentPeriodEndDate": "2026-07-26",
+        "FiscalYear": 2027,
+        "FiscalPeriod": "Q2"
+      },
+      "concept": "us-gaap:PaymentsToAcquireProductiveAssets",
+      "fact": "f-334, contextRef c-1, undimensioned, period 2026-01-26..2026-07-26 (six months), unitRef usd = iso4217:USD, decimals -6, value 4434000000",
+      "statementLine": "Purchases related to property and equipment and intangible assets (4,434) | (3,122) — six months ended Jul 26, 2026 | Jul 27, 2025",
+      "threeMonthFactAvailable": false,
+      "verdict": "VERIFIED: $4.434bn is FY27 H1 (year-to-date), correctly labelled Q2 2027 (YTD). The filing has no three-month capex fact."
+    },
+    {
+      "ticker": "AMZN",
+      "filing": "10-Q 0001018724-26-000040",
+      "filed": "2026-10-30",
+      "acceptance": "2026-10-29T22:20:46Z",
+      "issuer": "AMAZON.COM, INC., CIK 0001018724 (dei)",
+      "dei": {
+        "DocumentType": "10-Q",
+        "DocumentPeriodEndDate": "2026-09-30",
+        "FiscalYear": 2026,
+        "FiscalPeriod": "Q3"
+      },
+      "concept": "us-gaap:PaymentsToAcquireProductiveAssets",
+      "fact": "f-145, contextRef c-23, undimensioned, period 2026-07-01..2026-09-30 (three months, frame CY2026Q3), unitRef usd = iso4217:USD, decimals -6, value 77259000000",
+      "statementLine": "Purchases of property and equipment (35,095) | (77,259) | (92,297) | (175,670) | (120,131) | (215,192) — three, nine and twelve months ended Sep 30, 2025 | 2026",
+      "verdict": "VERIFIED: $77.259bn is Q3 2026 (three months)."
+    },
+    {
+      "ticker": "AMD",
+      "filing": "10-Q 0000002488-26-000191",
+      "concept": "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+      "fact": "period 2025-12-28..2026-09-26, iso4217:USD, decimals -6, value 1845000000 (comparative 2024-12-29..2025-09-27 = 752000000)",
+      "statementLine": "Purchases of property and equipment (1,845) | (752)",
+      "verdict": "VERIFIED: $1.845bn nine months to 2026-09-26; the stored $0.75bn was the 2025 comparative."
+    },
+    {
+      "ticker": "INTC",
+      "filing": "10-Q 0000050863-26-000191",
+      "concept": "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+      "fact": "period 2025-12-28..2026-09-26, iso4217:USD, decimals -6, value 10216000000 (comparative 2024-12-29..2025-09-27 = 11158000000)",
+      "verdict": "VERIFIED from the XBRL instance: $10.216bn nine months to 2026-09-26; the stored $11.16bn was the 2025 comparative."
+    }
+  ],
+  "records": [
+    {
+      "stagingItemId": "ss703rpdxnqe8fbp7sbw385tbs8j8gbj",
+      "externalId": "staged-7f5da1f3fb6a672d",
+      "ticker": "NVDA",
+      "runId": "cloud-news_discovery_agent-1794761343134",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-15T16:49:21.404Z",
+      "urlAccession": "0001045810-26-000075",
+      "citedAccession": "0001045810-20-000147",
+      "claim": "capital_expenditures 0.37 billions_usd period=Q22020",
+      "verdict": "INVALID",
+      "reasonCode": "sec_accession_mismatch",
+      "reason": "NVDA $0.37bn is the six months to 2020-07-26 (PaymentsToAcquirePropertyPlantAndEquipment, 10-Q 0001045810-20-000147 filed 2020-08-19), attached to the FY27 Q2 10-Q 0001045810-26-000075. That filing reports $4.434bn for 2026-01-26..2026-07-26 (PaymentsToAcquireProductiveAssets).",
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-08-26",
+        "report": "2026-07-26",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquireProductiveAssets",
+        "val": 4434000000,
+        "bn": 4.43,
+        "period": "Q2 2027 (YTD)",
+        "start": "2026-01-26",
+        "end": "2026-07-26",
+        "span": "cumulative_ytd",
+        "frame": null,
+        "accn": "0001045810-26-000075",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md7ccmyj02g4f5wbxysvh4kg758j9vvb"
+      ]
+    },
+    {
+      "stagingItemId": "ss70p947nts8cqsa9jnrw27w418j8qwq",
+      "externalId": "staged-cca5a888067bd7d3",
+      "ticker": "GOOGL",
+      "runId": "cloud-news_discovery_agent-1794761343134",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-15T16:49:21.404Z",
+      "urlAccession": "0001652044-26-000084",
+      "citedAccession": "0001652044-26-000084",
+      "claim": "capital_expenditures 131.95 billions_usd period=2026",
+      "verdict": "VALID",
+      "reasonCode": null,
+      "reason": null,
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-10-29",
+        "report": "2026-09-30",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+        "val": 131953000000,
+        "bn": 131.95,
+        "period": "Q3 2026 (YTD)",
+        "start": "2026-01-01",
+        "end": "2026-09-30",
+        "span": "cumulative_ytd",
+        "frame": null,
+        "accn": "0001652044-26-000084",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md75qvmc2pdrpn7j0tk57j0jv18j8v9g"
+      ]
+    },
+    {
+      "stagingItemId": "ss72cby9a9wfxt9fbt85b9arc58hp9wn",
+      "externalId": "staged-98c25c92c7ca82e7",
+      "ticker": "GOOGL",
+      "runId": "cloud-news_discovery_agent-1793984593963",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-06T17:03:15.698Z",
+      "urlAccession": "0001193125-26-449835",
+      "citedAccession": "0001193125-26-449835",
+      "claim": "capital_expenditures 63.6 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_periodic_report_required",
+      "reason": "GOOGL $63.6bn is the nine months to 2025-09-30 comparative column of 10-Q 0001652044-26-000084, attributed to 8-K 0001193125-26-449835. The valid current value ($131.95bn, nine months to 2026-09-30) is already stored from the 10-Q.",
+      "expected": {
+        "form": "8-K",
+        "filed": "2026-11-05",
+        "report": "2026-11-05",
+        "eligible": false,
+        "current": false,
+        "accessionMatched": false,
+        "concept": null,
+        "val": null,
+        "bn": null,
+        "period": null,
+        "start": null,
+        "end": null,
+        "span": null,
+        "frame": null,
+        "accn": "0001193125-26-449835",
+        "reject": "unsupported_non_periodic_form:8-K"
+      },
+      "evidenceIds": [
+        "md75wq3011eqzje9zyhzg0perx8hp7px"
+      ]
+    },
+    {
+      "stagingItemId": "ss7919q80bjb818aq2cg2hnpr98hpqtm",
+      "externalId": "staged-c135441d25ee1df9",
+      "ticker": "MSFT",
+      "runId": "cloud-news_discovery_agent-1793984593963",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-06T17:03:15.698Z",
+      "urlAccession": "0001193125-26-448357",
+      "citedAccession": "0001193125-26-448357",
+      "claim": "capital_expenditures 19.39 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_periodic_report_required",
+      "reason": "MSFT $19.39bn is the quarter to 2025-09-30 (FY26 Q1) comparative column of 10-Q 0001193125-26-436133, attributed to 8-K 0001193125-26-448357. The valid current value ($39.37bn, quarter to 2026-09-30) is already stored from the 10-Q.",
+      "expected": {
+        "form": "8-K",
+        "filed": "2026-11-05",
+        "report": "2026-11-04",
+        "eligible": false,
+        "current": false,
+        "accessionMatched": false,
+        "concept": null,
+        "val": null,
+        "bn": null,
+        "period": null,
+        "start": null,
+        "end": null,
+        "span": null,
+        "frame": null,
+        "accn": "0001193125-26-448357",
+        "reject": "unsupported_non_periodic_form:8-K"
+      },
+      "evidenceIds": [
+        "md77dsjwmbs4g6hbq34svrj5kn8hp65p"
+      ]
+    },
+    {
+      "stagingItemId": "ss79a2a4f59fxg9f7yk0heq7z18hqaf6",
+      "externalId": "staged-adfd0a710e5538b2",
+      "ticker": "AMD",
+      "runId": "py-remote-sec-1793984665101",
+      "agent": "antigravity-news-research-agent",
+      "ingestedAt": "2026-11-06T17:04:27.694Z",
+      "urlAccession": "0000002488-26-000191",
+      "citedAccession": "0000002488-26-000191",
+      "claim": "capital_expenditures 0.75 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_comparative_or_obsolete_period",
+      "reason": "AMD $0.75bn is the nine months to 2025-09-27 comparative column of 10-Q 0000002488-26-000191; the current nine months to 2026-09-26 is $1.845bn.",
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-11-04",
+        "report": "2026-09-26",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+        "val": 1845000000,
+        "bn": 1.84,
+        "period": "Q3 2026 (YTD)",
+        "start": "2025-12-28",
+        "end": "2026-09-26",
+        "span": "cumulative_ytd",
+        "frame": null,
+        "accn": "0000002488-26-000191",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md718n2qxb22cfw0ga68dvn5ax8hpba0"
+      ]
+    },
+    {
+      "stagingItemId": "ss79cpn06rc1xnpkfns5vtaxjx8hpnnp",
+      "externalId": "staged-dcf44b009199d49a",
+      "ticker": "AMZN",
+      "runId": "cloud-news_discovery_agent-1793984593963",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-06T17:03:15.698Z",
+      "urlAccession": "0001018724-26-000040",
+      "citedAccession": "0001018724-26-000040",
+      "claim": "capital_expenditures 4.9 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_comparative_or_obsolete_period",
+      "reason": "AMZN $4.9bn is the twelve months to 2016-03-31 (PaymentsToAcquirePropertyPlantAndEquipment, 10-Qs filed 2016-04-29 / 2017-04-28), presented as the 2026 Q3 10-Q 0001018724-26-000040 value. That filing reports $77.259bn for 2026-07-01..2026-09-30 (PaymentsToAcquireProductiveAssets).",
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-10-30",
+        "report": "2026-09-30",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquireProductiveAssets",
+        "val": 77259000000,
+        "bn": 77.26,
+        "period": "Q3 2026",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "span": "three_month",
+        "frame": "CY2026Q3",
+        "accn": "0001018724-26-000040",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md7402mdfykyf330rnj9h4p4c98hq9hx"
+      ]
+    },
+    {
+      "stagingItemId": "ss7b8fm4yv03b75trn2trxqw9s8hqd93",
+      "externalId": "staged-39bf33eb27445eee",
+      "ticker": "INTC",
+      "runId": "py-remote-sec-1793984665101",
+      "agent": "antigravity-news-research-agent",
+      "ingestedAt": "2026-11-06T17:04:27.694Z",
+      "urlAccession": "0000050863-26-000191",
+      "citedAccession": "0000050863-26-000191",
+      "claim": "capital_expenditures 11.16 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_comparative_or_obsolete_period",
+      "reason": "INTC $11.16bn is the nine months to 2025-09-27 comparative column of 10-Q 0000050863-26-000191; the current nine months to 2026-09-26 is $10.216bn.",
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-10-30",
+        "report": "2026-09-26",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+        "val": 10216000000,
+        "bn": 10.22,
+        "period": "Q3 2026 (YTD)",
+        "start": "2025-12-28",
+        "end": "2026-09-26",
+        "span": "cumulative_ytd",
+        "frame": null,
+        "accn": "0000050863-26-000191",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md7a79f73kdsfknh9w06eq6hss8hpjnc"
+      ]
+    },
+    {
+      "stagingItemId": "ss7cxe4kynkz3nz01syfffwyfd8hqzj1",
+      "externalId": "staged-e2523ed83a7c0247",
+      "ticker": "NVDA",
+      "runId": "cloud-news_discovery_agent-1793984593963",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-06T17:03:15.698Z",
+      "urlAccession": "0001045810-26-000078",
+      "citedAccession": "0001045810-26-000078",
+      "claim": "capital_expenditures 0.24 billions_usd period=2026",
+      "verdict": "INVALID",
+      "reasonCode": "sec_periodic_report_required",
+      "reason": "NVDA $0.24bn is the six months to 2019-07-28 (10-Qs 0001045810-19-000144 / -20-000147), attributed to 8-K 0001045810-26-000078, which carries no XBRL capex fact.",
+      "expected": {
+        "form": "8-K",
+        "filed": "2026-09-03",
+        "report": "2026-09-02",
+        "eligible": false,
+        "current": false,
+        "accessionMatched": false,
+        "concept": null,
+        "val": null,
+        "bn": null,
+        "period": null,
+        "start": null,
+        "end": null,
+        "span": null,
+        "frame": null,
+        "accn": "0001045810-26-000078",
+        "reject": "unsupported_non_periodic_form:8-K"
+      },
+      "evidenceIds": [
+        "md7bd53b7yj928k7hkm8zc6ky98hq1zw"
+      ]
+    },
+    {
+      "stagingItemId": "ss7dzreeqsqt13hmm0gr8xsyax8j9zsw",
+      "externalId": "staged-6afe1e4dac78ab77",
+      "ticker": "CRWV",
+      "runId": "cloud-news_discovery_agent-1794761343134",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-15T16:49:21.404Z",
+      "urlAccession": "0001769628-26-000465",
+      "citedAccession": "0001769628-26-000465",
+      "claim": "capital_expenditures 23.56 billions_usd period=2026",
+      "verdict": "VALID",
+      "reasonCode": null,
+      "reason": null,
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-11-12",
+        "report": "2026-09-30",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+        "val": 23558000000,
+        "bn": 23.56,
+        "period": "Q3 2026 (YTD)",
+        "start": "2026-01-01",
+        "end": "2026-09-30",
+        "span": "cumulative_ytd",
+        "frame": null,
+        "accn": "0001769628-26-000465",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md77gjh5e43aqyanfgkm4fsw618j8kck"
+      ]
+    },
+    {
+      "stagingItemId": "ss7fv6dv0w05rc9zwr7e8kbay58j8de7",
+      "externalId": "staged-ad56640669b3eae7",
+      "ticker": "MSFT",
+      "runId": "cloud-news_discovery_agent-1794761343134",
+      "agent": "convex-cloud-remote-agent",
+      "ingestedAt": "2026-11-15T16:49:21.404Z",
+      "urlAccession": "0001193125-26-436133",
+      "citedAccession": "0001193125-26-436133",
+      "claim": "capital_expenditures 39.37 billions_usd period=2026",
+      "verdict": "VALID",
+      "reasonCode": null,
+      "reason": null,
+      "expected": {
+        "form": "10-Q",
+        "filed": "2026-10-28",
+        "report": "2026-09-30",
+        "eligible": true,
+        "current": true,
+        "accessionMatched": true,
+        "concept": "PaymentsToAcquirePropertyPlantAndEquipment",
+        "val": 39367000000,
+        "bn": 39.37,
+        "period": "Q1 2027",
+        "start": "2026-07-01",
+        "end": "2026-09-30",
+        "span": "three_month",
+        "frame": "CY2026Q3",
+        "accn": "0001193125-26-436133",
+        "reject": null
+      },
+      "evidenceIds": [
+        "md706e332xdwc54ggmyqkn9brs8j9rf5"
+      ]
+    }
+  ],
+  "dependants": {
+    "morningBriefings": [
+      {
+        "id": "s9759rb0qvyw7smczk0g7hv8318hp44x",
+        "date": "2026-11-06",
+        "cites": [
+          "GOOGL 63.6",
+          "MSFT 19.39",
+          "AMZN 4.9",
+          "NVDA 0.24"
+        ]
+      },
+      {
+        "id": "s97ebx9w07dnv9ddhde4v5rp858j8m5a",
+        "date": "2026-11-15",
+        "cites": [
+          "NVDA 0.37 (Q2 2020)"
+        ]
+      }
+    ],
+    "forwardResearchEvents": [
+      {
+        "id": "sx7ek7083ewjnm4at5x9kz4em58hpzfb",
+        "eventKey": "forward-004-nvda-qqq-5d-2026-11-05",
+        "note": "Frozen registration (2026-11-06 19:03 UTC) lists staged-e2523ed83a7c0247 (NVDA 8-K) as context evidence. Its outcome is a 5-session NVDA vs QQQ price return and does not use the capex value, so the result is unaffected; the registration is not rewritten."
+      }
+    ],
+    "ratingsAndScores": "Not affected. lib/research-ratings reads the static SEC dataset in data/sec-xbrl/phase-g7-1-sec-xbrl-expansion.json, not Convex staging or evidence rows; no Convex evidence row feeds a rating, valuation or Market Radar score.",
+    "researchJobRuns": "Cursor strings in researchJobRuns/researchJobs contain the (valid) filing accessions only; they are audit history and are not changed."
+  }
+}

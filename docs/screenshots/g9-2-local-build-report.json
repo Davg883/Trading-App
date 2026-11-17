@@ -1,0 +1,66 @@
+{
+  "base": "http://localhost:3000",
+  "label": "g9-2-local-build",
+  "startedAt": "2026-11-17T00:57:33.989Z",
+  "checks": [
+    {
+      "id": "release-fingerprint",
+      "httpStatus": 200,
+      "checkedAt": "2026-11-17T00:57:49.895Z",
+      "frontend": {
+        "gitSha": null,
+        "gitRef": null,
+        "vercelEnv": null,
+        "deploymentHost": null,
+        "expectedConvex": {
+          "contractVersion": "aci-convex-fingerprint-v1",
+          "sourceSha256": "764ccc52a03349a24bff68ce7d17f03d25a5b41600f4cb7966e6f385f3a0a717",
+          "fileCount": 89,
+          "packageCount": 4
+        }
+      },
+      "backend": null,
+      "backendError": "[Request ID: 36981694fd935bbc] Server Error\nCould not find public function for 'release:fingerprint'.\n",
+      "verdict": "BACKEND_UNVERSIONED",
+      "compatible": false,
+      "detail": "The deployed Convex backend predates release fingerprinting; it cannot be proven compatible with this frontend.",
+      "executionAuthority": "none"
+    },
+    {
+      "id": "market-radar",
+      "heading": "Research as of 2026-11-13",
+      "asOf": "Market observation as of 2026-11-13 · Fundamental & graph cut-off: 2026-11-04",
+      "lastRefreshed": "Last refreshed 2026-11-15 16:49 UTC",
+      "freshnessNotice": "Market price observations are as of 2026-11-13 (persisted EOD close), whereas fundamental SEC/TypeDB relationship tables remain anchored to the 2026-11-04 verified filing cut-off; morning briefing record generated 2026-11-15 16:49:21 UTC. Cross-cutoff returns are never blended.",
+      "briefingSource": "bundled_reference",
+      "briefingTitle": "Historical bundled briefing (2026-11-05) — not current research",
+      "bundledNotice": "Historical record: this static briefing ships with the application build and predates the stored evidence; it is shown for reference only. Latest stored briefing: generated 2026-11-15 16:49 UTC. Its content is shown only to the authorised research owner.",
+      "withheldFacts": null,
+      "schedulerLayer": "1. SchedulerScheduler working — Convex cloud cron (remote) active; healthy scheduler does not imply all upstream sources succeeded.RESEARCH_SCHEDULER_ENV: unset · last tick 2026-11-15 17:23 UTC · no tick expected",
+      "externalNews": null,
+      "newsAgentRow": "Remote Financial News & Filing Research AgentAntigravity Remote Agent (AI) — Antigravity Remote Agent discovering AI-sector developments, classifying claims, identifying primary sources and staging candidate evidence.",
+      "nextRunSec": "2026-11-15 18:23 UTC"
+    },
+    {
+      "id": "refresh-navigation",
+      "runs": [
+        {
+          "heading": "Research as of 2026-11-13",
+          "briefingSource": "bundled_reference"
+        },
+        {
+          "heading": "Research as of 2026-11-13",
+          "briefingSource": "bundled_reference"
+        },
+        {
+          "heading": "Research as of 2026-11-13",
+          "briefingSource": "bundled_reference"
+        }
+      ],
+      "stable": true
+    }
+  ],
+  "pageErrors": [],
+  "finishedAt": "2026-11-17T00:58:29.573Z",
+  "releaseVerdict": "BACKEND_UNVERSIONED"
+}
