@@ -29,6 +29,11 @@ import {
   validateStagedItem,
   type ValidatedStagedItemResult,
 } from './staging-validator';
+import {
+  NVDA_HUGGINGFACE_8K_ACCESSION,
+  NVDA_HUGGINGFACE_8K_SHA256,
+  evaluateSecClaimQuarantine,
+} from './xbrl-quarantine-remediation';
 
 export const CASE_007_BUNDLE_ID = 'case-007-nvda-pre-q3fy27-v1' as const;
 export const CASE_007_POST_RESULTS_BUNDLE_ID = 'case-007-nvda-post-q3fy27-v2' as const;
@@ -89,7 +94,9 @@ export const DISPUTED_G9_SEC_XBRL_BLOCKLIST: readonly string[] = [
   'staged-e2523ed83a7c0247',
   'staged-dcf44b009199d49a',
   'staged-adfd0a710e5538b2',
+  'staged-84349400e88f3423',
   'staged-39bf33eb27445eee',
+  'staged-e28936b38824c3e3',
   'staged-98c25c92c7ca82e7',
   'staged-c135441d25ee1df9',
 ];
@@ -116,7 +123,11 @@ export function assertNoDisputedG9SecRecords(dataset: MacroGraphDataset): void {
  * Note: replacing accession-wide blocking of `0001045810-26-000078` with claim-level quarantine is
  * tracked separately in `docs/follow-ups/case-007b-claim-level-quarantine-followup.md`.
  */
-export function assertNoDisputedG9SecRecordsPostEarnings(dataset: MacroGraphDataset): void {
+export function assertNoDisputedG9SecRecordsPostEarnings(
+  dataset: MacroGraphDataset,
+  options?: { quarantinePolicy?: 'accession_wide' | 'claim_level' },
+): void {
+  const policy = options?.quarantinePolicy ?? 'accession_wide';
   const serialized = JSON.stringify({
     sources: dataset.sources,
     observations: dataset.observations,
@@ -126,10 +137,68 @@ export function assertNoDisputedG9SecRecordsPostEarnings(dataset: MacroGraphData
     if (forbidden === '0001045810-26-000088' || forbidden === '000104581026000088') {
       continue;
     }
+    if (
+      policy === 'claim_level' &&
+      (forbidden === '0001045810-26-000078' || forbidden === '000104581026000078')
+    ) {
+      continue;
+    }
     if (serialized.includes(forbidden)) {
       throw new Error(
         `Security/governance violation: disputed SEC/XBRL record token "${forbidden}" detected in Case 007-B promotion payload`,
       );
+    }
+  }
+
+  if (policy === 'claim_level') {
+    const hfSources = dataset.sources.filter(
+      (s) => s.url.includes('000104581026000078') || s.title.includes(NVDA_HUGGINGFACE_8K_ACCESSION),
+    );
+    const hfDocIdSet = new Set(hfSources.map((s) => s.sourceDocId));
+    for (const src of hfSources) {
+      if (src.sourceDocId === 'staged-e2523ed83a7c0247') {
+        throw new Error(
+          'Security/governance violation: quarantined XBRL staging item staged-e2523ed83a7c0247 cannot enter graph dataset',
+        );
+      }
+      if (src.contentSha256 !== NVDA_HUGGINGFACE_8K_SHA256) {
+        throw new Error(
+          `Security/governance violation: accession ${NVDA_HUGGINGFACE_8K_ACCESSION} source '${src.sourceDocId}' lacks verified EDGAR SHA-256`,
+        );
+      }
+    }
+    for (const obs of dataset.observations) {
+      if (obs.sourceDocIds.some((id) => hfDocIdSet.has(id))) {
+        const verdict = evaluateSecClaimQuarantine({
+          accession: NVDA_HUGGINGFACE_8K_ACCESSION,
+          extractionMethod: 'xbrl',
+          metricOrClaimType: obs.metricName,
+          contentSha256: NVDA_HUGGINGFACE_8K_SHA256,
+        });
+        if (!verdict.allowed) {
+          throw new Error(`Security/governance violation: ${verdict.detail}`);
+        }
+      }
+    }
+    for (const rel of dataset.relationships) {
+      if (rel.sourceDocIds.some((id) => hfDocIdSet.has(id))) {
+        const verdict = evaluateSecClaimQuarantine({
+          accession: NVDA_HUGGINGFACE_8K_ACCESSION,
+          extractionMethod: 'primary_filing_item_text',
+          metricOrClaimType: rel.relationType,
+          secItem: '8.01',
+          contentSha256: NVDA_HUGGINGFACE_8K_SHA256,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+          bindingObligation:
+            rel.contractualStatus === 'signed' ||
+            rel.contractualStatus === 'funded' ||
+            rel.contractualStatus === 'committed',
+        });
+        if (!verdict.allowed) {
+          throw new Error(`Security/governance violation: ${verdict.detail}`);
+        }
+      }
     }
   }
 }

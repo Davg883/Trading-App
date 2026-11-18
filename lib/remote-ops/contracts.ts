@@ -244,4 +244,6 @@ export type MorningBriefingRecord={
  version:typeof REMOTE_OPS_VERSION;
  /** Sprint G9.2: facts of this stored briefing later quarantined; withheld from display, record itself unchanged. */
  withheldFacts?:Array<{id:string;reason:string}>;
+ /** RC002 B-003: AI interpretations citing quarantined evidence; withheld from active display without deleting stored record. */
+ withheldInterpretations?:Array<{id:string;reason:string}>;
 };

@@ -16,6 +16,11 @@ import {
 import {factDedupeKey,validateForwardExperimentRegistration,validateStagedItem} from '../lib/remote-ops/staging-validator';
 import {accessionFromSecArchiveUrl,briefingFactIdFor,isQuarantined,quarantineKeyFor} from '../lib/remote-ops/evidence-integrity';
 import {
+ containsExactRecordToken,
+ discoverMatchingEvidenceRowsForStaging,
+ discoverXbrlQuarantineImpact,
+} from '../lib/remote-ops/xbrl-quarantine-remediation';
+import {
  evaluateCollectionHealth,
  type EvidenceChatOperationsSummary,
  type GraphProjectionOperationsSummary,
@@ -203,10 +208,18 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  const latestBriefingDoc=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',owner)).order('desc').first();
  const latestBriefing=privateRead?latestBriefingDoc:null;
  const withheldFactReasons=new Map<string,string>();
+ const quarantinedInterpretationTokenReasons=new Map<string,string>();
  if(latestBriefing){
   for(const q of quarantineRows){
+   const qLabel=`${q.reasonCode}: ${q.reason}`;
+   quarantinedInterpretationTokenReasons.set(q.stagingExternalId,qLabel);
+   quarantinedInterpretationTokenReasons.set(String(q.stagingItemId),qLabel);
+   for(const evId of q.evidenceIds)quarantinedInterpretationTokenReasons.set(String(evId),qLabel);
    if(!q.affectedBriefingIds.some(id=>id===latestBriefing._id))continue;
-   for(const factId of q.affectedBriefingFactIds??[])withheldFactReasons.set(factId,`${q.reasonCode}: ${q.reason}`);
+   for(const factId of q.affectedBriefingFactIds??[]){
+    withheldFactReasons.set(factId,qLabel);
+    quarantinedInterpretationTokenReasons.set(factId,qLabel);
+   }
   }
  }
  const spend=privateRead?await computeSpend(ctx,owner,now):ZERO_SPEND;
@@ -612,29 +625,47 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   if(!latestBySymbol.has(obs.symbol))latestBySymbol.set(obs.symbol,obs);
  }
 
- const forwardEventsFormatted=forwardRows.map(f=>({
-  eventKey:f.eventKey,
-  name:f.name,
-  version:f.version,
-  symbol:f.symbol as MarketDataSymbol,
-  benchmarkSymbol:f.benchmarkSymbol as MarketDataSymbol,
-  returnTarget:'excess_vs_benchmark' as const,
-  horizon:f.horizon,
-  neutralBand:f.neutralBand,
-  registeredAt:f.registeredAt,
-  cutoffAt:f.cutoffAt,
-  anchorSessionDate:f.anchorSessionDate,
-  anchorAt:f.anchorAt,
-  targetEndSessionDate:f.targetEndSessionDate,
-  targetEndAt:f.targetEndAt,
-  evidenceSha256:f.evidenceSha256,
-  evidenceItems:JSON.parse(f.evidenceJson) as FrozenForwardEvidenceItem[],
-  participants:JSON.parse(f.participantsJson) as ForwardParticipantRecord[],
-  evaluation:JSON.parse(f.evaluationJson) as ForwardOutcomeEvaluation,
-  executionAuthority:'none' as const,
- }));
+ const quarantinedForwardReasons=new Map<string,string[]>();
+ for(const q of quarantineRows){
+  for(const fId of q.affectedForwardEventIds){
+   const cur=quarantinedForwardReasons.get(String(fId))??[];
+   cur.push(`${q.ticker} (${q.stagingExternalId}): ${q.reasonCode}`);
+   quarantinedForwardReasons.set(String(fId),cur);
+  }
+ }
 
- const forwardWindowSpecs:ResearchWindowSpec[]=forwardEventsFormatted.map(fe=>({
+ const forwardEventsFormatted=forwardRows.map(f=>{
+  const evItems=JSON.parse(f.evidenceJson) as FrozenForwardEvidenceItem[];
+  const directReasons=quarantinedForwardReasons.get(String(f._id))??[];
+  const urlReasons=quarantineRows
+   .filter(q=>evItems.some(it=>it.sourceUrl===q.sourceUrl||it.id===q.stagingExternalId))
+   .map(q=>`${q.ticker} (${q.stagingExternalId}): ${q.reasonCode}`);
+  const mergedReasons=Array.from(new Set([...directReasons,...urlReasons]));
+  return {
+   eventKey:f.eventKey,
+   name:f.name,
+   version:f.version,
+   symbol:f.symbol as MarketDataSymbol,
+   benchmarkSymbol:f.benchmarkSymbol as MarketDataSymbol,
+   returnTarget:'excess_vs_benchmark' as const,
+   horizon:f.horizon,
+   neutralBand:f.neutralBand,
+   registeredAt:f.registeredAt,
+   cutoffAt:f.cutoffAt,
+   anchorSessionDate:f.anchorSessionDate,
+   anchorAt:f.anchorAt,
+   targetEndSessionDate:f.targetEndSessionDate,
+   targetEndAt:f.targetEndAt,
+   evidenceSha256:f.evidenceSha256,
+   evidenceItems:evItems,
+   participants:JSON.parse(f.participantsJson) as ForwardParticipantRecord[],
+   evaluation:JSON.parse(f.evaluationJson) as ForwardOutcomeEvaluation,
+   executionAuthority:'none' as const,
+   ...(mergedReasons.length>0?{invalidatedByQuarantine:true,quarantineReasons:mergedReasons}:{}),
+  };
+ });
+
+ const forwardWindowSpecs:ResearchWindowSpec[]=forwardEventsFormatted.filter(fe=>!fe.invalidatedByQuarantine).map(fe=>({
   windowId:`forward-004:${fe.eventKey}`,
   studyId:fe.eventKey,
   studyName:fe.name,
@@ -732,21 +763,35 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    researchEligible:s.researchEligible,
    marketOutcomeEligible:s.marketOutcomeEligible,
   })),
-  latestBriefing:latestBriefing?{
-   briefingDate:latestBriefing.briefingDate,
-   generatedAt:latestBriefing.generatedAt,
-   timezone:latestBriefing.timezone,
-   // Sprint G9.2: the stored briefing is a historical record and is never rewritten; facts later quarantined are
-   // withheld from display and listed with their reason instead.
-   confirmedFacts:(JSON.parse(latestBriefing.confirmedFactsJson) as Array<{id:string}>).filter(f=>!withheldFactReasons.has(f.id)),
-   withheldFacts:[...withheldFactReasons].filter(([id])=>(JSON.parse(latestBriefing.confirmedFactsJson) as Array<{id:string}>).some(f=>f.id===id)).map(([id,reason])=>({id,reason})),
-   researchInterpretation:JSON.parse(latestBriefing.researchInterpretationJson),
-   riskChanges:JSON.parse(latestBriefing.riskChangesJson),
-   incompleteEvidence:JSON.parse(latestBriefing.incompleteEvidenceJson),
-   modelVersion:latestBriefing.modelVersion,
-   executionAuthority:'none' as const,
-   version:REMOTE_OPS_VERSION,
-  }:null,
+  latestBriefing:latestBriefing?(()=>{
+   const parsedFacts=JSON.parse(latestBriefing.confirmedFactsJson) as Array<{id:string}>;
+   const parsedInterps=JSON.parse(latestBriefing.researchInterpretationJson) as Array<{id:string;citedEvidenceIds?:string[]}>;
+   const withheldInterps:Array<{id:string;reason:string}>=[];
+   const activeInterps=parsedInterps.filter(it=>{
+    const hitId=(it.citedEvidenceIds??[]).find(cid=>quarantinedInterpretationTokenReasons.has(cid));
+    if(hitId){
+     withheldInterps.push({id:it.id,reason:quarantinedInterpretationTokenReasons.get(hitId)!});
+     return false;
+    }
+    return true;
+   });
+   return {
+    briefingDate:latestBriefing.briefingDate,
+    generatedAt:latestBriefing.generatedAt,
+    timezone:latestBriefing.timezone,
+    // Sprint G9.2 + RC002 B-003: the stored briefing is a historical record and is never rewritten; facts and
+    // interpretations citing quarantined evidence are withheld from active display and listed with their reason instead.
+    confirmedFacts:parsedFacts.filter(f=>!withheldFactReasons.has(f.id)),
+    withheldFacts:[...withheldFactReasons].filter(([id])=>parsedFacts.some(f=>f.id===id)).map(([id,reason])=>({id,reason})),
+    ...(withheldInterps.length>0?{withheldInterpretations:withheldInterps}:{}),
+    researchInterpretation:activeInterps,
+    riskChanges:JSON.parse(latestBriefing.riskChangesJson),
+    incompleteEvidence:JSON.parse(latestBriefing.incompleteEvidenceJson),
+    modelVersion:latestBriefing.modelVersion,
+    executionAuthority:'none' as const,
+    version:REMOTE_OPS_VERSION,
+   };
+  })():null,
  };
 }
 
@@ -1671,9 +1716,16 @@ export const storeMarketObservationsInternal=internalMutation({
   });
 
   // Automatically re-evaluate any registered forward research events if authentic post-horizon observations have arrived
+  // (RC002 B-003: skip forward events whose frozen SEC XBRL evidence has been quarantined)
   const forwardRows=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const quarantineRows=await ctx.db.query('evidenceQuarantines').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const quarantinedForwardIds=new Set(quarantineRows.flatMap(q=>q.affectedForwardEventIds.map(id=>String(id))));
+  const quarantinedUrls=new Set(quarantineRows.map(q=>q.sourceUrl));
   let forwardEvaluatedCount=0;
   for(const fRow of forwardRows){
+   if(quarantinedForwardIds.has(String(fRow._id)))continue;
+   const frozenItems=JSON.parse(fRow.evidenceJson) as FrozenForwardEvidenceItem[];
+   if(frozenItems.some(it=>quarantinedUrls.has(it.sourceUrl)))continue;
    const prevEval=JSON.parse(fRow.evaluationJson) as ForwardOutcomeEvaluation;
    if(prevEval.evaluationStatus==='evaluated')continue;
    const nextEval=evaluateForwardResearchEvent({
@@ -1899,8 +1951,11 @@ export const quarantineStagedEvidenceInternal=internalMutation({
  handler:async(ctx,args)=>{
   validOwner(args.owner);
   const now=Date.now();
+  const ownerEvidenceRows=await ctx.db.query('evidence').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
   const briefings=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
   const forwardEvents=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const experiments=await ctx.db.query('experiments').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const forecasts=await ctx.db.query('forecasts').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
   const report:Array<Record<string,unknown>>=[];
   for(const item of args.items){
    const doc=await ctx.db.get(item.stagingItemId);
@@ -1910,13 +1965,57 @@ export const quarantineStagedEvidenceInternal=internalMutation({
    if(existing){report.push({stagingItemId:doc._id,status:'already_quarantined',quarantineId:existing._id});continue;}
    const claims=JSON.parse(doc.claimsJson) as Array<{entity?:string}>;
    const ticker=(claims[0]?.entity??doc.entities[0]??'UNKNOWN').toUpperCase();
-   const citedAccession=/\((\d{10}-\d{2}-\d{6})\)/.exec(doc.title)?.[1]??accessionFromSecArchiveUrl(doc.sourceUrl);
-   const tokens=[doc._id as string,doc.externalId,...doc.promotedEvidenceIds.map(id=>id as string),...(citedAccession?[briefingFactIdFor(ticker,citedAccession)]:[])];
-   const hit=(text:string)=>tokens.some(t=>text.includes(t));
+   const evMatch=discoverMatchingEvidenceRowsForStaging(
+    {
+     owner:doc.owner,
+     sourceUrl:doc.sourceUrl,
+     entities:doc.entities,
+     claimsJson:doc.claimsJson,
+     promotedEvidenceIds:doc.promotedEvidenceIds.map(id=>String(id)),
+    },
+    ownerEvidenceRows.map(ev=>({...ev,_id:String(ev._id)})),
+   );
+   const allEvidenceIds=evMatch.allEvidenceIds as Array<GenericId<'evidence'>>;
+   const evIdStrSet=new Set(evMatch.allEvidenceIds);
+   const titleAccession=/\((\d{10}-\d{2}-\d{6})\)/.exec(doc.title)?.[1]??null;
+   const urlAccession=accessionFromSecArchiveUrl(doc.sourceUrl);
+   const factCandidateIds=Array.from(new Set([
+    `fact-${doc.externalId}`,
+    `interp-${doc.externalId}`,
+    ...(titleAccession?[briefingFactIdFor(ticker,titleAccession)]:[]),
+    ...(urlAccession?[briefingFactIdFor(ticker,urlAccession)]:[]),
+   ]));
+   const tokens=[doc._id as string,doc.externalId,doc.sourceUrl,...evMatch.allEvidenceIds,...factCandidateIds];
+   const hit=(text:string)=>tokens.some(t=>containsExactRecordToken(text,t));
    const affectedBriefings=briefings.filter(b=>hit(b.confirmedFactsJson+b.researchInterpretationJson+b.riskChangesJson+b.incompleteEvidenceJson));
    const affectedForward=forwardEvents.filter(e=>hit(e.evidenceJson));
+   const forwardExpIds=new Set(affectedForward.map(e=>e.experimentId?String(e.experimentId):null).filter((x):x is string=>Boolean(x)));
+   const affectedExperiments=experiments.filter(exp=>
+    forwardExpIds.has(String(exp._id))||
+    exp.evidenceIds.some(id=>evIdStrSet.has(String(id)))||
+    affectedForward.some(f=>exp.protocol.includes(f.eventKey)||exp.name===f.name)
+   );
+   const affectedExpStrSet=new Set(affectedExperiments.map(e=>String(e._id)));
+   const affectedForecasts=forecasts.filter(fc=>
+    affectedExpStrSet.has(String(fc.experimentId))||
+    fc.evidenceIds.some(id=>evIdStrSet.has(String(id)))
+   );
    const affectedFactIds=[...new Set(affectedBriefings.flatMap(b=>(JSON.parse(b.confirmedFactsJson) as Array<{id:string}>).filter(f=>hit(JSON.stringify(f))).map(f=>f.id)))];
-   const entry={stagingItemId:doc._id,ticker,sourceUrl:doc.sourceUrl,evidenceIds:doc.promotedEvidenceIds,affectedBriefings:affectedBriefings.map(b=>({id:b._id,date:b.briefingDate})),affectedForwardEvents:affectedForward.map(e=>({id:e._id,eventKey:e.eventKey})),affectedBriefingFactIds:affectedFactIds,reasonCode:item.reasonCode};
+   const entry={
+    stagingItemId:doc._id,
+    stagingExternalId:doc.externalId,
+    ticker,
+    sourceUrl:doc.sourceUrl,
+    evidenceIds:allEvidenceIds,
+    promotedEvidenceIds:doc.promotedEvidenceIds,
+    orphanEvidenceIds:evMatch.orphanEvidenceIds,
+    affectedBriefings:affectedBriefings.map(b=>({id:b._id,date:b.briefingDate})),
+    affectedForwardEvents:affectedForward.map(e=>({id:e._id,eventKey:e.eventKey})),
+    affectedExperiments:affectedExperiments.map(e=>({id:e._id,name:e.name})),
+    affectedForecasts:affectedForecasts.map(fc=>({id:fc._id,participant:fc.participant,modelVersion:fc.modelVersion})),
+    affectedBriefingFactIds:affectedFactIds,
+    reasonCode:item.reasonCode,
+   };
    if(args.dryRun){report.push({...entry,status:'would_quarantine'});continue;}
    const quarantineId=await ctx.db.insert('evidenceQuarantines',{
     owner:args.owner,
@@ -1925,9 +2024,11 @@ export const quarantineStagedEvidenceInternal=internalMutation({
     stagingExternalId:doc.externalId,
     sourceUrl:doc.sourceUrl,
     ticker,
-    evidenceIds:doc.promotedEvidenceIds,
+    evidenceIds:allEvidenceIds,
     affectedBriefingIds:affectedBriefings.map(b=>b._id),
     affectedForwardEventIds:affectedForward.map(e=>e._id),
+    affectedExperimentIds:affectedExperiments.map(e=>e._id),
+    affectedForecastIds:affectedForecasts.map(fc=>fc._id),
     affectedBriefingFactIds:affectedFactIds,
     reasonCode:item.reasonCode,
     reason:item.reason,
@@ -1940,13 +2041,41 @@ export const quarantineStagedEvidenceInternal=internalMutation({
     executionAuthority:'none',
    });
    await ctx.db.patch(doc._id,{quarantinedAt:now,quarantineId});
-   for(const evId of doc.promotedEvidenceIds){
+   for(const evId of allEvidenceIds){
     const ev=await ctx.db.get(evId);
     if(ev&&ev.owner===args.owner&&!isQuarantined(ev))await ctx.db.patch(evId,{quarantinedAt:now,quarantineId});
    }
-   await ctx.db.insert('audit',{owner:args.owner,action:'evidence_quarantined',recordId:quarantineId,detail:`staging=${doc._id}; ticker=${ticker}; reason=${item.reasonCode}; evidence=${doc.promotedEvidenceIds.length}; briefings=${affectedBriefings.length}; forwardEvents=${affectedForward.length}; by=${args.quarantinedBy}`,at:now});
+   await ctx.db.insert('audit',{owner:args.owner,action:'evidence_quarantined',recordId:quarantineId,detail:`staging=${doc._id}; ticker=${ticker}; reason=${item.reasonCode}; evidence=${allEvidenceIds.length} (orphan=${evMatch.orphanEvidenceIds.length}); briefings=${affectedBriefings.length}; forwardEvents=${affectedForward.length}; experiments=${affectedExperiments.length}; forecasts=${affectedForecasts.length}; by=${args.quarantinedBy}`,at:now});
    report.push({...entry,status:'quarantined',quarantineId});
   }
   return {dryRun:Boolean(args.dryRun),evaluatedAt:now,report,executionAuthority:'none' as const};
+ },
+});
+
+/**
+ * RC002 Workstream B (B-003): Strictly read-only `internalQuery` dry-run impact planner
+ * across all 7 invalid SEC/XBRL rules, 8 `evidence` rows (including orphaned forward-frozen rows),
+ * `morningBriefings`, `forwardResearchEvents`, `experiments`, and `forecasts`.
+ */
+export const planKnownXbrlQuarantineInternal=internalQuery({
+ args:{owner:v.string()},
+ handler:async(ctx,args)=>{
+  validOwner(args.owner);
+  const stagingItems=await ctx.db.query('researchStagingItems').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const evidenceRows=await ctx.db.query('evidence').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const morningBriefings=await ctx.db.query('morningBriefings').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const forwardResearchEvents=await ctx.db.query('forwardResearchEvents').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const experiments=await ctx.db.query('experiments').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const forecasts=await ctx.db.query('forecasts').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  const existingQuarantines=await ctx.db.query('evidenceQuarantines').withIndex('by_owner',q=>q.eq('owner',args.owner)).collect();
+  return discoverXbrlQuarantineImpact({
+   stagingItems:stagingItems.map(s=>({...s,_id:String(s._id),promotedEvidenceIds:s.promotedEvidenceIds.map(id=>String(id))})),
+   evidenceRows:evidenceRows.map(e=>({...e,_id:String(e._id)})),
+   morningBriefings:morningBriefings.map(b=>({...b,_id:String(b._id)})),
+   forwardResearchEvents:forwardResearchEvents.map(f=>({...f,_id:String(f._id),experimentId:f.experimentId?String(f.experimentId):null})),
+   experiments:experiments.map(e=>({...e,_id:String(e._id),evidenceIds:e.evidenceIds.map(id=>String(id))})),
+   forecasts:forecasts.map(fc=>({...fc,_id:String(fc._id),experimentId:String(fc.experimentId),evidenceIds:fc.evidenceIds.map(id=>String(id))})),
+   existingQuarantines:existingQuarantines.map(q=>({...q,_id:String(q._id),stagingItemId:String(q.stagingItemId)})),
+  });
  },
 });

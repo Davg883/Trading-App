@@ -59,6 +59,11 @@ export function MorningBriefPanel({
        {briefing.withheldFacts.map(w=><span key={w.id}><code>{w.id}</code> ({w.reason.split(':')[0]}) </span>)}
       </p>
      )}
+     {briefing.withheldInterpretations&&briefing.withheldInterpretations.length>0&&(
+      <p className="cc-note" data-testid="brief-withheld-interpretations">
+       {briefing.withheldInterpretations.length} research interpretation(s) citing quarantined evidence were withheld from active display (historical briefing row preserved).
+      </p>
+     )}
     </div>
     <span className="cc-badge cc-public_reference">Execution authority: {briefing.executionAuthority}</span>
    </header>

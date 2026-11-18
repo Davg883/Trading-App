@@ -81,9 +81,14 @@ export function ResearchIntel({
    <h3 style={{fontSize:'0.95rem',marginBottom:'0.35rem'}}>Registered Forward Research Events (Trusted Server Timestamps)</h3>
    {fwdList.map(ev=><div key={ev.eventKey} data-testid={`forward-event-${ev.eventKey}`} style={{marginBottom:'0.75rem'}}>
     <p className="cc-note" style={{marginBottom:'0.4rem'}}>
-     <DataBadge kind="forward"/> <strong>{ev.name}</strong> ({ev.eventKey}) · Registered: <code>{iso(ev.registeredAt)}</code> · Cutoff: <code>{iso(ev.cutoffAt)}</code> · Anchor: <code>{ev.anchorSessionDate}</code> → Target End: <code>{ev.targetEndSessionDate}</code> · Frozen Bundle SHA-256: <code>{ev.evidenceSha256.slice(0,16)}…</code> · Outcome Status: <strong data-testid={`forward-eval-${ev.eventKey}`}>{ev.evaluation.evaluationStatus==='evaluated'?'Evaluated':'Awaiting post-horizon observations'}</strong>
+     <DataBadge kind="forward"/> <strong>{ev.name}</strong> ({ev.eventKey}) · Registered: <code>{iso(ev.registeredAt)}</code> · Cutoff: <code>{iso(ev.cutoffAt)}</code> · Anchor: <code>{ev.anchorSessionDate}</code> → Target End: <code>{ev.targetEndSessionDate}</code> · Frozen Bundle SHA-256: <code>{ev.evidenceSha256.slice(0,16)}…</code> · Outcome Status: <strong data-testid={`forward-eval-${ev.eventKey}`}>{ev.invalidatedByQuarantine?'Invalidated (Quarantined Input Evidence — Withheld from Active Alpha Scoring)':ev.evaluation.evaluationStatus==='evaluated'?'Evaluated':'Awaiting post-horizon observations'}</strong>
      {ev.evaluation.blockingReason?` (${ev.evaluation.blockingReason})`:''}
     </p>
+    {ev.invalidatedByQuarantine&&ev.quarantineReasons&&ev.quarantineReasons.length>0&&(
+     <p className="cc-note" data-testid={`forward-quarantine-notice-${ev.eventKey}`} style={{marginBottom:'0.4rem'}}>
+      <strong>Quarantine invalidation:</strong> Historical study record preserved for audit; excluded from active research scoring because frozen SEC XBRL evidence was quarantined ({ev.quarantineReasons.join(' · ')}).
+     </p>
+    )}
     <div className="cc-table-wrap" tabIndex={0} aria-label="Forward research participants table">
      <table className="cc-table" data-testid={`forward-participants-${ev.eventKey}`}>
       <thead>

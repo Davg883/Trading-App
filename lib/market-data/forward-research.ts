@@ -117,6 +117,9 @@ export type RegisteredForwardResearchEvent={
  participants:ForwardParticipantRecord[];
  evaluation:ForwardOutcomeEvaluation;
  executionAuthority:'none';
+ /** RC002 B-003: non-destructive invalidation flag when frozen input evidence was later quarantined. */
+ invalidatedByQuarantine?:boolean;
+ quarantineReasons?:string[];
 };
 export type ForwardResearchEventRecord=RegisteredForwardResearchEvent;
 
