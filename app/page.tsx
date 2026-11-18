@@ -2,6 +2,7 @@ import Dashboard from "../components/dashboard";
 import ConnectedCommandCentre,{UnconfiguredCommandCentre} from "../integrations/connected-command-centre";
 import {verifyBrokerVaultSelfTest} from "../lib/brokers/vault";
 import {resolveGeminiApiKey} from "../lib/graph/gemini-provider-adapter";
+import {loadAlignedNvidiaGraphIntelligence} from "../lib/graph/nvidia-dashboard-alignment";
 import {researchFeed} from "../lib/portfolio/research-feed";
 import {fetchLiveOperationsOverview} from "../lib/remote-ops/server";
 import {executionPermitted} from "../lib/trading/execution-boundary";
@@ -10,12 +11,23 @@ import "./command-centre.css";
 import "./broker-sync.css";
 
 export const dynamic="force-dynamic";
-export default async function Home(){
+export default async function Home({
+  searchParams,
+}:{
+  searchParams?:Promise<{asOf?:string}>;
+}={}){
+  const resolvedParams=searchParams?await searchParams:undefined;
+  const parsedAsOf=resolvedParams?.asOf?Number(resolvedParams.asOf):undefined;
   const configured=Boolean(process.env.NEXT_PUBLIC_CONVEX_URL&&process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY&&process.env.CLERK_SECRET_KEY);
   // Display only: the homepage reads the server execution flags and cannot change them.
   const flags={demo:executionPermitted()&&process.env.DEMO_TRADING_ENABLED==="true",live:executionPermitted()&&process.env.LIVE_TRADING_ENABLED==="true"};
   const baseFeed=researchFeed();
-  const liveOps=await fetchLiveOperationsOverview();
+  const [liveOps,nvidiaGraphSummary]=await Promise.all([
+    fetchLiveOperationsOverview(),
+    loadAlignedNvidiaGraphIntelligence({
+      asOfMs:parsedAsOf&&Number.isFinite(parsedAsOf)?parsedAsOf:undefined,
+    }),
+  ]);
   const latestMap=new Map((liveOps?.marketData?.latestBySymbol??[]).map(o=>[o.symbol,o]));
   const updatedWatchlist=baseFeed.watchlist.map(w=>{
     const obs=latestMap.get(w.ticker as never);
@@ -83,10 +95,11 @@ export default async function Home(){
     benchmarks:updatedBenchmarks,
     marketDataAsOf:latestMarketAt,
     agentOperations:reconciledHealth,
+    nvidiaGraphSummary,
     ...(liveOps.latestBriefing?{morningBriefing:liveOps.latestBriefing,morningBriefingSource:"stored_latest" as const}:{}),
     ...(liveOps.missingEvidenceResolution?{missingEvidenceResolution:liveOps.missingEvidenceResolution}:{}),
     ...(forwardEvents?{forwardResearchEvents:forwardEvents,forwardPredictions:forwardEvents.length}:{}),
-  }:baseFeed;
+  }:{...baseFeed,nvidiaGraphSummary};
   const workspaceConnections=buildWorkspaceConnectionsReport({
     liveOps:liveOps&&reconciledHealth?{...liveOps,health:reconciledHealth}:liveOps,
     convexUrlConfigured:Boolean(process.env.NEXT_PUBLIC_CONVEX_URL),

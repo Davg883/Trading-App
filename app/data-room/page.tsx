@@ -2,6 +2,7 @@ import React from 'react';
 import MacroDataRoom from '../../components/macro-data-room';
 import type { GraphSourceMode, MacroGraphDataset } from '../../lib/graph/contracts';
 import { loadInitialAcceptanceDataset } from '../../lib/graph/query-gateway';
+import { isSyntheticMacroCase001Dataset } from '../../lib/graph/nvidia-dashboard-alignment';
 import {
   TypeDbSchemaOrHydrationError,
   describeTypeDbTransport,
@@ -40,12 +41,12 @@ export default async function DataRoomPage({
   const probe = await probeTypeDbServer();
   const requireLive = process.env.ACI_REQUIRE_LIVE_TYPEDB === '1';
 
+  const isNvidiaFocalRequest = resolvedParams?.focal === 'org-nvda';
   let activeDataset: MacroGraphDataset | null = null;
-  let graphSourceMode: GraphSourceMode = requireLive
-    ? 'GRAPH_UNAVAILABLE'
-    : 'HISTORICAL_MIRROR';
-  let sourceModeDetail = requireLive
-    ? 'Live TypeDB graph is unavailable; static fallback disabled'
+  let graphSourceMode: GraphSourceMode =
+    requireLive || isNvidiaFocalRequest ? 'GRAPH_UNAVAILABLE' : 'HISTORICAL_MIRROR';
+  let sourceModeDetail = requireLive || isNvidiaFocalRequest
+    ? 'Verified NVIDIA TypeDB graph is unavailable; synthetic Macro Case 001 fallback is suppressed'
     : 'Displaying static historical mirror dataset (live TypeDB unconfigured or unreachable)';
 
   if (probe.reachable && probe.databaseExists) {
@@ -54,21 +55,28 @@ export default async function DataRoomPage({
         callerOwner: 'public_research',
       });
       if (hydrated.ok && hydrated.dataset) {
-        activeDataset = hydrated.dataset;
-        graphSourceMode = 'LIVE_GRAPH';
-        const c = hydrated.dataset;
-        const conceptTotal =
-          c.organisations.length +
-          (c.executives?.length ?? 0) +
-          c.sectors.length +
-          c.locations.length +
-          c.energyAssets.length +
-          c.projects.length +
-          c.instruments.length +
-          c.sources.length +
-          c.observations.length +
-          c.relationships.length;
-        sourceModeDetail = `Hydrated from live TypeDB ${hydrated.serverVersion ?? ''} (${probe.databaseName}) at ${queryTimestampIso} · ${conceptTotal} concepts (${c.relationships.length} relationships, ${c.observations.length} observations)`.trim();
+        if (isNvidiaFocalRequest && isSyntheticMacroCase001Dataset(hydrated.dataset)) {
+          graphSourceMode = 'GRAPH_UNAVAILABLE';
+          activeDataset = EMPTY_UNAVAILABLE_DATASET;
+          sourceModeDetail =
+            'Synthetic Macro Case 001 dataset cannot be displayed as current NVIDIA financial intelligence';
+        } else {
+          activeDataset = hydrated.dataset;
+          graphSourceMode = 'LIVE_GRAPH';
+          const c = hydrated.dataset;
+          const conceptTotal =
+            c.organisations.length +
+            (c.executives?.length ?? 0) +
+            c.sectors.length +
+            c.locations.length +
+            c.energyAssets.length +
+            c.projects.length +
+            c.instruments.length +
+            c.sources.length +
+            c.observations.length +
+            c.relationships.length;
+          sourceModeDetail = `Hydrated from live TypeDB ${hydrated.serverVersion ?? ''} (${probe.databaseName}) at ${queryTimestampIso} · ${conceptTotal} concepts (${c.relationships.length} relationships, ${c.observations.length} observations)`.trim();
+        }
       }
     } catch (err) {
       graphSourceMode = 'GRAPH_UNAVAILABLE';

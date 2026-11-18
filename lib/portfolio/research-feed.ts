@@ -8,6 +8,7 @@ import {evaluateCollectionHealth} from '../remote-ops/health-monitor';
 import {generateMorningBriefing} from '../remote-ops/morning-briefing';
 import type {MissingEvidenceResolutionSummary} from '../market-data/missing-evidence-resolver';
 import type {RegisteredForwardResearchEvent} from '../market-data/forward-research';
+import type {NvidiaDashboardGraphSummary} from '../graph/nvidia-dashboard-alignment';
 import type {BenchmarkObservation} from './performance';
 
 /**
@@ -248,6 +249,7 @@ export function researchFeed(){
   // Sprint G9.2: the static briefing generated at build time from bundled 2026-11-05 evidence. It is a labelled
   // reference fallback, never presented as the latest research; replaced only by a stored Convex briefing.
   morningBriefingSource:'bundled_reference' as 'bundled_reference'|'stored_latest',
+  nvidiaGraphSummary:undefined as NvidiaDashboardGraphSummary|undefined,
  };
 }
 export type ResearchFeed=ReturnType<typeof researchFeed>;

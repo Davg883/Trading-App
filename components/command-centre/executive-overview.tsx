@@ -19,6 +19,14 @@ import {
 import {
   evaluateAiCapexModerationThesis,
 } from '../../lib/research-ratings/thesis-monitor';
+import {
+  buildNvidiaGraphSummaryFromDataset,
+  type NvidiaDashboardGraphSummary,
+} from '../../lib/graph/nvidia-dashboard-alignment';
+import {
+  CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+  runCase007PostEarningsPipeline,
+} from '../../lib/remote-ops/case-007-nvidia-ingestor';
 import type { WatchItem } from './holdings-panel';
 import type { MorningBriefingRecord } from '../../lib/remote-ops/contracts';
 
@@ -29,6 +37,7 @@ interface ExecutiveOverviewProps {
   morningBriefing?: MorningBriefingRecord | null;
   reportGeneratedAtMs?: number | null;
   portfolioSnapshotSlot?: React.ReactNode;
+  nvidiaGraphSummary?: NvidiaDashboardGraphSummary | null;
 }
 
 const PRESET_ASSISTANT_QUESTIONS = [
@@ -46,6 +55,16 @@ const DIMENSION_ORDER: DimensionKey[] = [
   'company_specific_risk',
 ];
 
+function formatUsdSummary(usd: number | null | undefined, digits = 3): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd)) return 'undisclosed';
+  if (Math.abs(usd) >= 1_000_000_000) {
+    const b = usd / 1_000_000_000;
+    const trimmed = Number(b.toFixed(digits));
+    return `USD ${trimmed === Number(b.toFixed(1)) ? b.toFixed(1) : trimmed === Number(b.toFixed(2)) ? b.toFixed(2) : b.toFixed(digits)}B`;
+  }
+  return `USD ${(usd / 1_000_000).toFixed(1)}M`;
+}
+
 export function ExecutiveOverviewSections({
   watchlist,
   ownedTickers,
@@ -53,14 +72,26 @@ export function ExecutiveOverviewSections({
   morningBriefing,
   reportGeneratedAtMs,
   portfolioSnapshotSlot,
+  nvidiaGraphSummary,
 }: ExecutiveOverviewProps) {
+  const resolvedNvidiaSummary = useMemo<NvidiaDashboardGraphSummary>(() => {
+    if (nvidiaGraphSummary) return nvidiaGraphSummary;
+    const mirrorDataset = runCase007PostEarningsPipeline({ owner: 'public_research' }).dataset;
+    return buildNvidiaGraphSummaryFromDataset(mirrorDataset, {
+      asOfMs: now || CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+      graphSourceMode: 'HISTORICAL_MIRROR',
+      sourceDatabase: 'case007_verified_sec_mirror',
+    });
+  }, [nvidiaGraphSummary, now]);
+
   const assessments = useMemo(
     () =>
       evaluateUniverseResearchAssessments({
         asOfMs: now || undefined,
         liveWatchlist: watchlist,
+        nvidiaGraphSummary: nvidiaGraphSummary ?? undefined,
       }),
-    [watchlist, now],
+    [watchlist, now, nvidiaGraphSummary],
   );
 
   const briefing = useMemo(
@@ -909,82 +940,195 @@ export function ExecutiveOverviewSections({
                     <article
                       className="g6-layer-card"
                       data-testid="case-007-nvidia-summary-card"
+                      data-graph-source-mode={resolvedNvidiaSummary.graphSourceMode}
+                      data-reported-period={resolvedNvidiaSummary.latestReportedPeriodLabel ?? 'UNAVAILABLE'}
                     >
                       <span className="g6-layer-tag">
-                        CASE 007 · PRIMARY SEC &amp; TYPEDB PRE-EARNINGS SNAPSHOT (2026-11-17)
+                        {resolvedNvidiaSummary.graphSourceMode === 'LIVE_GRAPH'
+                          ? `LIVE GRAPH (${resolvedNvidiaSummary.sourceDatabase ?? 'typedb'}) · ${resolvedNvidiaSummary.latestReportedPeriodLabel ?? 'VERIFIED SEC'}`
+                          : resolvedNvidiaSummary.graphSourceMode === 'GRAPH_UNAVAILABLE'
+                            ? 'GRAPH UNAVAILABLE · VERIFIED TYPEDB READ PATH UNREACHABLE'
+                            : `HISTORICAL MIRROR · ${resolvedNvidiaSummary.latestReportedPeriodLabel ?? 'PRIMARY SEC SNAPSHOT'}`}
                       </span>
-                      <strong>
-                        Confirmed Governance &amp; 13F Stakes vs Contingent Anthropic Commitment
-                      </strong>
-                      <ul className="g6-gate-list">
-                        <li>
-                          <b>Confirmed Leadership Transition (Form 8-K 0001045810-26-000082, 2026-11-11):</b>{' '}
-                          Jensen Huang resigned; Colette Kress appointed Interim CEO (retaining EVP &amp; CFO); Harvey C. Jones appointed first-ever Board Chair.{' '}
-                          <a
-                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000082/nvda-20261111.htm"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="case-007-sec-link-8k"
-                          >
-                            SEC Form 8-K →
-                          </a>
-                        </li>
-                        <li>
-                          <b>Confirmed Equity Portfolio (Form 13F-HR 0001045810-26-000084, as of 2026-09-30):</b>{' '}
-                          USD 48.33B across 8 reported Section 13(f) holdings (SpaceX USD 19.68B, Intel USD 19.37B, CoreWeave USD 4.11B, Coherent USD 2.24B, Synopsys USD 1.89B, Nokia USD 738.8M, Nebius USD 280.8M, Generate Biomedicines USD 12.5M).{' '}
-                          <a
-                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000084/information_table.xml"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="case-007-sec-link-13f"
-                          >
-                            SEC Form 13F-HR →
-                          </a>
-                        </li>
-                        <li>
-                          <b>Proposed / Contingent Commitment (Anthropic S-1/A-2 0001628280-26-072484 &amp; 8-A12B 0001628280-26-074342):</b>{' '}
-                          ~USD 10.0B (135,135,135 Class N non-voting restricted shares at $74 midpoint) contingent upon IPO closing and stockholder approval — <i>not</i> completed ownership.{' '}
-                          <a
-                            href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026072484/anthropicpbc-sx1ax2.htm"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="case-007-sec-link-s1a2"
-                          >
-                            SEC S-1/A-2 →
-                          </a>
-                        </li>
-                        <li>
-                          <b>Pre-Results Snapshot &amp; Market Reference:</b> Last reported actual revenue USD 96.22B (Q2 FY27); Q3 FY27 management guidance USD 108.0B ± 2% (0001045810-26-000073, forecast only); Q3 FY27 actuals unissued prior to 2026-11-17 21:20 UTC (1:20 p.m. PT). Displayed market reference remains a delayed public close, never a live quote.{' '}
-                          <a
-                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000073/q2fy27pr.htm"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="case-007-sec-link-q2pr"
-                          >
-                            SEC Q2/Q3 Outlook 8-K →
-                          </a>{' '}
-                          ·{' '}
-                          <Link href="/data-room?focal=org-nvda&asOf=1794949170000">
-                            Open Live Graph in Macro Data Room →
-                          </Link>
-                        </li>
-                        <li>
-                          <b>Post-Earnings Update (Form 8-K 0001045810-26-000088, Q3 FY27 Batch v2):</b>{' '}
-                          Reported Q3 FY27 GAAP revenue USD 115.844B (+7.26% vs preserved USD 108.0B Q3 forecast; Data Center USD 107.610B), GAAP GM 74.8%, FCF USD 43.777B; Q4 FY27 14-week official outlook USD 130.0B ± 3% and 71.0%–72.0% GM. Direct commitments (USD 518B incl. USD 390B supply), contingent neocloud commitments (USD 32B), and maximum gross credit guarantees (USD 118.0B cap, USD 0 paid) remain separately classified and are not recognised additive liabilities.{' '}
-                          <a
-                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000088/q3fy27pr.htm"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-testid="case-007b-sec-link-q3pr"
-                          >
-                            SEC Q3 FY27 8-K Ex. 99.1 →
-                          </a>{' '}
-                          ·{' '}
-                          <Link href="/data-room?focal=org-nvda&asOf=1794965700000">
-                            Open Post-Earnings Graph →
-                          </Link>
-                        </li>
-                      </ul>
+                      {resolvedNvidiaSummary.graphSourceMode === 'GRAPH_UNAVAILABLE' ? (
+                        <div data-testid="nvidia-graph-unavailable-banner">
+                          <strong>
+                            NVIDIA Live Graph Unavailable — Historical SEC Baseline Only
+                          </strong>
+                          <p className="cc-note" style={{ marginTop: '0.4rem' }}>
+                            {resolvedNvidiaSummary.unavailableReason ??
+                              'Verified TypeDB NVIDIA observations could not be hydrated.'}{' '}
+                            Synthetic Macro Case 001 fixtures are never substituted as current NVIDIA financial intelligence.{' '}
+                            <Link href="/data-room?focal=org-nvda">
+                              Inspect Data Room Status →
+                            </Link>
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <strong>
+                            Source-Backed TypeDB Intelligence ({resolvedNvidiaSummary.latestReportedPeriodLabel ?? 'Latest Period'} · as of {resolvedNvidiaSummary.asOfIso.slice(0, 19)}Z)
+                          </strong>
+                          <ul className="g6-gate-list">
+                            {resolvedNvidiaSummary.governance.leadershipSummary && (
+                              <li>
+                                <b>
+                                  Confirmed Leadership Transition (Form 8-K{' '}
+                                  {resolvedNvidiaSummary.governance.filingAccession ?? 'primary'}):
+                                </b>{' '}
+                                {resolvedNvidiaSummary.governance.leadershipSummary}.{' '}
+                                {resolvedNvidiaSummary.links.leadership8kUrl && (
+                                  <a
+                                    href={resolvedNvidiaSummary.links.leadership8kUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="case-007-sec-link-8k"
+                                  >
+                                    SEC Form 8-K →
+                                  </a>
+                                )}
+                              </li>
+                            )}
+                            {resolvedNvidiaSummary.exposures.portfolio13fTotalUsd !== null && (
+                              <li>
+                                <b>Confirmed Equity Portfolio (Form 13F-HR, as of 2026-09-30):</b>{' '}
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.exposures.portfolio13fTotalUsd,
+                                  2,
+                                )}{' '}
+                                across {resolvedNvidiaSummary.exposures.portfolio13fHoldingCount} reported Section 13(f) holdings
+                                {resolvedNvidiaSummary.exposures.portfolio13fTopHoldingsSummary
+                                  ? ` (${resolvedNvidiaSummary.exposures.portfolio13fTopHoldingsSummary})`
+                                  : ''}
+                                .{' '}
+                                {resolvedNvidiaSummary.links.form13fUrl && (
+                                  <a
+                                    href={resolvedNvidiaSummary.links.form13fUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="case-007-sec-link-13f"
+                                  >
+                                    SEC Form 13F-HR →
+                                  </a>
+                                )}
+                              </li>
+                            )}
+                            {resolvedNvidiaSummary.exposures.anthropicContingentPlacementUsd !== null && (
+                              <li>
+                                <b>Proposed / Contingent Commitment (Anthropic S-1/A-2):</b>{' '}
+                                ~{formatUsdSummary(
+                                  resolvedNvidiaSummary.exposures.anthropicContingentPlacementUsd,
+                                  1,
+                                )}{' '}
+                                Class N private placement contingent upon IPO closing and stockholder approval —{' '}
+                                <i>not</i> completed ownership.{' '}
+                                {resolvedNvidiaSummary.links.anthropicS1aUrl && (
+                                  <a
+                                    href={resolvedNvidiaSummary.links.anthropicS1aUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="case-007-sec-link-s1a2"
+                                  >
+                                    SEC S-1/A-2 →
+                                  </a>
+                                )}
+                              </li>
+                            )}
+                            {!resolvedNvidiaSummary.isPostEarningsQ3Available ? (
+                              <li>
+                                <b>Reported Actual vs Forecast at Selected Cutoff:</b>{' '}
+                                Latest reported revenue{' '}
+                                {formatUsdSummary(resolvedNvidiaSummary.reported.revenueUsd, 3)} (
+                                {resolvedNvidiaSummary.latestReportedPeriodLabel}); management guidance{' '}
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.forwardGuidance.revenueMidpointUsd,
+                                  1,
+                                )}{' '}
+                                ± 2% ({resolvedNvidiaSummary.forwardGuidance.periodLabel ?? 'Q3 FY2027'}, forecast only). Displayed market reference remains a delayed public close, never a live quote.{' '}
+                                {resolvedNvidiaSummary.links.q2Outlook8kUrl && (
+                                  <a
+                                    href={resolvedNvidiaSummary.links.q2Outlook8kUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="case-007-sec-link-q2pr"
+                                  >
+                                    SEC Q2/Q3 Outlook 8-K →
+                                  </a>
+                                )}{' '}
+                                ·{' '}
+                                <Link href={`/data-room?focal=org-nvda&asOf=${resolvedNvidiaSummary.asOfMs}`}>
+                                  Open Aligned Graph in Macro Data Room →
+                                </Link>
+                              </li>
+                            ) : (
+                              <li>
+                                <b>
+                                  Latest Reported Period ({resolvedNvidiaSummary.latestReportedPeriodLabel}) &amp; Guidance:
+                                </b>{' '}
+                                Reported GAAP revenue{' '}
+                                {formatUsdSummary(resolvedNvidiaSummary.reported.revenueUsd, 3)}
+                                {resolvedNvidiaSummary.reported.q3BeatPct !== null &&
+                                  resolvedNvidiaSummary.reported.preservedQ3GuidanceMidpointUsd !== null && (
+                                    <>
+                                      {' '}
+                                      (+{resolvedNvidiaSummary.reported.q3BeatPct}% vs preserved{' '}
+                                      {formatUsdSummary(
+                                        resolvedNvidiaSummary.reported.preservedQ3GuidanceMidpointUsd,
+                                        1,
+                                      )}{' '}
+                                      Q3 forecast; Data Center{' '}
+                                      {formatUsdSummary(
+                                        resolvedNvidiaSummary.reported.dataCenterRevenueUsd,
+                                        2,
+                                      )}
+                                      )
+                                    </>
+                                  )}
+                                , GAAP GM{' '}
+                                {resolvedNvidiaSummary.reported.gaapGrossMarginRatio !== null
+                                  ? `${(resolvedNvidiaSummary.reported.gaapGrossMarginRatio * 100).toFixed(1)}%`
+                                  : 'n/a'}
+                                , FCF {formatUsdSummary(resolvedNvidiaSummary.reported.freeCashFlowUsd, 3)}, cash capex{' '}
+                                {formatUsdSummary(resolvedNvidiaSummary.reported.cashCapexUsd, 3)}; forward outlook{' '}
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.forwardGuidance.revenueMidpointUsd,
+                                  1,
+                                )}{' '}
+                                ± 3% ({resolvedNvidiaSummary.forwardGuidance.periodLabel ?? 'Q4 FY2027'}). Direct commitments (
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.exposures.directCommitmentsTotalUsd,
+                                  1,
+                                )}{' '}
+                                incl. {formatUsdSummary(resolvedNvidiaSummary.exposures.supplyCommitmentsUsd, 1)} supply), contingent neocloud commitments (
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.exposures.contingentNeocloudCapUsd,
+                                  1,
+                                )}
+                                ), and maximum gross credit guarantees (
+                                {formatUsdSummary(
+                                  resolvedNvidiaSummary.exposures.maxGuaranteesCapUsd,
+                                  1,
+                                )}{' '}
+                                cap, USD 0 paid) remain separately classified.{' '}
+                                {resolvedNvidiaSummary.links.q3Results8kUrl && (
+                                  <a
+                                    href={resolvedNvidiaSummary.links.q3Results8kUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-testid="case-007b-sec-link-q3pr"
+                                  >
+                                    SEC Q3 FY27 8-K Ex. 99.1 →
+                                  </a>
+                                )}{' '}
+                                ·{' '}
+                                <Link href={`/data-room?focal=org-nvda&asOf=${resolvedNvidiaSummary.asOfMs}`}>
+                                  Open Aligned Graph in Macro Data Room →
+                                </Link>
+                              </li>
+                            )}
+                          </ul>
+                        </>
+                      )}
                     </article>
                   )}
                 </div>

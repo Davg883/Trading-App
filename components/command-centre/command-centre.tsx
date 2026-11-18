@@ -197,7 +197,7 @@ export function CommandCentre({portfolio,trading,operations,feed,flags,now,signe
  return <div className={`cc-root ${fixture?'cc-fixture-mode':''}`} data-testid="command-centre" data-source={fixture?'synthetic-fixture':'broker'}>
   {fixtureLabel&&<p className="cc-fixture" role="note">{fixtureLabel}</p>}
   <AlertsCentre alerts={alerts} links={LINKS}/>
-  <ExecutiveOverviewSections watchlist={effectiveWatchlist} ownedTickers={ownedTickers} now={now} morningBriefing={executiveBriefing} reportGeneratedAtMs={executiveBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection}/>
+  <ExecutiveOverviewSections watchlist={effectiveWatchlist} ownedTickers={ownedTickers} now={now} morningBriefing={executiveBriefing} reportGeneratedAtMs={executiveBriefing?.generatedAt??activeHealth.operationalLayers.briefing.generatedAt} portfolioSnapshotSlot={portfolioSnapshotSection} nvidiaGraphSummary={feed.nvidiaGraphSummary}/>
   <details className="g6-drawer-details" data-testid="technical-evidence-details">
    <summary className="g6-drawer-summary">
     <span>Technical, Operations &amp; Evidence Audit Details (Agent Operations, Morning Brief, Watchlist &amp; Data Boundaries)</span>

@@ -5,6 +5,7 @@ import policyRiskRaw from '../../data/policy-risk/midterm-2026-11-03.json';
 import recoveryV2Raw from '../../data/recovery/november-3-2026-v2.json';
 import graphDatasetRaw from '../../data/graph/initial-acceptance-dataset.json';
 import { getSecXbrlExpansionPackage } from './sec-xbrl-expansion';
+import type { NvidiaDashboardGraphSummary } from '../graph/nvidia-dashboard-alignment';
 
 /**
  * Phase G.6 — Deterministic, Versioned Stock-Research Assessment & Methodology Validation Engine.
@@ -478,6 +479,7 @@ export function evaluateCompanyResearchAssessment(
       priceBasis?: string | null;
       corporateActionsReviewed?: boolean;
     };
+    nvidiaGraphSummary?: NvidiaDashboardGraphSummary | null;
   },
 ): StockResearchAssessment {
   const meta = UNIVERSE_META.find((u) => u.ticker === ticker) ?? {
@@ -645,58 +647,127 @@ export function evaluateCompanyResearchAssessment(
   let capexIntensityPct: number | null = null;
 
   if (ticker === 'NVDA') {
-    const nvda = companyComparisonRaw.companies.find((c) => c.symbol === 'NVDA')!;
-    revenueUsdMillions = nvda.companyRevenueMillions; // 96,221
-    operatingMarginPct = Number(
-      ((nvda.operatingIncomeMillions / nvda.companyRevenueMillions) * 100).toFixed(1),
-    ); // 66.2%
-    freeCashFlowUsdMillions = nvda.freeCashFlow.value; // 21,341
-    fcfMarginPct = Number(
-      ((nvda.freeCashFlow.value / nvda.companyRevenueMillions) * 100).toFixed(1),
-    ); // 22.2%
-    capexIntensityPct = Number(
-      ((nvda.cashCapex.value / nvda.companyRevenueMillions) * 100).toFixed(1),
-    ); // 2.8%
-    // Deterministic health score from operating margin (66.2%), positive FCF conversion (22.2%), low capex drag (2.8%)
-    const score = clampScore(
-      50 + operatingMarginPct * 0.42 + fcfMarginPct * 0.55 - capexIntensityPct * 0.35,
-    ); // ~89.0
-    dimEarnings = {
-      key: 'earnings_financial_health',
-      label: 'Earnings & Financial Health',
-      provisionalWeight: weights.earnings_financial_health,
-      declaredHorizon: '6-12M Fundamental',
-      status: 'evaluated',
-      score,
-      minimumEvidenceRequirement:
-        'Primary SEC filing or official earnings release with GAAP revenue, operating income, OCF, and cash capex.',
-      stalenessThreshold: 'Quarterly filing period end <= 135 days.',
-      observedMetrics: [
-        {
-          metric: 'FY27 Q2 Revenue',
-          valueDisplay: '$96,221M USD',
-          periodOrAsOf: '2026-07-26',
-          sourceLabel: 'NVIDIA FY27 Q2 Official Financial Results',
-          sourceId: 'nvda-fy27-q2',
-        },
-        {
-          metric: 'GAAP Operating Margin',
-          valueDisplay: `${operatingMarginPct}% ($63,734M operating income)`,
-          periodOrAsOf: '2026-07-26',
-          sourceLabel: 'NVIDIA FY27 Q2 Official Financial Results',
-          sourceId: 'nvda-fy27-q2',
-        },
-        {
-          metric: 'Reported Free Cash Flow',
-          valueDisplay: `$21,341M USD (${fcfMarginPct}% FCF margin; $2,677M cash capex)`,
-          periodOrAsOf: '2026-07-26',
-          sourceLabel: 'NVIDIA FY27 Q2 Official Financial Results',
-          sourceId: 'nvda-fy27-q2',
-        },
-      ],
-      missingInputs: [],
-      deterministicSummary: `Strongest operating profitability (${operatingMarginPct}%) and FCF conversion (${fcfMarginPct}%) in the tracked cohort with low direct capex intensity (${capexIntensityPct}%).`,
-    };
+    const nvdaGraph = options?.nvidiaGraphSummary;
+    if (
+      nvdaGraph &&
+      nvdaGraph.graphSourceMode !== 'GRAPH_UNAVAILABLE' &&
+      nvdaGraph.isPostEarningsQ3Available &&
+      nvdaGraph.reported.revenueUsd !== null
+    ) {
+      revenueUsdMillions = Math.round(nvdaGraph.reported.revenueUsd / 1_000_000); // 115,844
+      const opIncM =
+        nvdaGraph.reported.gaapOperatingIncomeUsd !== null
+          ? Math.round(nvdaGraph.reported.gaapOperatingIncomeUsd / 1_000_000)
+          : 75_585;
+      const fcfM =
+        nvdaGraph.reported.freeCashFlowUsd !== null
+          ? Math.round(nvdaGraph.reported.freeCashFlowUsd / 1_000_000)
+          : 43_777;
+      const capexM =
+        nvdaGraph.reported.cashCapexUsd !== null
+          ? Math.round(nvdaGraph.reported.cashCapexUsd / 1_000_000)
+          : 4_422;
+      operatingMarginPct = Number(((opIncM / revenueUsdMillions) * 100).toFixed(1));
+      freeCashFlowUsdMillions = fcfM;
+      fcfMarginPct = Number(((fcfM / revenueUsdMillions) * 100).toFixed(1));
+      capexIntensityPct = Number(((capexM / revenueUsdMillions) * 100).toFixed(1));
+      const score = clampScore(
+        50 + operatingMarginPct * 0.42 + fcfMarginPct * 0.55 - capexIntensityPct * 0.35,
+      );
+      const periodEndIso = nvdaGraph.latestReportedPeriodEndIso ?? '2026-10-25';
+      dimEarnings = {
+        key: 'earnings_financial_health',
+        label: 'Earnings & Financial Health',
+        provisionalWeight: weights.earnings_financial_health,
+        declaredHorizon: '6-12M Fundamental',
+        status: 'evaluated',
+        score,
+        minimumEvidenceRequirement:
+          'Primary SEC filing or official earnings release with GAAP revenue, operating income, OCF, and cash capex.',
+        stalenessThreshold: 'Quarterly filing period end <= 135 days.',
+        observedMetrics: [
+          {
+            metric: 'FY2027 Q3 Revenue',
+            valueDisplay: `$${revenueUsdMillions.toLocaleString('en-US')}M USD`,
+            periodOrAsOf: periodEndIso,
+            sourceLabel: 'NVIDIA FY27 Q3 Form 8-K Ex. 99.1 (0001045810-26-000088)',
+            sourceId: 'doc-nvda-q3fy27-ex991-20261117',
+          },
+          {
+            metric: 'GAAP Operating Margin',
+            valueDisplay: `${operatingMarginPct}% ($${opIncM.toLocaleString('en-US')}M operating income; ${nvdaGraph.reported.gaapGrossMarginRatio !== null ? `${(nvdaGraph.reported.gaapGrossMarginRatio * 100).toFixed(1)}% GAAP GM` : '74.8% GAAP GM'})`,
+            periodOrAsOf: periodEndIso,
+            sourceLabel: 'NVIDIA FY27 Q3 Form 8-K Ex. 99.1 (0001045810-26-000088)',
+            sourceId: 'doc-nvda-q3fy27-ex991-20261117',
+          },
+          {
+            metric: 'Reported Free Cash Flow',
+            valueDisplay: `$${fcfM.toLocaleString('en-US')}M USD (${fcfMarginPct}% FCF margin; $${capexM.toLocaleString('en-US')}M cash capex)`,
+            periodOrAsOf: periodEndIso,
+            sourceLabel: 'NVIDIA FY27 Q3 Form 8-K Ex. 99.1 (0001045810-26-000088)',
+            sourceId: 'doc-nvda-q3fy27-ex991-20261117',
+          },
+        ],
+        missingInputs: [],
+        deterministicSummary: `Verified Q3 FY27 operating profitability (${operatingMarginPct}%) and FCF conversion (${fcfMarginPct}%) from TypeDB (${nvdaGraph.sourceDatabase ?? 'live_graph'}) with ${capexIntensityPct}% cash capex intensity.`,
+      };
+    } else {
+      const nvda = companyComparisonRaw.companies.find((c) => c.symbol === 'NVDA')!;
+      revenueUsdMillions = nvda.companyRevenueMillions; // 96,221
+      operatingMarginPct = Number(
+        ((nvda.operatingIncomeMillions / nvda.companyRevenueMillions) * 100).toFixed(1),
+      ); // 66.2%
+      freeCashFlowUsdMillions = nvda.freeCashFlow.value; // 21,341
+      fcfMarginPct = Number(
+        ((nvda.freeCashFlow.value / nvda.companyRevenueMillions) * 100).toFixed(1),
+      ); // 22.2%
+      capexIntensityPct = Number(
+        ((nvda.cashCapex.value / nvda.companyRevenueMillions) * 100).toFixed(1),
+      ); // 2.8%
+      // Deterministic health score from operating margin (66.2%), positive FCF conversion (22.2%), low capex drag (2.8%)
+      const score = clampScore(
+        50 + operatingMarginPct * 0.42 + fcfMarginPct * 0.55 - capexIntensityPct * 0.35,
+      ); // ~89.0
+      dimEarnings = {
+        key: 'earnings_financial_health',
+        label: 'Earnings & Financial Health',
+        provisionalWeight: weights.earnings_financial_health,
+        declaredHorizon: '6-12M Fundamental',
+        status: 'evaluated',
+        score,
+        minimumEvidenceRequirement:
+          'Primary SEC filing or official earnings release with GAAP revenue, operating income, OCF, and cash capex.',
+        stalenessThreshold: 'Quarterly filing period end <= 135 days.',
+        observedMetrics: [
+          {
+            metric: 'FY27 Q2 Revenue',
+            valueDisplay: '$96,221M USD',
+            periodOrAsOf: '2026-07-26',
+            sourceLabel:
+              nvdaGraph?.graphSourceMode === 'GRAPH_UNAVAILABLE'
+                ? 'NVIDIA FY27 Q2 Historical SEC Snapshot (Live TypeDB Unavailable)'
+                : 'NVIDIA FY27 Q2 Official Financial Results',
+            sourceId: 'nvda-fy27-q2',
+          },
+          {
+            metric: 'GAAP Operating Margin',
+            valueDisplay: `${operatingMarginPct}% ($63,734M operating income)`,
+            periodOrAsOf: '2026-07-26',
+            sourceLabel: 'NVIDIA FY27 Q2 Official Financial Results',
+            sourceId: 'nvda-fy27-q2',
+          },
+          {
+            metric: 'Reported Free Cash Flow',
+            valueDisplay: `$21,341M USD (${fcfMarginPct}% FCF margin; $2,677M cash capex)`,
+            periodOrAsOf: '2026-07-26',
+            sourceLabel: 'NVIDIA FY27 Q2 Official Financial Results',
+            sourceId: 'nvda-fy27-q2',
+          },
+        ],
+        missingInputs: [],
+        deterministicSummary: `Strongest operating profitability (${operatingMarginPct}%) and FCF conversion (${fcfMarginPct}%) in the tracked cohort with low direct capex intensity (${capexIntensityPct}%).`,
+      };
+    }
   } else if (ticker === 'MSFT') {
     const msft = companyComparisonRaw.companies.find((c) => c.symbol === 'MSFT')!;
     revenueUsdMillions = msft.companyRevenueMillions; // 92,279
@@ -1443,20 +1514,66 @@ export function evaluateCompanyResearchAssessment(
       rels: string[];
     }
   > = {
-    NVDA: {
-      justification:
-        'Gated at INSUFFICIENT DATA because no licensed valuation multiple or 252-day adjusted price history is stored. Among verified dimensions (70% weight covered), NVIDIA ranks #1 on non-directional fundamental screening (82.3/100) with 66.2% GAAP operating margin ($63,734M FY27 Q2 operating income on $96,221M revenue) and $21,341M quarterly FCF.',
-      risk:
-        'Customer capex concentration across four hyperscalers, China Data Center export exclusion, and $1.86B+ of Nscale lease/convertible credit exposure (plus reported Monarch guarantee discussions).',
-      whatChanges:
-        'Importing verified diluted share counts, split-adjusted prices, and licensed forward consensus estimates would unlock the 30% Valuation gate; a confirmed binding Monarch credit guarantee would adjust Company Risk.',
-      sources: ['nvda-fy27-q2', 'nscale-s1-sep18', 'reuters-credit-oct30'],
-      rels: [
-        'rel-nscale-nvda-convertible-r1',
-        'rel-ward-county-guarantee-r1',
-        'rel-monarch-credit-talks-r1',
-      ],
-    },
+    NVDA: options?.nvidiaGraphSummary
+      ? options.nvidiaGraphSummary.graphSourceMode === 'GRAPH_UNAVAILABLE'
+        ? {
+            justification:
+              'Gated at INSUFFICIENT DATA pending licensed valuation multiples and 252-day adjusted price history. Live TypeDB NVIDIA graph is currently UNAVAILABLE; displaying historical SEC FY27 Q2 baseline ($96,221M revenue, 66.2% operating margin, $21,341M FCF) without synthetic graph substitution.',
+            risk:
+              'Live TypeDB graph unavailable; historical SEC risks include top-customer revenue concentration and China Data Center export restrictions.',
+            whatChanges:
+              'Restoring verified TypeDB graph connectivity and importing licensed forward valuation multiples plus split-adjusted price history.',
+            sources: ['nvda-fy27-q2'],
+            rels: [],
+          }
+        : options.nvidiaGraphSummary.isPostEarningsQ3Available
+          ? {
+              justification: `Gated at INSUFFICIENT DATA pending licensed valuation multiples and 252-day adjusted price history. Verified TypeDB observations (${options.nvidiaGraphSummary.sourceDatabase ?? 'live_graph'}) show FY2027 Q3 GAAP revenue of $${revenueUsdMillions?.toLocaleString('en-US') ?? '115,844'}M (+7.26% vs $108,000M Q3 forecast), ${operatingMarginPct}% GAAP operating margin, and $${freeCashFlowUsdMillions?.toLocaleString('en-US') ?? '43,777'}M quarterly FCF.`,
+              risk:
+                'Guided Q4 FY27 gross margin compression (71.0%-72.0%), 36% top-3 unnamed customer concentration, $518.0B direct contractual commitments + $118.0B maximum credit guarantee cap ($0 paid), and executive transition / board committee investigation overhang.',
+              whatChanges:
+                'Importing verified diluted share counts, split-adjusted prices, Q3 FY27 Form 10-Q tables, and licensed forward consensus estimates to unlock the 30% Valuation gate.',
+              sources: [
+                'doc-nvda-q3fy27-ex991-20261117',
+                'doc-nvda-q3fy27-ex992-20261117',
+                'doc-nvda-8k-20261112',
+              ],
+              rels: [
+                'rel-case007b-nvda-sbenergy-openai-ports-guarantee-r1',
+                'rel-case007-nvda-kress-interim-ceo-r1',
+              ],
+            }
+          : {
+              justification:
+                'Gated at INSUFFICIENT DATA pending licensed valuation multiples and 252-day adjusted price history. At pre-results cutoff, verified TypeDB records show FY2027 Q2 GAAP revenue of $96,221M, 66.2% operating margin, $21,341M FCF, $48.33B Form 13F equity holdings, and $108.0B (+/- 2%) Q3 revenue guidance.',
+              risk:
+                'Leadership transition (CEO resignation & Interim CEO/CFO dual role), IPO-contingent ~$10.0B Anthropic Class N placement, and China Data Center export exclusion.',
+              whatChanges:
+                'Release of post-21:20 UTC Q3 FY27 primary financial tables and verified valuation multiples.',
+              sources: [
+                'doc-nvda-q2fy27-8k-20260826',
+                'doc-nvda-13fhr-20261116',
+                'doc-nvda-8k-20261112',
+              ],
+              rels: [
+                'rel-case007-nvda-anthropic-pp-r1',
+                'rel-case007-nvda-kress-interim-ceo-r1',
+              ],
+            }
+      : {
+          justification:
+            'Gated at INSUFFICIENT DATA because no licensed valuation multiple or 252-day adjusted price history is stored. Among verified dimensions (70% weight covered), NVIDIA ranks #1 on non-directional fundamental screening (82.3/100) with 66.2% GAAP operating margin ($63,734M FY27 Q2 operating income on $96,221M revenue) and $21,341M quarterly FCF.',
+          risk:
+            'Customer capex concentration across four hyperscalers, China Data Center export exclusion, and $1.86B+ of Nscale lease/convertible credit exposure (plus reported Monarch guarantee discussions).',
+          whatChanges:
+            'Importing verified diluted share counts, split-adjusted prices, and licensed forward consensus estimates would unlock the 30% Valuation gate; a confirmed binding Monarch credit guarantee would adjust Company Risk.',
+          sources: ['nvda-fy27-q2', 'nscale-s1-sep18', 'reuters-credit-oct30'],
+          rels: [
+            'rel-nscale-nvda-convertible-r1',
+            'rel-ward-county-guarantee-r1',
+            'rel-monarch-credit-talks-r1',
+          ],
+        },
     MSFT: {
       justification:
         'Gated at INSUFFICIENT DATA pending verified valuation multiples and adjusted price history. Ranks #2 on non-directional fundamental screening (73.7/100, 70% weight covered): FY27 Q1 Azure revenue grew 48% YoY ($33,165M) with 49.8% company operating margin ($45,915M on $92,279M revenue) and $18,633M positive FCF after $39,367M cash capex.',
@@ -1740,6 +1857,7 @@ export function classifyAssessmentFromValidatedScores(input: {
 export function evaluateUniverseResearchAssessments(options?: {
   asOfMs?: number;
   usePreG71Baseline?: boolean;
+  nvidiaGraphSummary?: NvidiaDashboardGraphSummary | null;
   liveWatchlist?: Array<{
     ticker: string;
     close: number | null;
@@ -1758,6 +1876,7 @@ export function evaluateUniverseResearchAssessments(options?: {
       asOfMs: options?.asOfMs,
       usePreG71Baseline: options?.usePreG71Baseline,
       livePriceOverride: overrideMap.get(u.ticker),
+      nvidiaGraphSummary: u.ticker === 'NVDA' ? options?.nvidiaGraphSummary : undefined,
     }),
   ).sort((a, b) => {
     const scoreA = a.researchPriorityScore ?? -1;
@@ -2135,6 +2254,12 @@ export function buildExecutiveMarketBriefing(
 
   const nvda = assessments.find((a) => a.ticker === 'NVDA');
   const msft = assessments.find((a) => a.ticker === 'MSFT');
+  const nvdaQ = nvda?.layers.quantitativeCalculation;
+  const nvdaRevObs = nvdaQ?.dimensions.earnings_financial_health.observedMetrics[0];
+  const nvdaIsQ3 = nvdaRevObs?.metric.includes('Q3');
+  const nvdaPeriodSummary = nvdaIsQ3
+    ? `FY2027 Q3 ended ${nvdaRevObs?.periodOrAsOf ?? '2026-10-25'}: $${(nvdaQ?.revenueUsdMillions ?? 115844).toLocaleString('en-US')}M revenue, ${nvdaQ?.operatingMarginPct ?? 65.2}% GAAP operating margin, $${(nvdaQ?.freeCashFlowUsdMillions ?? 43777).toLocaleString('en-US')}M FCF`
+    : 'FY27 Q2 ended 2026-07-26: $96,221M revenue, 66.2% GAAP operating margin, $21,341M FCF';
 
   const marketEnvironmentSentence = hasNewerPersistedQqq
     ? `Market Environment (Market observation as of ${asOfDateIso}): Nasdaq-100 benchmark QQQ closed at $${liveQqq!.close!.toFixed(2)} USD (${qqqAnchorCumulativePct !== null ? `${Number(qqqAnchorCumulativePct) >= 0 ? '+' : ''}${qqqAnchorCumulativePct}% cumulative since the ${qqqBundledLatest!.dateIso} snapshot anchor of $${qqqBundledLatest!.close.toFixed(2)}, delayed unadjusted EOD close` : 'delayed EOD reference close'}); Case 006 v2 regime classification remains anchored to its ${fundamentalCutoffDateIso} cut-off and is not extrapolated across later sessions.`
@@ -2162,7 +2287,7 @@ export function buildExecutiveMarketBriefing(
     sentences: {
       marketEnvironment: marketEnvironmentSentence,
       sectorDevelopments: `Major Sector Developments (Filings 2026-09-18 to 2026-11-02): Verified SEC Form S-1/A (filed 2026-11-02) and Form 10-Q disclosures in the TypeDB knowledge graph document $895.4B USD of deduplicated multi-year AI compute commitments across Amazon, Alphabet, Microsoft, and Anthropic (preventing $44.6B USD of double-counting on Nscale’s Monarch sub-allocation disclosed 2026-09-18).`,
-      strongestResearchOpportunities: `Non-Directional Screening Priorities (Gated — Not Buy/Hold/Sell Recommendations): Zero directional ratings are emitted because licensed valuation multiples (30% weight) and 252-day split-adjusted histories are unconfigured, but NVIDIA (FY27 Q2 ended 2026-07-26: $96,221M revenue, 66.2% GAAP operating margin, $21,341M FCF; screening score ${nvda?.researchPriorityScore ?? 82.3}/100) and Microsoft (FY27 Q1 ended 2026-09-30: $92,279M revenue, +48% YoY Azure growth, 49.8% operating margin, $18,633M derived FCF; screening score ${msft?.researchPriorityScore ?? 73.7}/100) lead verified fundamental coverage.`,
+      strongestResearchOpportunities: `Non-Directional Screening Priorities (Gated — Not Buy/Hold/Sell Recommendations): Zero directional ratings are emitted because licensed valuation multiples (30% weight) and 252-day split-adjusted histories are unconfigured, but NVIDIA (${nvdaPeriodSummary}; screening score ${nvda?.researchPriorityScore ?? 82.3}/100) and Microsoft (FY27 Q1 ended 2026-09-30: $92,279M revenue, +48% YoY Azure growth, 49.8% operating margin, $18,633M derived FCF; screening score ${msft?.researchPriorityScore ?? 73.7}/100) lead verified fundamental coverage.`,
       highestMaterialRisks: `Highest Material Risks (Q3 2026 Ended 2026-09-30): Hyperscaler AI capital expenditure has compressed free cash flow negative—Alphabet’s 2026-Q3 FCF fell to -$9.065B USD after $51.355B Q3 capex (filed 2026-10-28), and Amazon’s TTM-2026-Q3 net capex surged to $210,657M USD (125.2% of $168,300M TTM OCF, pushing TTM FCF to -$42,357M USD vs +$14,788M USD / 88.7% net capex/OCF in TTM-2025-Q3; filed 2026-10-29)—alongside US/Ireland electricity-grid constraints (350 MW AWS Dublin EirGrid dependency and New York EO 62 moratorium) and unsigned Monarch credit-support discussions (reported 2026-10-30).`,
       changesSincePriorSession: changesSentence,
     },
