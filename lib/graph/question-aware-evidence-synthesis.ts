@@ -2,12 +2,13 @@ import {
   EVIDENCE_LOCKED_ANSWER_VERSION,
   SUGGESTED_STARTER_QUESTIONS,
   evidenceLockedAnswerSchema,
-  type ContradictoryEvidenceItem,
   type EvidenceBundleV1,
   type EvidenceLockedAnswer,
-  type SupportingClaimItem,
 } from './evidence-chat-contracts';
 import { buildEvidenceLimitedAbstentionAnswer } from './evidence-answer-validator';
+
+type SupportingClaimItem = EvidenceLockedAnswer['supportingClaims'][number];
+type ContradictoryEvidenceItem = EvidenceLockedAnswer['contradictoryEvidence'][number];
 
 /**
  * RC002 Workstream A (B-002) — Question-Aware, Data-Driven Closed-Evidence Synthesis Engine.

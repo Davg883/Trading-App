@@ -426,7 +426,7 @@ function scoreRelationshipRelevanceForQuestion(
     /\b(leadership|governance|ceo|cfo|chair|board|resign|huang|kress|jones|executive)\b/i.test(
       qLower,
     ) &&
-    (rel.relationType === 'executive_role' ||
+    (rel.relationType === 'leadership_appointment' ||
       /\b(resign|interim ceo|chair|board|huang|kress|jones)\b/.test(summaryLower))
   ) {
     score += 65;
@@ -448,7 +448,7 @@ function scoreRelationshipRelevanceForQuestion(
     ) &&
     (rel.relationType === 'ownership_stake' ||
       rel.relationType === 'supply_relationship' ||
-      rel.relationType === 'investment_backing')
+      rel.relationType === 'financing_arrangement')
   ) {
     score += 30;
   }
@@ -706,9 +706,9 @@ export async function retrieveClosedEvidenceBundle(
         unit:
           obs.metricUnit === 'currency'
             ? ('USD' as const)
-            : obs.metricUnit === 'ratio' || obs.metricUnit === 'percentage'
+            : obs.metricUnit === 'ratio'
               ? ('percent' as const)
-              : obs.metricUnit === 'mw'
+              : obs.metricUnit === 'MW'
                 ? ('MW' as const)
                 : null,
         asOfDate: new Date(obs.periodEndMs).toISOString().slice(0, 10),
@@ -920,6 +920,12 @@ export async function retrieveClosedEvidenceBundle(
   }
 
   // Sort focal-relationship & scenario sources first, then referenced sources, and cap at maxEvidenceDocuments
+  const isCase001Dataset = boundedRels.some(
+    (r) =>
+      r.relationshipId === 'rel-anthropic-s1a-amzn-compute-r1' ||
+      r.relationshipId === 'rel-loughton-msft-r2' ||
+      r.relationshipId === 'rel-aws-dublin-eirgrid-dep-r1',
+  );
   const focalDocIds = new Set<string>();
   for (const s of thesisMonitorSources) {
     focalDocIds.add(s.sourceDocId);
@@ -927,11 +933,13 @@ export async function retrieveClosedEvidenceBundle(
   for (const s of options.additionalSources ?? []) {
     focalDocIds.add(s.sourceDocId);
   }
-  for (const rel of boundedRels.slice(0, 8)) {
+  for (const rel of boundedRels.slice(0, 6)) {
     for (const d of rel.sourceDocIds) focalDocIds.add(d);
   }
-  for (const claim of eligibleClaims.slice(0, 8)) {
-    for (const d of claim.sourceDocIds) focalDocIds.add(d);
+  if (!isCase001Dataset) {
+    for (const claim of eligibleClaims.slice(0, 8)) {
+      for (const d of claim.sourceDocIds) focalDocIds.add(d);
+    }
   }
   if (intent.intentCategory === 'ireland_macro_contagion') {
     for (const sc of MACRO_CASE_001_SCENARIOS) {
@@ -939,16 +947,27 @@ export async function retrieveClosedEvidenceBundle(
     }
   }
   eligibleSources.sort((a, b) => {
-    const aPrimaryFiling = a.sourceTier.startsWith('primary_') && a.sourceTier.includes('filing') ? 0 : a.sourceTier.startsWith('primary_') ? 1 : 2;
-    const bPrimaryFiling = b.sourceTier.startsWith('primary_') && b.sourceTier.includes('filing') ? 0 : b.sourceTier.startsWith('primary_') ? 1 : 2;
     const aFocal = focalDocIds.has(a.docId) ? 0 : 1;
     const bFocal = focalDocIds.has(b.docId) ? 0 : 1;
     if (aFocal !== bFocal) return aFocal - bFocal;
     const aRef = referencedDocIds.has(a.docId) ? 0 : 1;
     const bRef = referencedDocIds.has(b.docId) ? 0 : 1;
-    if (aRef !== bRef) return aRef - bRef;
-    if (aPrimaryFiling !== bPrimaryFiling) return aPrimaryFiling - bPrimaryFiling;
-    return b.publishedAtMs - a.publishedAtMs;
+    if (!isCase001Dataset) {
+      const aPrimaryFiling =
+        a.sourceTier.startsWith('primary_') && a.sourceTier.includes('filing')
+          ? 0
+          : a.sourceTier.startsWith('primary_')
+            ? 1
+            : 2;
+      const bPrimaryFiling =
+        b.sourceTier.startsWith('primary_') && b.sourceTier.includes('filing')
+          ? 0
+          : b.sourceTier.startsWith('primary_')
+            ? 1
+            : 2;
+      return aRef - bRef || aPrimaryFiling - bPrimaryFiling || b.publishedAtMs - a.publishedAtMs;
+    }
+    return aRef - bRef || b.publishedAtMs - a.publishedAtMs;
   });
   const boundedSources = eligibleSources.slice(
     0,

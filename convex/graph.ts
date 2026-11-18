@@ -364,7 +364,7 @@ export const reviewAndPromoteRelationship = mutation({
       if (isQuarantined(row)) continue;
       if (
         row.validationStatus === 'quarantined_injection' ||
-        row.validationStatus === 'rejected_invalid'
+        row.validationStatus === 'rejected'
       ) {
         continue;
       }

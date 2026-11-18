@@ -192,8 +192,7 @@ export function assertNoDisputedG9SecRecordsPostEarnings(
           contractualStatus: rel.contractualStatus,
           bindingObligation:
             rel.contractualStatus === 'signed' ||
-            rel.contractualStatus === 'funded' ||
-            rel.contractualStatus === 'committed',
+            rel.contractualStatus === 'funded',
         });
         if (!verdict.allowed) {
           throw new Error(`Security/governance violation: ${verdict.detail}`);

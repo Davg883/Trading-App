@@ -8,6 +8,7 @@ import {
   NVDA_HUGGINGFACE_8K_ACCESSION,
   NVDA_HUGGINGFACE_8K_SHA256,
   evaluateSecClaimQuarantine,
+  type QuarantineDryRunImpactReport,
 } from '../lib/remote-ops/xbrl-quarantine-remediation';
 import {
   assertNoDisputedG9SecRecordsPostEarnings,
@@ -370,9 +371,11 @@ describe('RC002 Workstream B — SEC/XBRL Quarantine, Orphan Evidence & Study In
     });
 
     // 1. Run strictly read-only `planKnownXbrlQuarantineInternal`
-    const planRef = makeFunctionReference<'query', Record<string, unknown>, any>(
-      'operations:planKnownXbrlQuarantineInternal',
-    );
+    const planRef = makeFunctionReference<
+      'query',
+      Record<string, unknown>,
+      QuarantineDryRunImpactReport
+    >('operations:planKnownXbrlQuarantineInternal');
     const plan = await t.query(planRef, { owner: OWNER });
     expect(plan.dryRun).toBe(true);
     expect(plan.uniqueAffectedIds.stagingItemIds).toHaveLength(7);
@@ -386,10 +389,12 @@ describe('RC002 Workstream B — SEC/XBRL Quarantine, Orphan Evidence & Study In
     expect(plan.afterCountsIfExecuted.rowsDeletedCount).toBe(0);
 
     // 2. Run `quarantineStagedEvidenceInternal` with `dryRun: true` and verify ZERO mutations occurred
-    const quarantineMutRef = makeFunctionReference<'mutation', Record<string, unknown>, any>(
-      'operations:quarantineStagedEvidenceInternal',
-    );
-    const mutationItems = plan.items.map((it: any) => ({
+    const quarantineMutRef = makeFunctionReference<
+      'mutation',
+      Record<string, unknown>,
+      { dryRun: boolean; report: Array<{ status: string }> }
+    >('operations:quarantineStagedEvidenceInternal');
+    const mutationItems = plan.items.map((it) => ({
       stagingItemId: it.stagingItemId,
       reasonCode: it.reasonCode,
       reason: it.reason,
@@ -416,13 +421,13 @@ describe('RC002 Workstream B — SEC/XBRL Quarantine, Orphan Evidence & Study In
       items: mutationItems,
     });
     expect(liveTestRes.dryRun).toBe(false);
-    expect(liveTestRes.report.every((r: any) => r.status === 'quarantined')).toBe(true);
+    expect(liveTestRes.report.every((r) => r.status === 'quarantined')).toBe(true);
 
     // Verify all 8 evidence rows (including orphanEvId!) are quarantined while cleanEvId remains unquarantined, and 0 rows deleted
     const postDbCheck = await t.run(async (ctx) => {
       const allEv = await ctx.db.query('evidence').collect();
-      const orphan = await ctx.db.get(seeded.orphanEvId as any);
-      const clean = await ctx.db.get(seeded.cleanEvId as any);
+      const orphan = await ctx.db.get(seeded.orphanEvId);
+      const clean = await ctx.db.get(seeded.cleanEvId);
       const allBriefings = await ctx.db.query('morningBriefings').collect();
       const allForward = await ctx.db.query('forwardResearchEvents').collect();
       const allExp = await ctx.db.query('experiments').collect();
@@ -430,39 +435,59 @@ describe('RC002 Workstream B — SEC/XBRL Quarantine, Orphan Evidence & Study In
       return { allEv, orphan, clean, allBriefings, allForward, allExp, allFc };
     });
     expect(postDbCheck.allEv).toHaveLength(9);
-    expect(typeof (postDbCheck.orphan as any)?.quarantinedAt).toBe('number');
-    expect((postDbCheck.clean as any)?.quarantinedAt).toBeUndefined();
+    expect(typeof postDbCheck.orphan?.quarantinedAt).toBe('number');
+    expect(postDbCheck.clean?.quarantinedAt).toBeUndefined();
     expect(postDbCheck.allBriefings).toHaveLength(1);
     expect(postDbCheck.allForward).toHaveLength(1);
     expect(postDbCheck.allExp).toHaveLength(1);
     expect(postDbCheck.allFc).toHaveLength(2);
 
     // Verify `operations:overview` visibly withholds quarantined briefing facts + interpretations AND invalidates forward study
-    const overview = await asOwner.query(makeFunctionReference<'query'>('operations:overview'), {}) as any;
-    expect(overview.latestBriefing.confirmedFacts.map((f: any) => f.id)).toEqual([
+    type TestOverview = {
+      latestBriefing: {
+        confirmedFacts: Array<{ id: string }>;
+        withheldFacts: Array<{ id: string }>;
+        researchInterpretation: Array<{ id: string }>;
+        withheldInterpretations: Array<{ id: string }>;
+      };
+      forwardResearchEvents: Array<{ invalidatedByQuarantine?: boolean }>;
+      missingEvidenceResolution: { windows: Array<{ windowId: string }> };
+    };
+    const overview = (await asOwner.query(
+      makeFunctionReference<'query'>('operations:overview'),
+      {},
+    )) as TestOverview;
+    expect(overview.latestBriefing.confirmedFacts.map((f) => f.id)).toEqual([
       'fact-NVDA-0001045810-26-000088',
     ]);
-    expect(overview.latestBriefing.withheldFacts.map((w: any) => w.id)).toEqual([
+    expect(overview.latestBriefing.withheldFacts.map((w) => w.id)).toEqual([
       'fact-NVDA-0001045810-26-000084',
     ]);
-    expect(overview.latestBriefing.researchInterpretation.map((i: any) => i.id)).toEqual([
+    expect(overview.latestBriefing.researchInterpretation.map((i) => i.id)).toEqual([
       'interp-clean-1',
     ]);
-    expect(overview.latestBriefing.withheldInterpretations.map((w: any) => w.id)).toEqual([
+    expect(overview.latestBriefing.withheldInterpretations.map((w) => w.id)).toEqual([
       'interp-contaminated-1',
     ]);
-    expect(overview.forwardResearchEvents[0].invalidatedByQuarantine).toBe(true);
+    expect(overview.forwardResearchEvents[0]!.invalidatedByQuarantine).toBe(true);
     expect(
-      overview.missingEvidenceResolution.windows.some((w: any) =>
+      overview.missingEvidenceResolution.windows.some((w) =>
         w.windowId.includes('forward-004-nvda-qqq-5d-2026-11-05'),
       ),
     ).toBe(false);
 
     // Verify `research:dashboard` flags affected `experiments` & `forecasts` as `invalidatedByQuarantine: true`
     // and `research:freezeExperiment` blocks quarantined evidence
-    const researchDash = await asOwner.query(makeFunctionReference<'query'>('research:dashboard'), {}) as any;
-    expect(researchDash.experiments[0].invalidatedByQuarantine).toBe(true);
-    expect(researchDash.forecasts.every((fc: any) => fc.invalidatedByQuarantine === true)).toBe(true);
+    type TestResearchDash = {
+      experiments: Array<{ invalidatedByQuarantine: boolean }>;
+      forecasts: Array<{ invalidatedByQuarantine: boolean }>;
+    };
+    const researchDash = (await asOwner.query(
+      makeFunctionReference<'query'>('research:dashboard'),
+      {},
+    )) as TestResearchDash;
+    expect(researchDash.experiments[0]!.invalidatedByQuarantine).toBe(true);
+    expect(researchDash.forecasts.every((fc) => fc.invalidatedByQuarantine === true)).toBe(true);
 
     await expect(
       asOwner.mutation(makeFunctionReference<'mutation'>('research:freezeExperiment'), {

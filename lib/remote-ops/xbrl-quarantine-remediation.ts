@@ -683,7 +683,7 @@ export interface SecClaimQuarantineEvaluationInput {
   metricOrClaimType: string;
   secItem?: string | null;
   contentSha256?: string | null;
-  epistemicStatus?: 'confirmed' | 'proposed' | 'reported' | 'unverified' | null;
+  epistemicStatus?: string | null;
   contractualStatus?: string | null;
   bindingObligation?: boolean | null;
 }

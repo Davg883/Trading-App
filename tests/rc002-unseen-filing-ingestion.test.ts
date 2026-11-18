@@ -389,9 +389,11 @@ describe('RC002 Workstream C — General-Purpose Unseen SEC Filing Ingestion & T
       sourceDocIds: [dynamicStagedExternalId],
     };
 
-    const reviewMutRef = makeFunctionReference<'mutation', Record<string, unknown>, any>(
-      'graph:reviewAndPromoteRelationship',
-    );
+    const reviewMutRef = makeFunctionReference<
+      'mutation',
+      Record<string, unknown>,
+      { decision: string; promotedOutboxId: string | null; deduplicated: boolean }
+    >('graph:reviewAndPromoteRelationship');
 
     // Non-reviewer MUST be rejected
     await expect(
