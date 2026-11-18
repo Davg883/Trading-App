@@ -17,7 +17,11 @@ import {
 } from '../lib/graph/query-gateway';
 import { processProjectionOutboxBatch } from '../lib/graph/projection-engine';
 import {
+  CASE_007_VERIFIED_DEV_DATABASE,
+  PRODUCTION_TYPEDB_DATABASE,
+  STAGING_TYPEDB_DATABASE,
   TypeDbSchemaOrHydrationError,
+  assertIsolatedCase007WriteTarget,
   executeWriteStatementsOnLiveServer,
   hydrateMacroDatasetFromLiveTypeDb,
   inspectLiveTypeDbGraphCounts,
@@ -30,6 +34,7 @@ import {
   CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
   NVDA_Q3_FY27_SCHEDULED_RELEASE_MS,
   appendPostEarningsQ3ResultsBatch,
+  assertNoDisputedG9SecRecords,
   runCase007PreEarningsPipeline,
 } from '../lib/remote-ops/case-007-nvidia-ingestor';
 
@@ -82,6 +87,48 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     expect(ipoV2.supersedesRelationshipId).toBe('rel-case007-anthropic-ipo-r1');
     expect(ipoV2.epistemicStatus).toBe('proposed');
     expect(ipoV2.contractualStatus).toBe('announced');
+
+    // SpaceXAI $120.5B ceiling and Lambda $41.3B ($34.9B terminable) are strictly distinguished from unconditional binding obligations
+    const spacexCompute = res.dataset.relationships.find(
+      (r) => r.relationshipId === 'rel-case007-anthropic-spacexai-nvda-compute-r1',
+    )!;
+    expect(spacexCompute.bindingObligation).toBe(false);
+    expect(spacexCompute.conditionsSummary).toContain('90 days');
+
+    const lambdaCompute = res.dataset.relationships.find(
+      (r) => r.relationshipId === 'rel-case007-anthropic-lambda-nvda-compute-r1',
+    )!;
+    expect(lambdaCompute.bindingObligation).toBe(false);
+    expect(lambdaCompute.conditionsSummary).toContain('34.9B is currently terminable');
+
+    // Only the 7 verified primary SEC/IR disclosures enter promoted dataset.sources
+    expect(res.dataset.sources).toHaveLength(7);
+    expect(res.dataset.sources.every((s) => s.authority === 'primary')).toBe(true);
+
+    // Hard write-target isolation & disputed G9 XBRL blocklist guards
+    expect(() =>
+      assertIsolatedCase007WriteTarget(CASE_007_VERIFIED_DEV_DATABASE),
+    ).not.toThrow();
+    expect(() => assertIsolatedCase007WriteTarget(STAGING_TYPEDB_DATABASE)).toThrow(
+      /aci_case007_verified_dev/,
+    );
+    expect(() => assertIsolatedCase007WriteTarget(PRODUCTION_TYPEDB_DATABASE)).toThrow(
+      /aci_case007_verified_dev/,
+    );
+    expect(() => assertNoDisputedG9SecRecords(res.dataset)).not.toThrow();
+    expect(() =>
+      assertNoDisputedG9SecRecords({
+        ...res.dataset,
+        sources: [
+          ...res.dataset.sources,
+          {
+            ...res.dataset.sources[0]!,
+            sourceDocId: 'bad-disputed-xbrl',
+            title: 'Disputed 0001045810-20-000147 Q2 2020 XBRL',
+          },
+        ],
+      }),
+    ).toThrow(/0001045810-20-000147/);
 
     // Completed 13F equity holdings are `confirmed` / `funded` and sum to exact $48,330,717,074
     const f13Edges = res.dataset.relationships.filter(
@@ -315,6 +362,12 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     expect(liveHtml).not.toContain('data-testid="macro-case-001-workspace"');
     expect(liveHtml).toContain('Colette Kress');
     expect(liveHtml).toContain('contingent-signed capital commitment(s)');
+    expect(liveHtml).toContain('data-testid="drawer-source-link-doc-nvda-8k-20261112"');
+    expect(liveHtml).toContain(
+      'https://www.sec.gov/Archives/edgar/data/1045810/000104581026000082/nvda-20261111.htm',
+    );
+    expect(liveHtml).toContain('forecast (pre-results guidance)');
+    expect(liveHtml).toContain('reported actual');
 
     // Gate 6 check: when LIVE_GRAPH has pre-existing records only (0 Case 007 edges), explicitly states NOT YET VERIFIED
     const preCase007LiveHtml = renderToStaticMarkup(
@@ -405,7 +458,9 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     );
     expect(execOverviewHtml).toContain('data-testid="case-007-nvidia-summary-card"');
     expect(execOverviewHtml).toContain('0001045810-26-000082');
-    expect(execOverviewHtml).toContain('USD 48.33B across 8 reported holdings');
+    expect(execOverviewHtml).toContain('USD 48.33B across 8 reported Section 13(f) holdings');
+    expect(execOverviewHtml).toContain('data-testid="case-007-sec-link-8k"');
+    expect(execOverviewHtml).toContain('data-testid="case-007-sec-link-13f"');
     expect(execOverviewHtml).toContain('contingent upon IPO closing');
   });
 

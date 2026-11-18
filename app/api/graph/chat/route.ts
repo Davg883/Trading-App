@@ -481,8 +481,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const preferLive = Boolean(
+      process.env.TYPEDB_HTTP_ADDRESS ||
+        (process.env.NEXT_PUBLIC_CONVEX_URL && process.env.TYPEDB_BRIDGE_SECRET),
+    );
     let mergedDataset: MacroGraphDataset | undefined;
-    if (retrievalCtx && retrievalCtx.publicProjectedRelationships.length > 0) {
+    if (!preferLive && retrievalCtx && retrievalCtx.publicProjectedRelationships.length > 0) {
       const baseDataset = loadInitialAcceptanceDataset();
       const mergedRelMap = new Map<string, MacroRelationship>();
       for (const r of baseDataset.relationships) {
@@ -506,8 +510,10 @@ export async function POST(req: NextRequest) {
       ...(retrievalCtx?.checkpoint
         ? { projectionCheckpoint: retrievalCtx.checkpoint }
         : {}),
-      graphDatabaseName: process.env.TYPEDB_DATABASE ?? 'aci_macro_intelligence_prod',
-      preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
+      ...(process.env.TYPEDB_DATABASE
+        ? { graphDatabaseName: process.env.TYPEDB_DATABASE }
+        : {}),
+      preferLiveTypeDb: preferLive,
     });
 
     // Pre-merge risk H2: a paid provider call requires an authoritative, atomically reserved budget. When the

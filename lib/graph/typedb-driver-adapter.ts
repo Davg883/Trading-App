@@ -51,6 +51,20 @@ import {
 
 export const PRODUCTION_TYPEDB_DATABASE = 'aci_macro_intelligence_prod';
 export const STAGING_TYPEDB_DATABASE = 'aci_macro_intelligence_staging';
+export const CASE_007_VERIFIED_DEV_DATABASE = 'aci_case007_verified_dev';
+
+/**
+ * Enforces strict database target isolation for Case 007 development promotion:
+ * writes are permitted ONLY to `aci_case007_verified_dev`, never to `aci_macro_intelligence_staging`
+ * or `aci_macro_intelligence_prod`.
+ */
+export function assertIsolatedCase007WriteTarget(databaseName: string): void {
+  if (databaseName !== CASE_007_VERIFIED_DEV_DATABASE) {
+    throw new Error(
+      `Security/isolation violation: Case 007 write target must be "${CASE_007_VERIFIED_DEV_DATABASE}" (refused "${databaseName}" to preserve production and existing staging data).`,
+    );
+  }
+}
 
 export function assertCanRecreateTypeDbDatabase(databaseName: string): void {
   if (
@@ -299,6 +313,7 @@ export async function probeTypeDbServer(
   distribution: string | null;
   version: string | null;
   latencyMs: number;
+  tlsEnabled?: boolean;
   error: string | null;
 }> {
   const startedAt = Date.now();
@@ -316,6 +331,7 @@ export async function probeTypeDbServer(
           distribution: string | null;
           version: string | null;
           latencyMs: number;
+          tlsEnabled?: boolean;
         }>(convexUrl, 'graph:probeHostedTypeDbCloud', {});
         if (cloudVal?.reachable) {
           return { ...cloudVal, error: null };
@@ -329,6 +345,7 @@ export async function probeTypeDbServer(
         distribution: null,
         version: null,
         latencyMs: Math.max(1, Date.now() - startedAt),
+        tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
         error: sanitizeTypeDbError(`${res.err.code}: ${res.err.message}`, config),
       };
     }
@@ -344,6 +361,7 @@ export async function probeTypeDbServer(
         distribution: res.ok.distribution,
         version: res.ok.version,
         latencyMs,
+        tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
         error: sanitizeTypeDbError(`${dbsRes.err.code}: ${dbsRes.err.message}`, config),
       };
     }
@@ -357,6 +375,7 @@ export async function probeTypeDbServer(
       distribution: res.ok.distribution,
       version: res.ok.version,
       latencyMs,
+      tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
       error: null,
     };
   } catch (err) {
@@ -370,6 +389,7 @@ export async function probeTypeDbServer(
         distribution: string | null;
         version: string | null;
         latencyMs: number;
+        tlsEnabled?: boolean;
       }>(convexUrl, 'graph:probeHostedTypeDbCloud', {});
       if (cloudVal?.reachable) {
         return { ...cloudVal, error: null };
@@ -383,6 +403,7 @@ export async function probeTypeDbServer(
       distribution: null,
       version: null,
       latencyMs: Math.max(1, Date.now() - startedAt),
+      tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
       error: sanitizeTypeDbError(
         err instanceof Error ? err.message : String(err),
         config,

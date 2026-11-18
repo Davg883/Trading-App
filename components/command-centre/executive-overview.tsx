@@ -919,20 +919,53 @@ export function ExecutiveOverviewSections({
                       <ul className="g6-gate-list">
                         <li>
                           <b>Confirmed Leadership Transition (Form 8-K 0001045810-26-000082, 2026-11-11):</b>{' '}
-                          Jensen Huang resigned; Colette Kress appointed Interim CEO (retaining EVP &amp; CFO); Harvey C. Jones appointed first-ever Board Chair.
+                          Jensen Huang resigned; Colette Kress appointed Interim CEO (retaining EVP &amp; CFO); Harvey C. Jones appointed first-ever Board Chair.{' '}
+                          <a
+                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000082/nvda-20261111.htm"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="case-007-sec-link-8k"
+                          >
+                            SEC Form 8-K →
+                          </a>
                         </li>
                         <li>
                           <b>Confirmed Equity Portfolio (Form 13F-HR 0001045810-26-000084, as of 2026-09-30):</b>{' '}
-                          USD 48.33B across 8 reported holdings (SpaceX USD 19.68B, Intel USD 19.37B, CoreWeave USD 4.11B, Coherent USD 2.24B, Synopsys USD 1.89B, Nokia USD 738.8M, Nebius USD 280.8M, Generate Biomedicines USD 12.5M).
+                          USD 48.33B across 8 reported Section 13(f) holdings (SpaceX USD 19.68B, Intel USD 19.37B, CoreWeave USD 4.11B, Coherent USD 2.24B, Synopsys USD 1.89B, Nokia USD 738.8M, Nebius USD 280.8M, Generate Biomedicines USD 12.5M).{' '}
+                          <a
+                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000084/information_table.xml"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="case-007-sec-link-13f"
+                          >
+                            SEC Form 13F-HR →
+                          </a>
                         </li>
                         <li>
                           <b>Proposed / Contingent Commitment (Anthropic S-1/A-2 0001628280-26-072484 &amp; 8-A12B 0001628280-26-074342):</b>{' '}
-                          ~USD 10.0B (135,135,135 Class N non-voting restricted shares at $74 midpoint) contingent upon IPO closing and stockholder approval — <i>not</i> completed ownership.
+                          ~USD 10.0B (135,135,135 Class N non-voting restricted shares at $74 midpoint) contingent upon IPO closing and stockholder approval — <i>not</i> completed ownership.{' '}
+                          <a
+                            href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026072484/anthropicpbc-sx1ax2.htm"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="case-007-sec-link-s1a2"
+                          >
+                            SEC S-1/A-2 →
+                          </a>
                         </li>
                         <li>
-                          <b>Pre-Results Snapshot &amp; Market Reference:</b> Last reported actual revenue USD 96.22B (Q2 FY27); Q3 FY27 management guidance USD 108.0B ± 2% (0001045810-26-000073); Q3 FY27 actuals unissued prior to 2026-11-17 21:20 UTC (1:20 p.m. PT). Displayed market reference remains a delayed public close, never a live quote.{' '}
+                          <b>Pre-Results Snapshot &amp; Market Reference:</b> Last reported actual revenue USD 96.22B (Q2 FY27); Q3 FY27 management guidance USD 108.0B ± 2% (0001045810-26-000073, forecast only); Q3 FY27 actuals unissued prior to 2026-11-17 21:20 UTC (1:20 p.m. PT). Displayed market reference remains a delayed public close, never a live quote.{' '}
+                          <a
+                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000073/q2fy27pr.htm"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="case-007-sec-link-q2pr"
+                          >
+                            SEC Q2/Q3 Outlook 8-K →
+                          </a>{' '}
+                          ·{' '}
                           <Link href="/data-room?focal=org-nvda&asOf=1794949170000">
-                            Open in Macro Data Room →
+                            Open Live Graph in Macro Data Room →
                           </Link>
                         </li>
                       </ul>

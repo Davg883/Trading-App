@@ -793,6 +793,8 @@ export default function MacroDataRoom({
     const linkedSources = rel.sourceDocIds
       .map((id) => sourcesById.get(id))
       .filter((s): s is NonNullable<typeof s> => Boolean(s));
+    const isVerifiedCase007LiveRecord =
+      graphSourceMode === 'LIVE_GRAPH' && rel.relationshipId.startsWith('rel-case007-');
     const supersededTarget = rel.supersedesRelationshipId
       ? dataset.relationships.find((r) => r.relationshipId === rel.supersedesRelationshipId)
       : null;
@@ -878,10 +880,20 @@ export default function MacroDataRoom({
               </dd>
             </div>
             <div>
-              <dt>Extraction &amp; Synthetic Review Fixture</dt>
-              <dd data-testid="drawer-synthetic-review-status">
-                {rel.extractionStatus} · {rel.reviewerStatus} (Synthetic Fixture Example)
-              </dd>
+              <dt>
+                {isVerifiedCase007LiveRecord
+                  ? 'Extraction & Primary Filing Provenance'
+                  : 'Extraction & Synthetic Review Fixture'}
+              </dt>
+              {isVerifiedCase007LiveRecord ? (
+                <dd data-testid="drawer-verified-review-status">
+                  {rel.extractionStatus} · {rel.reviewerStatus} (Live TypeDB Primary SEC Filing)
+                </dd>
+              ) : (
+                <dd data-testid="drawer-synthetic-review-status">
+                  {rel.extractionStatus} · {rel.reviewerStatus} (Synthetic Fixture Example)
+                </dd>
+              )}
             </div>
             <div>
               <dt>Published Timestamp</dt>
@@ -950,8 +962,13 @@ export default function MacroDataRoom({
                 marginBottom: '8px',
               }}
             >
-              SUPPORTING STATIC FIXTURE SOURCES (
-              {isSelectedRelationshipInActiveSlice ? linkedSources.length : 0} ACTIVE AT CUTOFF)
+              {isVerifiedCase007LiveRecord
+                ? `SUPPORTING PRIMARY SEC FILINGS (${
+                    isSelectedRelationshipInActiveSlice ? linkedSources.length : 0
+                  } ACTIVE AT CUTOFF)`
+                : `SUPPORTING STATIC FIXTURE SOURCES (${
+                    isSelectedRelationshipInActiveSlice ? linkedSources.length : 0
+                  } ACTIVE AT CUTOFF)`}
             </strong>
             {!isSelectedRelationshipInActiveSlice ? (
               <div
@@ -965,7 +982,8 @@ export default function MacroDataRoom({
                   color: '#475569',
                 }}
               >
-                {linkedSources.length} static fixture source(s) (
+                {linkedSources.length}{' '}
+                {isVerifiedCase007LiveRecord ? 'primary filing' : 'static fixture'} source(s) (
                 <code>{rel.sourceDocIds.join(', ')}</code>) for{' '}
                 <code>{rel.relationshipId}</code> are withheld at the{' '}
                 <b>{formatUtcDate(asOfMs)}</b> ({temporalBasis}) cutoff to prevent hindsight
@@ -1002,8 +1020,17 @@ export default function MacroDataRoom({
                   </div>
                   <h4>{src.title}</h4>
                   <div className="dr-source-snippet">
-                    Basis: {src.publicationBasis} · Static demonstration source fixture (
-                    <code>{src.sourceDocId}</code>)
+                    {isVerifiedCase007LiveRecord ? (
+                      <>
+                        Basis: {src.publicationBasis} · Primary SEC/IR disclosure (
+                        <code>{src.sourceDocId}</code>)
+                      </>
+                    ) : (
+                      <>
+                        Basis: {src.publicationBasis} · Static demonstration source fixture (
+                        <code>{src.sourceDocId}</code>)
+                      </>
+                    )}
                   </div>
                   <div
                     style={{
@@ -1020,13 +1047,25 @@ export default function MacroDataRoom({
                       Pub: {formatUtcDate(src.publishedAtMs)} · Rec:{' '}
                       {formatUtcDate(src.receivedAtMs)}
                     </span>
-                    <span
-                      data-testid={`drawer-source-reference-${src.sourceDocId}`}
-                      style={{ color: '#475569', wordBreak: 'break-all' }}
-                    >
-                      Reference URI (static fixture, not a live external link):{' '}
-                      <code>{src.url}</code>
-                    </span>
+                    {isVerifiedCase007LiveRecord ? (
+                      <a
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid={`drawer-source-link-${src.sourceDocId}`}
+                        style={{ color: '#2b6cb0', fontWeight: 600, wordBreak: 'break-all' }}
+                      >
+                        Open Primary Filing ({src.url}) ↗
+                      </a>
+                    ) : (
+                      <span
+                        data-testid={`drawer-source-reference-${src.sourceDocId}`}
+                        style={{ color: '#475569', wordBreak: 'break-all' }}
+                      >
+                        Reference URI (static fixture, not a live external link):{' '}
+                        <code>{src.url}</code>
+                      </span>
+                    )}
                   </div>
                 </div>
               ))
@@ -1168,7 +1207,9 @@ export default function MacroDataRoom({
           <div>
             <span>AI CAPITAL INTELLIGENCE · MACRO INTELLIGENCE DATA ROOM</span>
             <small>
-              Static Demonstration Dataset · Deterministic Governance · Read-Only Gateway (Execution Authority: None)
+              {graphSourceMode === 'LIVE_GRAPH'
+                ? `Live TypeDB 3.14 Graph (${liveTypeDbStatus.databaseName ?? 'live'}) · Deterministic Governance · Read-Only Gateway (Execution Authority: None)`
+                : 'Static Demonstration Dataset · Deterministic Governance · Read-Only Gateway (Execution Authority: None)'}
             </small>
           </div>
         </div>
@@ -1667,7 +1708,22 @@ export default function MacroDataRoom({
                             <td>{entityNameById.get(obs.subjectOrgId) ?? obs.subjectOrgId}</td>
                             <td>
                               <b>{obs.metricName}</b>{' '}
-                              <span className="tag">{obs.observationKind}</span>
+                              <span
+                                className={`tag ${
+                                  obs.observationKind === 'forecast'
+                                    ? 'amber'
+                                    : obs.observationKind === 'reported'
+                                      ? 'green'
+                                      : ''
+                                }`}
+                                data-testid={`obs-kind-${obs.observationId}`}
+                              >
+                                {obs.observationKind === 'forecast'
+                                  ? 'forecast (pre-results guidance)'
+                                  : obs.observationKind === 'reported'
+                                    ? 'reported actual'
+                                    : obs.observationKind}
+                              </span>
                             </td>
                             <td>
                               {obs.metricUnit === 'currency'
@@ -1678,7 +1734,26 @@ export default function MacroDataRoom({
                               {obs.reportingPeriodLabel} · {obs.accountingBasis}
                             </td>
                             <td>
-                              <code>{obs.sourceDocIds.join(', ')}</code>
+                              {obs.sourceDocIds.map((docId, idx) => {
+                                const doc = sourcesById.get(docId);
+                                return (
+                                  <React.Fragment key={docId}>
+                                    {idx > 0 ? ', ' : ''}
+                                    {doc?.url && docId.startsWith('doc-') ? (
+                                      <a
+                                        href={doc.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        data-testid={`obs-source-link-${obs.observationId}-${docId}`}
+                                      >
+                                        <code>{docId}</code> ↗
+                                      </a>
+                                    ) : (
+                                      <code>{docId}</code>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
                             </td>
                           </tr>
                         ))}

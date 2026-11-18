@@ -64,44 +64,60 @@ export async function runGraphVsConvexBenchmark(
   dataset: MacroGraphDataset = loadInitialAcceptanceDataset(),
 ): Promise<BenchmarkComparisonReport> {
   const t0 = performance.now();
+  const isCase007Isolated =
+    dataset.relationships.some((r) => r.relationshipId.startsWith('rel-case007-')) &&
+    !dataset.relationships.some((r) => r.relationshipId === 'rel-loughton-msft-r1');
 
   // Execute a 2-hop multi-sector dependency query (`org-nvda` shared counterparty exposure)
   const sharedRes = await executeAllowlistedGraphQuery(
     {
       queryType: 'shared_counterparty_exposure',
       organisationId: 'org-nvda',
-      asOfMs: 1793900000000,
+      asOfMs: isCase007Isolated ? 1794949170000 : 1793900000000,
       temporalBasis: 'receipt',
       maxDepth: 2,
     },
     { callerId: 'benchmark_evaluator', datasets: [dataset] },
   );
 
-  // Execute a historical point-in-time reconstruction before the October 19, 2026 Loughton cancellation
+  // Execute a historical point-in-time reconstruction before supersession
   const historicalRes = await executeAllowlistedGraphQuery(
-    {
-      queryType: 'as_known_at_date_graph',
-      organisationId: 'org-msft',
-      asOfMs: 1790000000000, // 21 Sep 2026 (publication basis)
-      temporalBasis: 'publication',
-    },
+    isCase007Isolated
+      ? {
+          queryType: 'as_known_at_date_graph',
+          organisationId: 'org-anthropic',
+          asOfMs: 1794480000000, // 12 Nov 2026 (after S-1/A-2, before 17 Nov Form 8-A12B supersession)
+          temporalBasis: 'publication',
+        }
+      : {
+          queryType: 'as_known_at_date_graph',
+          organisationId: 'org-msft',
+          asOfMs: 1790000000000, // 21 Sep 2026 (publication basis)
+          temporalBasis: 'publication',
+        },
     { callerId: 'benchmark_evaluator', datasets: [dataset] },
   );
 
   const elapsedMs = Math.max(1, Math.round((performance.now() - t0) * 100) / 100);
 
-  // Verify 2-hop traversal finds Anthropic -> Nscale -> NVIDIA and Ward County Lessor -> Nscale -> NVIDIA
-  const foundAnthropicViaNscale = sharedRes.nodes.some((n) => n.id === 'org-anthropic');
-  const foundHistoricalAnnounced = historicalRes.edges.some(
-    (e) =>
-      e.relationshipId === 'rel-loughton-msft-r1' && e.contractualStatus === 'announced',
-  );
-  const excludedLaterCancellation = !historicalRes.edges.some(
-    (e) => e.relationshipId === 'rel-loughton-msft-r2',
-  );
+  const foundAnthropicTwoHop = sharedRes.nodes.some((n) => n.id === 'org-anthropic');
+  const foundHistoricalV1 = isCase007Isolated
+    ? historicalRes.edges.some(
+        (e) =>
+          e.relationshipId === 'rel-case007-anthropic-ipo-r1' &&
+          e.epistemicStatus === 'proposed',
+      )
+    : historicalRes.edges.some(
+        (e) =>
+          e.relationshipId === 'rel-loughton-msft-r1' &&
+          e.contractualStatus === 'announced',
+      );
+  const excludedLaterV2 = isCase007Isolated
+    ? !historicalRes.edges.some((e) => e.relationshipId === 'rel-case007-anthropic-ipo-r2')
+    : !historicalRes.edges.some((e) => e.relationshipId === 'rel-loughton-msft-r2');
 
-  const accuracy = foundAnthropicViaNscale ? 1.0 : 0.0;
-  const temporalScore = foundHistoricalAnnounced && excludedLaterCancellation ? 1.0 : 0.0;
+  const accuracy = foundAnthropicTwoHop ? 1.0 : 0.0;
+  const temporalScore = foundHistoricalV1 && excludedLaterV2 ? 1.0 : 0.0;
   const everyEdgeHasSources = sharedRes.edges.every((e) => e.sources.length >= 1);
 
   return {

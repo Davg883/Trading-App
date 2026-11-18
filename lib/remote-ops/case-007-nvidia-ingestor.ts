@@ -32,6 +32,78 @@ export const CASE_007_POST_RESULTS_BUNDLE_ID = 'case-007-nvda-post-q3fy27-v2' as
 export const CASE_007_PRE_EARNINGS_CAPTURED_AT_MS = 1794949170000 as const;
 export const NVDA_Q3_FY27_SCHEDULED_RELEASE_MS = 1794950400000 as const; // 2026-11-17T21:20:00Z (1:20 p.m. PT)
 
+/**
+ * Canonical raw byte-stream SHA-256 digests verified directly against live SEC EDGAR (`www.sec.gov/Archives/edgar/data/...`).
+ * Preserves `data/graph/case-007-nvidia-sec-filings-2026-11-17.json` untouched as the immutable pre-earnings capture snapshot
+ * while ensuring promoted `source_document` provenance carries exact raw-byte digests for all 6 SEC filings.
+ */
+export const VERIFIED_SEC_RAW_BYTE_SHA256: Readonly<Record<string, string>> = {
+  'doc-nvda-8k-20261112':
+    '607a8a5ed41dd022cc7d25d952d544d2c54bb0d91d907d5bb3a89ab32fb5c0ce',
+  'doc-nvda-8k-ex991-20261112':
+    'c2f26c105f3fc428aaa04c800e0b8b8571a4a7a51e817ae6eb27a89799766af6',
+  'doc-nvda-q2fy27-8k-20260826':
+    '972e6c1d066a7ed8f114fcd866c89177c6bfb3f54a80c318b71a8d936fb0d164',
+  'doc-nvda-13fhr-20261116':
+    'dd6ef7aebc2180ebf37dc4aced39d835307897c9a09aba707f080e96c4369b55',
+  'doc-anthropic-s1a2-20261110':
+    '066d43cd68db77530bfbcba9f67388810a64f4da209fcbcc2614b03c04d31794',
+  'doc-anthropic-8a12b-20261117':
+    'b704b64ea81411b6b8d89c78ba41b11068a9b87b32a5f3ebabe210554aca5f0f',
+};
+
+/**
+ * Hard blocklist preventing any of the 7 previously disputed G9.2/G9.4 SEC XBRL staging records
+ * (or unreviewed post-earnings Q3 FY27 Form 8-K 0001045810-26-000088) from entering the Case 007 pre-earnings projection.
+ */
+export const DISPUTED_G9_SEC_XBRL_BLOCKLIST: readonly string[] = [
+  '0001045810-20-000147',
+  '0001045810-26-000075',
+  '000104581026000075',
+  '0001045810-26-000078',
+  '000104581026000078',
+  '0001018724-26-000040',
+  '000101872426000040',
+  '0000002488-26-000191',
+  '000000248826000191',
+  '0000050863-26-000191',
+  '000005086326000191',
+  '0001193125-26-449835',
+  '000119312526449835',
+  '0001193125-26-448357',
+  '000119312526448357',
+  '0001193125-26-436133',
+  '000119312526436133',
+  '0001652044-26-000084',
+  '000165204426000084',
+  '0001769628-26-000465',
+  '000176962826000465',
+  '0001045810-26-000088',
+  '000104581026000088',
+  'staged-7f5da1f3fb6a672d',
+  'staged-e2523ed83a7c0247',
+  'staged-dcf44b009199d49a',
+  'staged-adfd0a710e5538b2',
+  'staged-39bf33eb27445eee',
+  'staged-98c25c92c7ca82e7',
+  'staged-c135441d25ee1df9',
+];
+
+export function assertNoDisputedG9SecRecords(dataset: MacroGraphDataset): void {
+  const serialized = JSON.stringify({
+    sources: dataset.sources,
+    observations: dataset.observations,
+    relationships: dataset.relationships,
+  });
+  for (const forbidden of DISPUTED_G9_SEC_XBRL_BLOCKLIST) {
+    if (serialized.includes(forbidden)) {
+      throw new Error(
+        `Security/governance violation: disputed or unreviewed SEC record token "${forbidden}" detected in Case 007 promotion payload`,
+      );
+    }
+  }
+}
+
 const SEC_ACCESSION_RE = /^\d{10}-\d{2}-\d{6}$/;
 
 export type Case007RawFilingSource = {
@@ -237,13 +309,13 @@ const CASE_007_CANONICAL_ORGANISATIONS: GraphOrganisation[] = [
     orgId: 'org-spacex',
     legalName: 'Space Exploration Technologies Corp. (SpaceXAI)',
     displayName: 'SpaceX / SpaceXAI',
-    subtype: 'private_company',
+    subtype: 'public_company',
     secCik: '0001181412',
     leiCode: null,
-    ticker: null,
+    ticker: 'SPCX',
     jurisdiction: 'US-TX',
     sectorIds: ['sec-specialist-neoclouds'],
-    aliases: ['SPACE EXPLORATION TECHN CORP', 'SpaceXAI'],
+    aliases: ['SPACE EXPLORATION TECHN CORP', 'SpaceX.AI LLC', 'SpaceXAI'],
   },
   {
     orgId: 'org-intc',
@@ -371,8 +443,8 @@ const ISSUER_CUSIP_TO_ORG_AND_INSTRUMENT: Record<
     secCik: '0001181412',
     slug: 'spacex',
     instrumentId: 'inst-spacex-class-a',
-    instrumentType: 'Class A Common Stock (13F Reported Holding, CUSIP 84615Q103)',
-    ticker: null,
+    instrumentType: 'Class A Common Stock (Nasdaq: SPCX, 13F Reported Holding, CUSIP 84615Q103)',
+    ticker: 'SPCX',
   },
   '458140100': {
     orgId: 'org-intc',
@@ -548,7 +620,7 @@ export function extractNvidia8kLeadershipClaims(
       governanceAction: 'resigned_effective_immediately',
       isInterim: false,
       conditionsSummary:
-        'Form 8-K Item 5.02 (0001045810-26-000082): Jen-Hsun (Jensen) Huang resigned as President, CEO and Board member on 2026-11-11, effective immediately; no disagreement on operations, policies or practices.',
+        'Form 8-K Item 5.02 (0001045810-26-000082): On 2026-11-11, the NVIDIA Board accepted the resignation of Jen-Hsun (Jensen) Huang as President, Chief Executive Officer and member of the Board, effective immediately.',
       bindingObligation: true,
       effectiveFromMs: eventDateMs,
       effectiveToMs: eventEndMs,
@@ -846,9 +918,9 @@ export function extractNvidia13fInformationTable(
     reportingPeriodLabel: 'As of 2026-09-30 (Form 13F-HR Filed 2026-11-16)',
     periodStartMs: Date.parse('2026-07-01T00:00:00.000Z'),
     periodEndMs: periodEndMs,
-    accountingBasis: 'SEC_Form_13F_Fair_Value_8_Positions',
+    accountingBasis: 'SEC_Form_13F_X0202_Exact_USD_Fair_Value_8_Positions',
     metricDefinition:
-      'Total reported Form 13F-HR equity portfolio value ($48,330,717,074 across 8 positions: SpaceX $19.68B, Intel $19.37B, CoreWeave $4.11B, Coherent $2.24B, Synopsys $1.89B, Nokia $738.8M, Nebius $280.8M, Generate Biomedicines $12.5M)',
+      'Total reported Form 13F-HR Section 13(f) US equity holdings fair value as of quarter-end 2026-09-30 (USD 48,330,717,074 exact whole dollars across 8 SOLE-discretion positions: SpaceX $19.68B, Intel $19.37B, CoreWeave $4.11B, Coherent $2.24B, Synopsys $1.89B, Nokia $738.8M, Nebius $280.8M, Generate Biomedicines $12.5M; excludes cash, marketable debt, non-13(f) private stakes, and post-2026-09-30 contingent commitments)',
     observationKind: 'reported',
     publishedAtMs: f13Source.publishedAtMs,
     receivedAtMs: f13Source.receivedAtMs,
@@ -958,7 +1030,7 @@ export function extractAnthropicS1aAnd8a12bClaims(
       periodEndMs: Date.parse('2026-09-30T23:59:59.000Z'),
       accountingBasis: 'S1A2_Undiscounted_Future_Lease_Obligations',
       metricDefinition:
-        'Executed data-center and compute leases not yet commenced as of Sept 30, 2026 ($451.2B undiscounted)',
+        'Estimated future undiscounted lease obligations for executed data-center/compute leases not yet commenced as of Sept 30, 2026 (~$451.2B; per Note 9 p. F-60, some arrangements are subject to pre-commencement termination rights or contingent financing/facility/regulatory conditions)',
       observationKind: 'reported',
       publishedAtMs: s1a2Source.publishedAtMs,
       receivedAtMs: s1a2Source.receivedAtMs,
@@ -1133,8 +1205,8 @@ export function extractAnthropicS1aAnd8a12bClaims(
       currencyCode: 'USD',
       capacityUnit: null,
       capacityQuantity: null,
-      conditionsSummary: `Anthropic Form S-1/A-2 (${s1a2Source.secAccession}): SpaceXAI Arrangements (May-Oct 2026) up to USD ${spacexComputeMatch[1]}B into 2029 for compute powered by NVIDIA GPUs (creates circular capital loop with NVIDIA's $19.68B SpaceX 13F stake).`,
-      bindingObligation: true,
+      conditionsSummary: `Anthropic Form S-1/A-2 (${s1a2Source.secAccession}, p. 179): SpaceXAI Arrangements (May-Oct 2026) with SpaceX.AI LLC up to USD ${spacexComputeMatch[1]}B into 2029 (~$3.1B/mo once all capacity delivered, expected Dec 2026) for compute powered by NVIDIA GPUs; following initial non-cancelable periods ending January 2027 and March 2027, each agreement is cancellable by either party upon 90 days' advance written notice.`,
+      bindingObligation: false,
       effectiveFromMs: Date.parse('2026-05-01T00:00:00.000Z'),
       effectiveToMs: null,
       maturityAtMs: null,
@@ -1326,22 +1398,22 @@ export function runCase007PreEarningsPipeline(options?: {
     ingestedAtMs: nowMs,
   };
 
-  const sources: GraphSourceDocument[] = [
-    ...rawSources.map((s) => ({
-      sourceDocId: s.sourceDocId,
-      title: s.title,
-      url: s.url,
-      kind: s.kind,
-      authority: s.authority,
-      contentSha256: s.contentSha256,
-      publicationBasis: s.publicationBasis,
-      publishedAtMs: s.publishedAtMs,
-      receivedAtMs: s.receivedAtMs,
-      ingestedAtMs: s.ingestedAtMs,
-    })),
-    secondaryDiscoveryDoc,
-  ];
-  const sourcesById = new Map(sources.map((s) => [s.sourceDocId, s]));
+  const primaryGraphSources: GraphSourceDocument[] = rawSources.map((s) => ({
+    sourceDocId: s.sourceDocId,
+    title: s.title,
+    url: s.url,
+    kind: s.kind,
+    authority: s.authority,
+    contentSha256: VERIFIED_SEC_RAW_BYTE_SHA256[s.sourceDocId] ?? s.contentSha256,
+    publicationBasis: s.publicationBasis,
+    publishedAtMs: s.publishedAtMs,
+    receivedAtMs: s.receivedAtMs,
+    ingestedAtMs: s.ingestedAtMs,
+  }));
+  const sourcesById = new Map<string, GraphSourceDocument>([
+    ...primaryGraphSources.map((s) => [s.sourceDocId, s] as const),
+    [secondaryDiscoveryDoc.sourceDocId, secondaryDiscoveryDoc] as const,
+  ]);
 
   // 4. Evaluate candidate relationships + deliberate invalid candidates through governance gates
   const extractedCandidates: MacroRelationship[] = [
@@ -1472,7 +1544,7 @@ export function runCase007PreEarningsPipeline(options?: {
     energyAssets: [],
     projects: [],
     instruments: [...anthropicClaims.instruments, ...nvda13f.instruments],
-    sources,
+    sources: primaryGraphSources,
     observations: [
       ...nvdaQ2Obs,
       nvda13f.portfolioObservation,
@@ -1480,6 +1552,8 @@ export function runCase007PreEarningsPipeline(options?: {
     ],
     relationships: validatedRelationships,
   });
+
+  assertNoDisputedG9SecRecords(dataset);
 
   const { accepted: outboxItems, rejected } = buildOutboxItemsFromDataset(dataset, nowMs, 3);
   for (const rej of rejected) {

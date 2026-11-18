@@ -32,8 +32,10 @@ import {
   loadInitialAcceptanceDataset,
 } from '../lib/graph/query-gateway';
 import {
+  CASE_007_VERIFIED_DEV_DATABASE,
   TypeDbSchemaOrHydrationError,
   assertCanRecreateTypeDbDatabase,
+  assertIsolatedCase007WriteTarget,
   defaultTypeDbConfig,
   describeTypeDbTransport,
   executeReadOnlyTypeQlOnLiveServer,
@@ -47,7 +49,12 @@ import {
   STAGING_TYPEDB_DATABASE,
 } from '../lib/graph/typedb-driver-adapter';
 import { runMacroCase001GraphInvestigations } from '../lib/graph/macro-case-001';
-import { runCase007PreEarningsPipeline } from '../lib/remote-ops/case-007-nvidia-ingestor';
+import {
+  CASE_007_BUNDLE_ID,
+  CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+  assertNoDisputedG9SecRecords,
+  runCase007PreEarningsPipeline,
+} from '../lib/remote-ops/case-007-nvidia-ingestor';
 
 const action: ActionBuilder<DataModel, 'public'> = actionGeneric;
 const internalAction: ActionBuilder<DataModel, 'internal'> = internalActionGeneric;
@@ -1068,11 +1075,24 @@ export const projectPendingOutboxNow = action({
  * every call must present `TYPEDB_BRIDGE_SECRET`, a dedicated secret held only by the application server.
  * With the secret unset the bridge is closed.
  */
+const allowlistedReadDatabaseOverride = v.optional(
+  v.union(
+    v.literal(STAGING_TYPEDB_DATABASE),
+    v.literal(CASE_007_VERIFIED_DEV_DATABASE),
+  ),
+);
+
 export const probeHostedTypeDbCloud = action({
-  args: { bridgeKey: v.optional(v.string()) },
+  args: {
+    bridgeKey: v.optional(v.string()),
+    databaseOverride: allowlistedReadDatabaseOverride,
+  },
   handler: async (_ctx, args) => {
     assertBridgeKey(args.bridgeKey);
-    const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const baseConfig = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const config = args.databaseOverride
+      ? { ...baseConfig, databaseName: args.databaseOverride }
+      : baseConfig;
     const probe = await probeTypeDbServer(config);
     return {
       reachable: probe.reachable && probe.authenticated,
@@ -1115,6 +1135,7 @@ export const executeReadOnlyCloudTypeQl = action({
   args: {
     typeql: v.string(),
     bridgeKey: v.optional(v.string()),
+    databaseOverride: allowlistedReadDatabaseOverride,
   },
   handler: async (_ctx, args) => {
     assertBridgeKey(args.bridgeKey);
@@ -1133,7 +1154,10 @@ export const executeReadOnlyCloudTypeQl = action({
     ) {
       throw new Error('Security violation: only read-only match TypeQL queries are permitted.');
     }
-    const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const baseConfig = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const config = args.databaseOverride
+      ? { ...baseConfig, databaseName: args.databaseOverride }
+      : baseConfig;
     return await executeReadOnlyTypeQlOnLiveServer(trimmed, config);
   },
 });
@@ -1142,10 +1166,14 @@ export const hydrateHostedTypeDbCloud = action({
   args: {
     bridgeKey: v.optional(v.string()),
     callerOwner: v.optional(v.string()),
+    databaseOverride: allowlistedReadDatabaseOverride,
   },
   handler: async (_ctx, args) => {
     assertBridgeKey(args.bridgeKey);
-    const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const baseConfig = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const config = args.databaseOverride
+      ? { ...baseConfig, databaseName: args.databaseOverride }
+      : baseConfig;
     try {
       const res = await hydrateMacroDatasetFromLiveTypeDb(config, {
         callerOwner: args.callerOwner ?? 'public_research',
@@ -1189,6 +1217,7 @@ export const stageAndEnqueueCase007Internal = internalMutation({
       owner: 'public_research',
       nowMs: args.nowMs,
     });
+    assertNoDisputedG9SecRecords(pipeline.dataset);
     const nowMs = args.nowMs ?? pipeline.capturedAtMs;
 
     const existingOutbox = await ctx.db
@@ -1200,6 +1229,7 @@ export const stageAndEnqueueCase007Internal = internalMutation({
     let enqueuedCount = 0;
     let deduplicatedCount = 0;
     const itemSummaries: Array<{
+      outboxId?: ReturnType<typeof v.id<'graphProjectionOutbox'>>['type'];
       relationshipId: string;
       projectionKey: string;
       deduplicated: boolean;
@@ -1239,6 +1269,7 @@ export const stageAndEnqueueCase007Internal = internalMutation({
         if (res.deduplicated) deduplicatedCount += 1;
         else enqueuedCount += 1;
         itemSummaries.push({
+          outboxId: res.outboxId,
           relationshipId: rel.relationshipId,
           projectionKey: res.projectionKey,
           deduplicated: res.deduplicated,
@@ -1262,6 +1293,213 @@ export const stageAndEnqueueCase007Internal = internalMutation({
         ? existingOutbox.length
         : existingOutbox.length + enqueuedCount,
       itemSummaries,
+      executionAuthority: 'none' as const,
+    };
+  },
+});
+
+/**
+ * Controlled Case 007 promotion into the isolated development TypeDB database `aci_case007_verified_dev`.
+ * - Explicitly confirms target database === `aci_case007_verified_dev` before any write.
+ * - Never deletes or mutates `aci_macro_intelligence_staging` (verifies all 23 existing relationships before & after).
+ * - Never touches `aci_macro_intelligence_prod` or the 7 disputed G9 SEC/XBRL records.
+ */
+export const promoteCase007ToVerifiedDevCloud = internalAction({
+  args: {
+    expectedTargetDatabase: v.literal(CASE_007_VERIFIED_DEV_DATABASE),
+    dryRun: v.optional(v.boolean()),
+    owner: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun ?? true;
+    assertIsolatedCase007WriteTarget(args.expectedTargetDatabase);
+
+    const owner = requireExplicitOwner(args.owner);
+    const baseConfig = defaultTypeDbConfig(CASE_007_VERIFIED_DEV_DATABASE);
+    const targetConfig = {
+      ...baseConfig,
+      databaseName: CASE_007_VERIFIED_DEV_DATABASE,
+    };
+    const stagingConfig = {
+      ...baseConfig,
+      databaseName: STAGING_TYPEDB_DATABASE,
+    };
+    assertIsolatedCase007WriteTarget(targetConfig.databaseName);
+
+    const pipeline = runCase007PreEarningsPipeline({
+      owner: 'public_research',
+      nowMs: CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+    });
+    if (
+      pipeline.bundleId !== CASE_007_BUNDLE_ID ||
+      pipeline.capturedAtMs !== CASE_007_PRE_EARNINGS_CAPTURED_AT_MS
+    ) {
+      throw new Error('Immutable pre-earnings Case 007 snapshot boundary violated');
+    }
+    assertNoDisputedG9SecRecords(pipeline.dataset);
+
+    const [
+      targetProbeBefore,
+      stagingCountsBefore,
+      stagingDetailsBefore,
+      targetCountsBefore,
+    ] = await Promise.all([
+      probeTypeDbServer(targetConfig),
+      inspectLiveTypeDbGraphCounts(stagingConfig),
+      inspectLiveTypeDbReconciliationDetails(stagingConfig),
+      inspectLiveTypeDbGraphCounts(targetConfig),
+    ]);
+
+    if (!targetProbeBefore.reachable || !targetProbeBefore.authenticated) {
+      return {
+        ok: false,
+        dryRun,
+        stage: 'typedb_unreachable_or_unauthenticated',
+        targetDatabaseName: targetConfig.databaseName,
+        targetProbeBefore,
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    if (dryRun) {
+      const outboxDryRun = await ctx.runMutation(
+        graphMRef('stageAndEnqueueCase007Internal'),
+        { owner, dryRun: true, nowMs: CASE_007_PRE_EARNINGS_CAPTURED_AT_MS },
+      );
+      return {
+        ok: true,
+        dryRun: true,
+        targetDatabaseName: targetConfig.databaseName,
+        clusterDatabasesBefore: stagingDetailsBefore.clusterDatabases,
+        targetExistedBefore: targetProbeBefore.databaseExists,
+        targetCountsBefore: targetCountsBefore.counts,
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingRelationshipCountBefore: stagingDetailsBefore.relationshipIds.length,
+        outboxDryRun,
+        validatedSourceCount: pipeline.dataset.sources.length,
+        validatedObservationCount: pipeline.dataset.observations.length,
+        validatedRelationshipCount: pipeline.dataset.relationships.length,
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    // Re-confirm target explicitly right before TypeDB creation/projection write
+    assertIsolatedCase007WriteTarget(targetConfig.databaseName);
+    if (
+      targetConfig.databaseName === STAGING_TYPEDB_DATABASE ||
+      targetConfig.databaseName === PRODUCTION_TYPEDB_DATABASE
+    ) {
+      throw new Error('Refused write to protected TypeDB database');
+    }
+
+    let projectionResult;
+    try {
+      projectionResult = await projectDatasetIntoLiveTypeDb(pipeline.dataset, {
+        config: targetConfig,
+        recreateDatabase: false,
+      });
+    } catch (err) {
+      const [stagingCountsOnErr, stagingDetailsOnErr] = await Promise.all([
+        inspectLiveTypeDbGraphCounts(stagingConfig),
+        inspectLiveTypeDbReconciliationDetails(stagingConfig),
+      ]);
+      return {
+        ok: false,
+        dryRun: false,
+        stage: 'create_database_or_projection_failed',
+        targetDatabaseName: targetConfig.databaseName,
+        error: err instanceof Error ? err.message : String(err),
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingCountsAfter: stagingCountsOnErr.counts,
+        stagingRelationshipsIntact:
+          JSON.stringify(stagingDetailsBefore.relationshipIds) ===
+          JSON.stringify(stagingDetailsOnErr.relationshipIds),
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    const [
+      targetCountsAfter,
+      targetDetailsAfter,
+      stagingCountsAfter,
+      stagingDetailsAfter,
+    ] = await Promise.all([
+      inspectLiveTypeDbGraphCounts(targetConfig),
+      inspectLiveTypeDbReconciliationDetails(targetConfig),
+      inspectLiveTypeDbGraphCounts(stagingConfig),
+      inspectLiveTypeDbReconciliationDetails(stagingConfig),
+    ]);
+
+    const targetRelSet = new Set(targetDetailsAfter.relationshipIds);
+    const all20PresentInTarget = pipeline.dataset.relationships.every((r) =>
+      targetRelSet.has(r.relationshipId),
+    );
+
+    const outboxEnqueue = (await ctx.runMutation(
+      graphMRef('stageAndEnqueueCase007Internal'),
+      { owner, dryRun: false, nowMs: CASE_007_PRE_EARNINGS_CAPTURED_AT_MS },
+    )) as {
+      enqueuedCount: number;
+      deduplicatedCount: number;
+      beforeOutboxRowCount: number;
+      afterOutboxRowCount: number;
+      itemSummaries: Array<{
+        outboxId?: ReturnType<typeof v.id<'graphProjectionOutbox'>>['type'];
+        relationshipId: string;
+        projectionKey: string;
+        deduplicated: boolean;
+      }>;
+    };
+
+    let markedProjectedCount = 0;
+    if (all20PresentInTarget) {
+      for (const item of outboxEnqueue.itemSummaries) {
+        if (item.outboxId && targetRelSet.has(item.relationshipId)) {
+          await ctx.runMutation(graphMRef('recordProjectionOutcomeInternal'), {
+            outboxId: item.outboxId,
+            succeeded: true,
+          });
+          markedProjectedCount += 1;
+        }
+      }
+    }
+
+    const stagingRelationshipsIntact =
+      stagingDetailsBefore.relationshipIds.length === 23 &&
+      stagingDetailsAfter.relationshipIds.length === 23 &&
+      JSON.stringify(stagingDetailsBefore.relationshipIds) ===
+        JSON.stringify(stagingDetailsAfter.relationshipIds) &&
+      JSON.stringify(stagingCountsBefore.counts) ===
+        JSON.stringify(stagingCountsAfter.counts);
+
+    return {
+      ok:
+        all20PresentInTarget &&
+        projectionResult.report.outboxDeadLetterCount === 0 &&
+        stagingRelationshipsIntact,
+      dryRun: false,
+      targetDatabaseName: targetConfig.databaseName,
+      tlsEnabled: describeTypeDbTransport(targetConfig).tlsEnabled,
+      clusterDatabasesAfter: targetDetailsAfter.clusterDatabases,
+      targetExistedBefore: targetProbeBefore.databaseExists,
+      targetCountsBefore: targetCountsBefore.counts,
+      targetCountsAfter: targetCountsAfter.counts,
+      targetRelationshipIdsAfter: targetDetailsAfter.relationshipIds,
+      all20PresentInTarget,
+      projectionReport: projectionResult.report,
+      outboxEnqueue: {
+        beforeOutboxRowCount: outboxEnqueue.beforeOutboxRowCount,
+        afterOutboxRowCount: outboxEnqueue.afterOutboxRowCount,
+        enqueuedCount: outboxEnqueue.enqueuedCount,
+        deduplicatedCount: outboxEnqueue.deduplicatedCount,
+        markedProjectedCount,
+      },
+      stagingIsolationProof: {
+        stagingDatabaseName: STAGING_TYPEDB_DATABASE,
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingCountsAfter: stagingCountsAfter.counts,
+        stagingRelationshipsIntact,
+      },
       executionAuthority: 'none' as const,
     };
   },

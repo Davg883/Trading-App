@@ -317,19 +317,23 @@ export const askEvidenceLockedQuestion = action({
       throw new Error('Rate limit exceeded: too many research chat turns in the last minute');
     }
 
-    // Merge base acceptance dataset with any additional projected `public_research` relationships
-    const baseDataset = loadInitialAcceptanceDataset();
-    const mergedRelMap = new Map<string, MacroRelationship>();
-    for (const r of baseDataset.relationships) {
-      mergedRelMap.set(r.relationshipId, r);
+    const preferLive = Boolean(process.env.TYPEDB_HTTP_ADDRESS);
+    // Static acceptance dataset fallback is constructed ONLY when live TypeDB is not configured
+    let mergedDataset: MacroGraphDataset | undefined;
+    if (!preferLive) {
+      const baseDataset = loadInitialAcceptanceDataset();
+      const mergedRelMap = new Map<string, MacroRelationship>();
+      for (const r of baseDataset.relationships) {
+        mergedRelMap.set(r.relationshipId, r);
+      }
+      for (const r of retrievalCtx.publicProjectedRelationships) {
+        mergedRelMap.set(r.relationshipId, r);
+      }
+      mergedDataset = {
+        ...baseDataset,
+        relationships: [...mergedRelMap.values()],
+      };
     }
-    for (const r of retrievalCtx.publicProjectedRelationships) {
-      mergedRelMap.set(r.relationshipId, r);
-    }
-    const mergedDataset: MacroGraphDataset = {
-      ...baseDataset,
-      relationships: [...mergedRelMap.values()],
-    };
 
     const temporalBasis: TemporalBasis = args.temporalBasis ?? 'receipt';
     const bundle = await retrieveClosedEvidenceBundle({
@@ -337,10 +341,10 @@ export const askEvidenceLockedQuestion = action({
       requesterId: owner,
       historicalCutoffMs: args.historicalCutoffMs,
       temporalBasis,
-      dataset: mergedDataset,
+      ...(mergedDataset ? { dataset: mergedDataset } : {}),
       projectionCheckpoint: retrievalCtx.checkpoint ?? undefined,
       graphDatabaseName: process.env.TYPEDB_DATABASE ?? 'aci_macro_intelligence_prod',
-      preferLiveTypeDb: Boolean(process.env.TYPEDB_HTTP_ADDRESS),
+      preferLiveTypeDb: preferLive,
     });
 
     // Pre-merge risk H2: reserve paid-inference budget atomically before any possible provider call. If it

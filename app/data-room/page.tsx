@@ -136,7 +136,7 @@ export default async function DataRoomPage({
         distribution: probe.distribution,
         version: probe.version,
         latencyMs: probe.latencyMs,
-        tlsEnabled: describeTypeDbTransport().tlsEnabled,
+        tlsEnabled: probe.tlsEnabled ?? describeTypeDbTransport().tlsEnabled,
       }}
     />
   );

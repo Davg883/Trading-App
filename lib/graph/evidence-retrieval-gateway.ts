@@ -24,6 +24,10 @@ import {
   executeAllowlistedGraphQuery,
   loadInitialAcceptanceDataset,
 } from './query-gateway';
+import {
+  hydrateMacroDatasetFromLiveTypeDb,
+  probeTypeDbServer,
+} from './typedb-driver-adapter';
 
 /**
  * Phase G.4 (Phases B, C & G) — Closed-Evidence Retrieval Gateway.
@@ -305,6 +309,8 @@ function matchProjectId(q: string, dataset: MacroGraphDataset): string | null {
 function resolveEntityLabel(entityId: string, dataset: MacroGraphDataset): string {
   const org = dataset.organisations.find((o) => o.orgId === entityId);
   if (org) return org.displayName;
+  const exec = (dataset.executives ?? []).find((e) => e.personId === entityId);
+  if (exec) return exec.displayName;
   const proj = dataset.projects.find((p) => p.projectId === entityId);
   if (proj) return proj.projectName;
   const sec = dataset.sectors.find((s) => s.sectorId === entityId);
@@ -371,8 +377,45 @@ export async function retrieveClosedEvidenceBundle(
   options: RetrieveEvidenceBundleOptions,
 ): Promise<EvidenceBundleV1> {
   const nowMs = options.nowMs ?? Date.now();
-  const baseDataset = options.dataset ?? loadInitialAcceptanceDataset();
+  const preferLive =
+    options.simulateTypeDbOutage === true
+      ? false
+      : (options.preferLiveTypeDb ??
+        Boolean(
+          process.env.TYPEDB_HTTP_ADDRESS ||
+            (process.env.NEXT_PUBLIC_CONVEX_URL && process.env.TYPEDB_BRIDGE_SECRET),
+        ));
+
+  let liveHydratedDataset: MacroGraphDataset | null = null;
+  let liveResolvedDatabaseName: string | null = null;
+  if (preferLive && !options.dataset) {
+    try {
+      const [probe, hydrated] = await Promise.all([
+        probeTypeDbServer(),
+        hydrateMacroDatasetFromLiveTypeDb(undefined, {
+          callerOwner: 'public_research',
+        }),
+      ]);
+      if (hydrated.ok && hydrated.dataset) {
+        liveHydratedDataset = hydrated.dataset;
+        if (probe.reachable && probe.databaseName) {
+          liveResolvedDatabaseName = probe.databaseName;
+        }
+      }
+    } catch {
+      // Fall back cleanly if live TypeDB is unavailable and not strictly required
+    }
+  }
+
+  const baseDataset = liveHydratedDataset ?? options.dataset ?? loadInitialAcceptanceDataset();
   const temporalBasis: TemporalBasis = options.temporalBasis ?? 'receipt';
+  const defaultDatasetCutoffMs =
+    liveHydratedDataset && liveHydratedDataset.relationships.length > 0
+      ? Math.max(
+          1794146400000,
+          ...liveHydratedDataset.relationships.map((r) => r.receivedAtMs),
+        )
+      : 1794146400000;
 
   // Detect explicit date in question (e.g., "31 July 2026") if caller didn't override cutoff,
   // or take the stricter of the caller's cutoff and the date asked in the question.
@@ -380,13 +423,9 @@ export async function retrieveClosedEvidenceBundle(
   const historicalCutoffMs =
     questionCutoffMs !== null
       ? Math.min(options.historicalCutoffMs ?? questionCutoffMs, questionCutoffMs)
-      : (options.historicalCutoffMs ?? 1794146400000);
+      : (options.historicalCutoffMs ?? defaultDatasetCutoffMs);
 
   const intent = classifyResearchQuestionIntent(options.question, baseDataset);
-  const preferLive =
-    options.simulateTypeDbOutage === true
-      ? false
-      : (options.preferLiveTypeDb ?? Boolean(process.env.TYPEDB_HTTP_ADDRESS));
 
   // Execute the allowlisted TypeDB query via the existing gateway
   const gatewayRes = await executeAllowlistedGraphQuery(
@@ -491,12 +530,39 @@ export async function retrieveClosedEvidenceBundle(
       parentCommitmentEnvelopeId: rel.economicGroupId ?? null,
     }));
 
+  const hasMacroCase001InDataset = baseDataset.relationships.some(
+    (r) => r.relationshipId === 'rel-anthropic-s1a-amzn-compute-r1',
+  );
+  const candidateQuantitativeClaims = hasMacroCase001InDataset
+    ? MACRO_CASE_001_CLAIMS
+    : baseDataset.observations.map((obs) => ({
+        claimId: obs.observationId,
+        title: `${resolveEntityLabel(obs.subjectOrgId, baseDataset)} — ${obs.metricName} (${obs.reportingPeriodLabel})`,
+        classification:
+          obs.observationKind === 'forecast'
+            ? ('proposed' as const)
+            : ('observed' as const),
+        commitmentBucket: null,
+        subjectEntityId: obs.subjectOrgId,
+        counterpartyEntityIds: obs.counterpartyOrgId ? [obs.counterpartyOrgId] : [],
+        relationshipId: null,
+        parentCommitmentEnvelopeId: null,
+        quantitativeValue: obs.metricValue,
+        unit: obs.metricUnit === 'currency' ? ('USD' as const) : null,
+        asOfDate: new Date(obs.periodEndMs).toISOString().slice(0, 10),
+        publishedAtMs: obs.publishedAtMs,
+        receivedAtMs: obs.receivedAtMs,
+        assumptionsAndBasis: `${obs.accountingBasis}: ${obs.metricDefinition}`.slice(0, 600),
+        sourceDocIds: obs.sourceDocIds,
+        promotedToConfirmedGraph: obs.observationKind === 'reported',
+      }));
+
   // Filter quantitative claims by temporal eligibility and quarantine any adversarial text
   const eligibleClaims =
     intent.intentCategory === 'out_of_scope_or_unsupported' ||
     intent.intentCategory === 'security_blocked'
       ? []
-      : MACRO_CASE_001_CLAIMS.filter((claim) => {
+      : candidateQuantitativeClaims.filter((claim) => {
           if (
             !isTemporalEligible(
               claim.publishedAtMs,
@@ -790,6 +856,7 @@ export async function retrieveClosedEvidenceBundle(
     }));
 
   const graphDatabaseName =
+    liveResolvedDatabaseName ??
     options.graphDatabaseName ??
     process.env.TYPEDB_DATABASE ??
     'aci_macro_intelligence_prod';
