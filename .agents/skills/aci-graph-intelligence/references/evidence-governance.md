@@ -1,6 +1,6 @@
 # ACI Evidence Governance, SEC Ingestion, Chronology & Quarantine Standards
 
-**Skill Version:** `1.1.2`  
+**Skill Version:** `1.1.3`  
 **Authoritative Code Sources:**
 - Canonical Identity & Supersession Governance: `lib/graph/identity-governance.ts`
 - General-Purpose SEC Discovery & Extractor: `lib/remote-ops/sec-filing-graph-extractor.ts` & `lib/remote-ops/sec-xbrl-fact-selector.ts`
@@ -97,10 +97,11 @@ Implemented in `lib/remote-ops/sec-filing-graph-extractor.ts` and `lib/remote-op
 2. **Non-Destructive SEC/XBRL Quarantine (`DEV_VERIFIED` on `dev:prestigious-dragon-8` at `3222376`; Production Execution Pending Separate Authorisation):**
    - Originals are **never deleted** (`rowsDeletedCount === 0`).
    - `operations:quarantineStagedEvidenceInternal` supports `dryRun: true` and `dryRun: false`: executed and independently read-back verified on `dev:prestigious-dragon-8` (`7` staging items + `8` `evidence` rows quarantined, `7` `evidenceQuarantines` ledger rows, `0` rows deleted); **not yet executed on `prod:benevolent-magpie-921`** (`NO-GO` pending separate Production authorisation).
-   - Patches `quarantinedAt` and `quarantineId` onto **both** `researchStagingItems` (`7` items) and **all** matching `evidence` rows (`8` rows) — including **orphaned forward-frozen `evidence` rows** created by `storeForwardResearchEventInternal` outside `promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` quarantined in Dev; `ms71z2vm0nhq2850kvr3pym65s8hr3wb` still active in Prod).
-   - Records affected `morningBriefings`, `forwardResearchEvents`, `experiments`, and `forecasts` on the `evidenceQuarantines` ledger and withholds/flags invalidated facts and studies in `operations:overview` and `research:dashboard`.
+   - Patches `quarantinedAt` and `quarantineId` onto **both** `researchStagingItems` (`7` items in Dev; `11` items in RC002.1 Prod scope) and **all** matching `evidence` rows (`8` rows in Dev; `10` rows in RC002.1 Prod scope) — including **orphaned forward-frozen `evidence` rows** created by `storeForwardResearchEventInternal` outside `promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` quarantined in Dev; `ms71z2vm0nhq2850kvr3pym65s8hr3wb` still active in Prod).
+   - Records affected `morningBriefings`, `forwardResearchEvents`, `experiments`, and `forecasts` on the `evidenceQuarantines` ledger and withholds/flags invalidated facts and studies in `operations:overview`, `operations:getMorningBriefing`, `research:dashboard`, and `research:getStudyRecord` (`SAFE_WITHHELD_PENDING_QUARANTINE` enforced on read prior to ledger execution, `LOCALLY_VERIFIED` in `tests/rc0021-hardening-and-11item-quarantine.test.ts`).
 3. **Claim-Level vs Accession-Level Quarantine:**
    - **NVIDIA `0001045810-26-000078` Policy (`DEV_VERIFIED` at `3222376`):** `evaluateNvidia000078ClaimPolicy` blocks XBRL `capital_expenditures` claims (`$0.24B` / `$1.07B`) on Form 8-K `0001045810-26-000078` while permitting SHA-256-verified (`17fe107f9113be5c57673d0a591ea49e87a667ea357de3959eeb91142c49280c`) Item `8.01` pending M&A relationship evidence strictly as `proposed` / `contingent_signed` (`principalAmount: null`, `bindingObligation: false`).
+   - **NVIDIA `0001045810-26-000082` & CoreWeave `0001769628-26-000465` Claim-Level Policies (`LOCALLY_VERIFIED` in RC002.1):** `evaluateNvidia000082ClaimPolicy` blocks XBRL `capital_expenditures` (`$0.24B` Q2 2020) on Form 8-K `0001045810-26-000082` while permitting SHA-256-verified Item `5.02` CEO transition disclosures (`doc-nvda-8k-20261112`), and `rc0021-invalid-crwv-000465-10q-comparative-2025-capex` matches only the `$6.25B` prior-year comparative claim while preserving valid `$23.56B Q3 2026 (YTD)` disclosures on the same accession.
    - **General Multi-Accession Claim-Level Table (`PLANNED`):** A generic Convex table parameterising per-claim quarantine predicates across arbitrary future accessions without code-defined rules is not yet implemented.
 
 ---

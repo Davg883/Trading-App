@@ -120,6 +120,8 @@ export type RegisteredForwardResearchEvent={
  /** RC002 B-003: non-destructive invalidation flag when frozen input evidence was later quarantined. */
  invalidatedByQuarantine?:boolean;
  quarantineReasons?:string[];
+ /** RC002.1: distinguishes formal ledger quarantine from fail-closed pre-quarantine withholding. */
+ remediationState?:'CLEAN'|'QUARANTINED_LEDGER_COMPLETE'|'SAFE_WITHHELD_PENDING_QUARANTINE';
 };
 export type ForwardResearchEventRecord=RegisteredForwardResearchEvent;
 

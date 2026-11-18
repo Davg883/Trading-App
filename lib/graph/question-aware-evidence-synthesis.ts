@@ -237,7 +237,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     );
     if (!hfRel || hfRel.principalAmount === null) {
       undisclosedFacetNotes.push(
-        'Confirmed purchase price for the pending Hugging Face acquisition is absent from the approved graph (rel-case007b-nvda-huggingface-pending-acq-r1 is proposed/contingent_signed with principalAmount: null while accession 0001045810-26-000078 remains under claim-level quarantine review).',
+        'Confirmed Hugging Face acquisition price is undisclosed (proposed/contingent_signed with principalAmount: null; 0001045810-26-000078 under claim-level quarantine).',
       );
     }
   }
@@ -682,6 +682,11 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     const sbGuarRel = findRel('rel-case007b-nvda-sbenergy-openai-ports-guarantee-r1');
     const ex991Src = sourceById.get('doc-nvda-q3fy27-ex991-20261117');
 
+    const nvdaPpStr = anthropicPp?.principalAmount ? formatUsdCompact(anthropicPp.principalAmount) : '$10.0B';
+    const googlPpStr = googlPp?.principalAmount ? formatUsdCompact(googlPp.principalAmount) : '$10.0B';
+    const amdPpStr = amdPp?.principalAmount ? formatUsdCompact(amdPp.principalAmount) : '$2.5B';
+    const msftPpStr = msftPp?.principalAmount ? formatUsdCompact(msftPp.principalAmount) : '$1.0B';
+
     if (anthropicHw || anthropicPp) {
       const coRels = [
         ...(anthropicHw ? [anthropicHw.relationshipId] : []),
@@ -692,7 +697,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
       ];
       pushClaim({
         claimId: 'sc-cp-anthropic-co-investors-and-hardware',
-        statement: `[Anthropic & Shared Co-Investors — Confirmed Collaboration vs Contingent Placement] NVIDIA maintains a confirmed Grace Blackwell & Vera Rubin cloud/engineering collaboration with Anthropic (${anthropicHw?.relationshipId ?? 'r2'}) while sharing Anthropic's IPO-contingent Class N private-placement syndicate (proposed/contingent_signed, not completed ownership) alongside NVIDIA (~$10.0B), Microsoft (~$5.0B), Alphabet, and AMD (S-1/A-2 0001628280-26-072484).`,
+        statement: `[Anthropic & Shared Co-Investors — Confirmed Collaboration vs Contingent Placement] NVIDIA maintains a confirmed Grace Blackwell & Vera Rubin cloud/engineering collaboration with Anthropic (${anthropicHw?.relationshipId ?? 'r2'}) while sharing Anthropic's $26.0B IPO-contingent Class N private-placement syndicate (proposed/contingent_signed, not completed ownership) alongside NVIDIA (~${nvdaPpStr}), Alphabet (~${googlPpStr}), AMD (~${amdPpStr}), and Microsoft (~${msftPpStr}) (S-1/A-2 0001628280-26-072484).`,
         distinction: anthropicPp ? 'reported_unverified' : 'source_fact',
         evidenceIds: [
           ...(anthropicHw ? anthropicHw.sourceDocIds : []),
@@ -739,7 +744,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
       ];
       pushClaim({
         claimId: 'sc-cp-hyperscalers-msft-googl-orcl',
-        statement: `[Hyperscalers — Microsoft, Alphabet & Oracle] Q3 FY27 Ex. 99.1 confirms Vera Rubin NVL72 production racks running at Microsoft Azure, Google Cloud (A5X general availability), and Oracle Cloud Infrastructure (NVL72 & Vera CPU GA), while Microsoft ($5.0B) and Alphabet co-participate with NVIDIA ($10.0B) in Anthropic's IPO-contingent Class N syndicate.`,
+        statement: `[Hyperscalers — Microsoft, Alphabet & Oracle] Q3 FY27 Ex. 99.1 confirms Vera Rubin NVL72 production racks running at Microsoft Azure, Google Cloud (A5X general availability), and Oracle Cloud Infrastructure (NVL72 & Vera CPU GA), while Microsoft (~${msftPpStr}) and Alphabet (~${googlPpStr}) co-participate with NVIDIA (~${nvdaPpStr}) in Anthropic's IPO-contingent Class N syndicate.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(ex991Src ? [ex991Src.docId] : []),
@@ -779,7 +784,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     }
 
     tldrBullets.push(
-      'Shared Frontier Syndicate (Anthropic S-1/A-2): NVIDIA (~$10.0B), Microsoft (~$5.0B), Alphabet, and AMD share IPO-contingent Class N placements (proposed, not completed ownership) alongside NVIDIA’s confirmed Rubin cloud partnership (r2).',
+      `Shared Frontier Syndicate (Anthropic S-1/A-2): NVIDIA (~${nvdaPpStr}), Alphabet (~${googlPpStr}), AMD (~${amdPpStr}), and Microsoft (~${msftPpStr}) share IPO-contingent Class N placements (proposed, not completed ownership) alongside NVIDIA’s confirmed Rubin cloud partnership (r2).`,
     );
     tldrBullets.push(
       'Dual Equity + Compute Neoclouds & Hyperscalers: CoreWeave ($4.11B 13F + Rubin racks), Nebius (9.3% 13F+13G warrant stake + Rubin racks), plus confirmed Vera Rubin deployments at Microsoft Azure, Google Cloud (A5X), and Oracle OCI.',

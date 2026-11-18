@@ -343,6 +343,8 @@ export function evaluateCollectionHealth(input:{
  schedulerEnv?:'remote'|'local'|'disabled'|'unset';
  /** Sprint G9.2: whether any external (non-SEC) financial-news collector is wired. None is today. */
  externalNewsCollectorImplemented?:boolean;
+ /** RC002.1: count of unquarantined invalid SEC/XBRL staging items withheld fail-closed on read before ledger execution. */
+ pendingQuarantineCount?:number;
  jobs:Array<{
   jobKey:string;
   name?:string;
@@ -388,6 +390,17 @@ export function evaluateCollectionHealth(input:{
    title:'Remote operations paused centrally.',
    detail:'Scheduled research and deterministic collection are centrally disabled.',
    href:'#agent-operations',
+  });
+ }
+
+ if((input.pendingQuarantineCount??0)>0){
+  alerts.push({
+   id:'ops-safe-withheld-pending-quarantine',
+   severity:'alert',
+   providerOrJob:'evidence_integrity',
+   title:'SAFE_WITHHELD_PENDING_QUARANTINE: Contaminated SEC/XBRL claims withheld automatically.',
+   detail:`${input.pendingQuarantineCount} invalid SEC/XBRL staging record(s) have not yet been written to the evidenceQuarantines ledger; affected facts, briefings, and downstream studies are automatically withheld on read while unaffected verified observations remain accessible.`,
+   href:'#morning-brief',
   });
  }
 

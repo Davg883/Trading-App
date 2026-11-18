@@ -53,9 +53,14 @@ export function MorningBriefPanel({
        Its content is shown only to the authorised research owner.
       </p>
      )}
+     {briefing.remediationState==='SAFE_WITHHELD_PENDING_QUARANTINE'&&(
+      <p className="cc-note" data-testid="brief-safe-withheld-pending-quarantine">
+       <strong>SAFE_WITHHELD_PENDING_QUARANTINE:</strong> Unquarantined invalid SEC/XBRL disclosures were detected and automatically withheld on read pending formal ledger quarantine; unaffected primary-source facts remain displayed.
+      </p>
+     )}
      {briefing.withheldFacts&&briefing.withheldFacts.length>0&&(
       <p className="cc-note" data-testid="brief-withheld-facts">
-       {briefing.withheldFacts.length} confirmed fact(s) in this stored briefing were later quarantined and are withheld:{' '}
+       {briefing.withheldFacts.length} confirmed fact(s) in this stored briefing were {briefing.remediationState==='SAFE_WITHHELD_PENDING_QUARANTINE'?'withheld pending formal quarantine':'later quarantined and are withheld'}:{' '}
        {briefing.withheldFacts.map(w=><span key={w.id}><code>{w.id}</code> ({w.reason.split(':')[0]}) </span>)}
       </p>
      )}

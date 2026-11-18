@@ -103,6 +103,12 @@ http.route({
   if(!constantTimeBearerMatch(request.headers.get('authorization'),token)){
    return Response.json({error:{code:'unauthorized_staging',message:'Valid research-staging machine token required.'}},{status:401,headers});
   }
+  if((process.env.RESEARCH_SCHEDULER_ENV??'').trim()==='disabled'){
+   return Response.json({
+    error:{code:'scheduler_env_disabled',message:'Direct HTTP research staging is blocked while RESEARCH_SCHEDULER_ENV=disabled.'},
+    executionAuthority:'none',
+   },{status:503,headers});
+  }
   const rawText=await request.text();
   if(new TextEncoder().encode(rawText).length>MAX_STAGING_PAYLOAD_BYTES){
    return Response.json({error:{code:'invalid_request',message:'Payload exceeds 64 KB limit.'}},{status:400,headers});
@@ -165,6 +171,12 @@ http.route({
   }
   if(hasForbiddenKeys(body)){
    return Response.json({error:{code:'forbidden_capability',message:'Forbidden operational key in payload.'}},{status:403,headers});
+  }
+  if((process.env.RESEARCH_SCHEDULER_ENV??'').trim()==='disabled'&&body.forceOnDemand===true){
+   return Response.json({
+    error:{code:'scheduler_env_disabled',message:'HTTP forceOnDemand execution is blocked while RESEARCH_SCHEDULER_ENV=disabled.'},
+    executionAuthority:'none',
+   },{status:409,headers});
   }
   const res=await ctx.runAction(aRef('runScheduledCloudCycle'),{
    environment:body.environment??'remote',

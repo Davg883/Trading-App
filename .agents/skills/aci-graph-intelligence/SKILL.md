@@ -9,10 +9,10 @@ description: >-
   testing, or auditing any graph, SEC/XBRL ingestion, staging/quarantine,
   /data-room, Evidence Chat, or NVIDIA/issuer intelligence workflow.
 metadata:
-  version: "1.1.2"
+  version: "1.1.3"
   schemaVersion: "macro-intelligence-graph-3.14-v1"
   codeBaselineSha: "3222376"
-  convexFingerprintSha256: "85f665a324349391b2c582504a02da3af0a55f1878d8236f6c49d8ddcc067875"
+  convexFingerprintSha256: "b540bd3949d0d02afc8367a7e26fb4c4ffef22d6977a1d3b3402fca4f0126dcf"
   lastReviewedUtc: "2026-11-18"
   pathPatterns:
     - "data/graph/**"
@@ -28,7 +28,7 @@ metadata:
     - "worker/remote_research.py"
 ---
 
-# ACI Graph Intelligence Development Skill (`v1.1.2`)
+# ACI Graph Intelligence Development Skill (`v1.1.3`)
 
 This skill governs the end-to-end ACI relationship and financial intelligence pipeline:
 

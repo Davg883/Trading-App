@@ -501,7 +501,7 @@ describe('RC002 Workstream B — SEC/XBRL Quarantine, Orphan Evidence & Study In
   });
 
   it('enforces claim-level quarantine on Form 8-K 0001045810-26-000078: blocks XBRL capex and completed-ownership claims while allowing verified Item 8.01 pending M&A', () => {
-    expect(KNOWN_INVALID_SEC_XBRL_RULES).toHaveLength(7);
+    expect(KNOWN_INVALID_SEC_XBRL_RULES).toHaveLength(11);
 
     // 1. Disputed XBRL capex extraction on 0001045810-26-000078 remains permanently blocked
     const xbrlVerdict = evaluateSecClaimQuarantine({

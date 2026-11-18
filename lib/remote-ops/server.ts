@@ -269,6 +269,15 @@ export async function submitResearchStaging(request:Request){
   if(!constantTimeBearerMatch(request.headers.get('authorization'),token)){
    throw new RemoteOpsError('unauthorized_staging',401);
   }
+  if((process.env.RESEARCH_SCHEDULER_ENV??'').trim()==='disabled'){
+   return Response.json(
+    {
+     error:{code:'scheduler_env_disabled',message:'Direct HTTP research staging is blocked while RESEARCH_SCHEDULER_ENV=disabled.'},
+     executionAuthority:'none',
+    },
+    {status:503,headers},
+   );
+  }
   const rawBody=await boundedJsonBody(request,MAX_STAGING_PAYLOAD_BYTES);
   const parsed=stagedSubmissionRequestSchema.parse(rawBody);
   const client=stagingConvexClient();
@@ -304,6 +313,24 @@ export async function runScheduledOperations(request:Request){
   }
   const rawBody=await boundedJsonBody(request,MAX_SCHEDULER_PAYLOAD_BYTES);
   const input=scheduledRunSchema.parse(rawBody);
+  if((process.env.RESEARCH_SCHEDULER_ENV??'').trim()==='disabled'){
+   if(input.forceOnDemand===true){
+    return Response.json(
+     {
+      error:{code:'scheduler_env_disabled',message:'HTTP forceOnDemand execution is blocked while RESEARCH_SCHEDULER_ENV=disabled.'},
+      executionAuthority:'none',
+     },
+     {status:409,headers},
+    );
+   }
+   return jsonSuccess({
+    executedAt:Date.now(),
+    environment:'disabled' as const,
+    results:[],
+    skippedReason:'scheduler_env_disabled_to_prevent_duplicate_dev_prod_collection',
+    executionAuthority:'none' as const,
+   });
+  }
   const client=stagingConvexClient();
   const targetJobs=input.jobs??DEFAULT_RESEARCH_JOBS.map(d=>d.jobKey);
   const now=Date.now();

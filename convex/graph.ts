@@ -1861,7 +1861,7 @@ export const promoteCase007BToVerifiedDevCloud = internalAction({
     const all30PresentInTarget =
       pipeline.dataset.relationships.length === 30 &&
       pipeline.dataset.relationships.every((r) => targetRelSet.has(r.relationshipId)) &&
-      (targetCountsAfter.counts?.observations ?? 0) === 21 &&
+      (targetCountsAfter.counts?.observations ?? 0) === pipeline.dataset.observations.length &&
       (targetCountsAfter.counts?.sources ?? 0) === 16;
 
     const outboxEnqueue = (await ctx.runMutation(
