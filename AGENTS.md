@@ -30,7 +30,7 @@ AI Capital Intelligence (`https://capital.aiguides.co.uk`) is an evidence-locked
 
 Before modifying any code, data fixture, Convex function, API route, or UI view touching SEC ingestion, research staging, quarantine, TypeDB `3.14.2` schemas/queries, Evidence-Locked Chat, `/` NVIDIA summaries, or `/data-room`, **you must read and follow**:
 
-- **Primary Skill (`v1.1.1`):** [.agents/skills/aci-graph-intelligence/SKILL.md](./.agents/skills/aci-graph-intelligence/SKILL.md)
+- **Primary Skill (`v1.1.2`):** [.agents/skills/aci-graph-intelligence/SKILL.md](./.agents/skills/aci-graph-intelligence/SKILL.md)
 - **TypeDB `3.14.2` & Zod Contracts:** [.agents/skills/aci-graph-intelligence/references/graph-data-contracts.md](./.agents/skills/aci-graph-intelligence/references/graph-data-contracts.md)
 - **Provenance, SEC Ingestion, Quarantine & Governance:** [.agents/skills/aci-graph-intelligence/references/evidence-governance.md](./.agents/skills/aci-graph-intelligence/references/evidence-governance.md)
 - **Permanent Acceptance & Regression Suite:** [.agents/skills/aci-graph-intelligence/references/acceptance-tests.md](./.agents/skills/aci-graph-intelligence/references/acceptance-tests.md)
@@ -56,7 +56,7 @@ Always classify capabilities using these exact **environment-specific verificati
 
 **Current Open Release Blockers (`PRODUCTION = NO-GO`):**
 1. **Interactive Signed-In Browser UI Walkthrough Pending Owner SSO Session:** Deployed Preview SSR/API & live TypeDB `3.14.2` checks at `3222376` passed, while interactive browser click-through paused cleanly at Vercel Deployment Protection (`AUTH_GATE_REQUIRES_OWNER_SESSION`) awaiting an active owner Vercel SSO + Clerk session.
-2. **Active Production SEC/XBRL Contamination & Unpaused Cron:** `prod:benevolent-magpie-921` (`639a2ed`) retains `7` unquarantined invalid SEC/XBRL staging rows, `8` active contaminated `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active, next run `2026-11-19T07:30:00Z`), and `4` contaminated forward-study rows.
+2. **Active Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** Phase A scheduler containment (`RESEARCH_SCHEDULER_ENV=disabled`) is `PRODUCTION_VERIFIED` for stopping unattended cron writes, **but** `7` baseline invalid SEC/XBRL staging rows (+ `4` legacy `639a2ed` Prod-only `8-K`/`10-Q` rows), `8`+`2` active contaminated `evidence` rows (including forward-frozen orphan `ms71z2vm0nhq2850kvr3pym65s8hr3wb`), `9` contaminated `morningBriefings`, and `4` contaminated forward-study rows remain unquarantined in Production.
 
 ## 4. Core Financial & Graph Invariants (Summary)
 

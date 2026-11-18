@@ -1,6 +1,6 @@
 # ACI Evidence Governance, SEC Ingestion, Chronology & Quarantine Standards
 
-**Skill Version:** `1.1.1`  
+**Skill Version:** `1.1.2`  
 **Authoritative Code Sources:**
 - Canonical Identity & Supersession Governance: `lib/graph/identity-governance.ts`
 - General-Purpose SEC Discovery & Extractor: `lib/remote-ops/sec-filing-graph-extractor.ts` & `lib/remote-ops/sec-xbrl-fact-selector.ts`

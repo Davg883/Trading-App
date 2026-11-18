@@ -9,7 +9,7 @@ description: >-
   testing, or auditing any graph, SEC/XBRL ingestion, staging/quarantine,
   /data-room, Evidence Chat, or NVIDIA/issuer intelligence workflow.
 metadata:
-  version: "1.1.1"
+  version: "1.1.2"
   schemaVersion: "macro-intelligence-graph-3.14-v1"
   codeBaselineSha: "3222376"
   convexFingerprintSha256: "85f665a324349391b2c582504a02da3af0a55f1878d8236f6c49d8ddcc067875"
@@ -28,7 +28,7 @@ metadata:
     - "worker/remote_research.py"
 ---
 
-# ACI Graph Intelligence Development Skill (`v1.1.1`)
+# ACI Graph Intelligence Development Skill (`v1.1.2`)
 
 This skill governs the end-to-end ACI relationship and financial intelligence pipeline:
 
@@ -61,11 +61,11 @@ Never use an unqualified `VERIFIED` label, and never classify local or disposabl
 
 **Active Open Release Blockers (`PRODUCTION = NO-GO`):**
 1. **Interactive Signed-In Browser UI Walkthrough Pending Owner SSO Session:** Deployed Preview SSR/API & live TypeDB `3.14.2` checks at `3222376` passed, while interactive browser click-through paused cleanly at Vercel Deployment Protection (`AUTH_GATE_REQUIRES_OWNER_SESSION`) awaiting an active owner Vercel SSO + Clerk session.
-2. **Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** `7` invalid staging rows, `8` active `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active on `639a2ed`, next run `2026-11-19T07:30:00Z`), and `4` forward-study rows remain unquarantined in Production.
+2. **Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** Phase A scheduler containment (`RESEARCH_SCHEDULER_ENV=disabled`) is `PRODUCTION_VERIFIED` for stopping unattended cron writes, **but** `7` baseline invalid staging rows (+ `4` legacy `639a2ed` Prod-only `8-K`/`10-Q` rows), `8`+`2` contaminated `evidence` rows (incl. forward-frozen orphan `ms71z2vm0nhq2850kvr3pym65s8hr3wb`), `9` contaminated `morningBriefings`, and `4` forward-study rows remain unquarantined in Production, and `639a2ed` still falsely reports `scheduler.status: "working"` from persisted DB settings.
 
 ---
 
-## 3. Mandatory Graph Rules (All 13 Invariants)
+## 3. Mandatory Graph Rules (All 14 Invariants)
 
 1. **Primary-Source Provenance:** Every promoted `MacroRelationship` and `GraphObservation` must cite `>= 1` immutable `GraphSourceDocument` (`https://` without embedded credentials, `64`-hex `contentSha256`, `authority`, `kind`, `publicationBasis`) linked in TypeDB via `evidential_support`.
 2. **Multi-Clock Timestamp Preservation:** Preserve distinct timestamps (UTC epoch ms, never invented): reporting window (`periodStartMs`, `periodEndMs`), contractual validity (`effectiveFromMs`, `effectiveToMs`, `maturityAtMs`), publication/acceptance (`publishedAtMs`), trusted receipt (`receivedAtMs >= publishedAtMs`), and ingestion (`ingestedAtMs`).
@@ -80,6 +80,7 @@ Never use an unqualified `VERIFIED` label, and never classify local or disposabl
 11. **Question-Aware Synthesis & Honest Abstention:** Evidence Chat (`lib/graph/question-aware-evidence-synthesis.ts`, `lib/graph/evidence-answer-validator.ts`) must route to the focal entity earliest in the prompt, synthesise directly from retrieved `GraphObservation` and `MacroRelationship` records, bound every client-facing validation `detail` string (`<= 480` chars, logging full redacted diagnostics server-side), and return `supportStatus: "unsupported"` (`0` fabricated claims) whenever requested facts are undisclosed or out of scope.
 12. **Zero Synthetic Fixture Leakage:** Synthetic demonstration datasets (`data/graph/initial-acceptance-dataset.json`, `lib/graph/macro-case-001.ts` — `Nscale`, `Loughton`, `EirGrid`, `$895.4B`) are restricted to isolated Case 001 tests/demos and must never be bootstrapped into verified TypeDB targets (`syncAndVerifyTypeDbCloud`) or rendered in NVIDIA / real-issuer views on `/` or `/data-room`.
 13. **Zero Unauthorised Cloud, Execution, or Scheduler Changes:** Never deploy to Production, push `main`, execute non-dry-run cloud quarantines, write to shared TypeDB Cloud databases, enable schedulers, or touch broker/trading controls (`executionAuthority: "none"`) without explicit separate human approval.
+14. **Five-State Operational-Status Separation:** Health and operations views (`lib/remote-ops/health-monitor.ts`, `convex/operations.ts`) must strictly distinguish **(a) configured** (credentials/endpoints present, e.g. `configured_not_tested`), **(b) enabled** (persisted DB toggles `systemEnabled`, `job.enabled`, `activeEnvironment`), **(c) effectively running** (`scheduled === true` & `status === "working"` only when `cronGateOpen` — including runtime `RESEARCH_SCHEDULER_ENV !== "disabled"` — AND a recent tick within `SCHEDULER_OVERDUE_AFTER_MS` is observed), **(d) paused** (`!cronGateOpen` or `pausedReason !== null`, reporting exact pause source such as `RESEARCH_SCHEDULER_ENV=disabled`), and **(e) last-successful** (`lastSuccessAt` / `freshness`, never using historical `lastRunAt !== null` to mask a disabled or overdue scheduler).
 
 ---
 
@@ -94,7 +95,7 @@ Execute these 10 steps in order whenever working on graph, ingestion, quarantine
 5. **Implement the Smallest Safe Change:** Keep edits additive and non-destructive; preserve TypeQL `put` idempotency, strict Zod `.strict()` contracts, bounded error strings (`<= 500` chars), and `executionAuthority: "none"`.
 6. **Run Targeted & Regression Suites:** Run the permanent regression tests in [acceptance-tests.md](./references/acceptance-tests.md) plus `npm run convex:fingerprint`, `npm run typecheck`, `npm run lint:baseline`, `npm run test:python`, `npm test`, `npm run build`, and `npm run check:server-bundle`.
 7. **Verify Real TypeDB `3.14.2` Read-Back (Where Applicable):** For schema, compiler, adapter, or ingestion changes, project into an isolated disposable local TypeDB `3.14.2` database (`127.0.0.1:8000` / `127.0.0.1:1729`) and verify live TypeQL read-back counts (`LOCALLY_VERIFIED`) before proposing any cloud target write.
-8. **Verify Investor-Facing Output:** Confirm parity between `/` and `/data-room`, verify historical `?asOfMs=` reconstruction, check `GRAPH_UNAVAILABLE` behaviour when disconnected, and score affected Evidence Chat prompts against the 6-dimension (`0–30`) investor rubric.
+8. **Verify Investor-Facing Output:** Confirm parity between `/` and `/data-room`, verify historical `?asOf=` reconstruction, check `GRAPH_UNAVAILABLE` behaviour when disconnected, and score affected Evidence Chat prompts against the 6-dimension (`0–30`) investor rubric.
 9. **Report Limitations & Exact Verification Level:** Label each result strictly as `IMPLEMENTED`, `LOCALLY_VERIFIED`, `DEV_VERIFIED`, `PREVIEW_VERIFIED`, `PRODUCTION_VERIFIED`, or `PLANNED`, noting any unverified filings or open blockers.
 10. **Stop & Request Separate Authorisation for Shared Writes / Deploys:** Present backup hashes, dry-run diffs (`dryRun: true`), exact target database/deployment names, and rollback steps, then **stop** until explicit approval is granted.
 
@@ -108,7 +109,7 @@ Whenever a pull request or commit modifies **any** trigger below, update this sk
 | :--- | :--- | :--- |
 | **TypeQL 3 & Driver Contracts** | `data/graph/macro-intelligence-schema.tql`, `lib/graph/typedb-schema.ts`, `lib/graph/contracts.ts`, `lib/graph/typedb-driver-adapter.ts`, `worker/graph_projection.py` | Update entity/relation/attribute tables, pinned versions, allowlisted query types, or database target constants in [graph-data-contracts.md](./references/graph-data-contracts.md). |
 | **SEC Discovery, XBRL/13F Parsing & Identity** | `lib/remote-ops/sec-filing-graph-extractor.ts`, `lib/remote-ops/sec-xbrl-fact-selector.ts`, `lib/graph/identity-governance.ts`, `worker/remote_research.py` | Update form support, XBRL duration/period-end gates, CIK/LEI priority, or supersession rules in [evidence-governance.md](./references/evidence-governance.md). |
-| **Quarantine, Staging & Reviewer Governance** | `lib/remote-ops/xbrl-quarantine-remediation.ts`, `lib/remote-ops/staging-validator.ts`, `convex/operations.ts`, `convex/research.ts`, `convex/graph.ts`, `convex/schema.ts` | Update quarantine rule inventory, orphan/study invalidation tables, Convex schema summary, or claim-level quarantine status in [evidence-governance.md](./references/evidence-governance.md) and [graph-data-contracts.md](./references/graph-data-contracts.md). |
+| **Quarantine, Staging, Reviewer & Operational Health** | `lib/remote-ops/xbrl-quarantine-remediation.ts`, `lib/remote-ops/staging-validator.ts`, `lib/remote-ops/health-monitor.ts`, `lib/remote-ops/pipeline-stages.ts`, `convex/operations.ts`, `convex/research.ts`, `convex/graph.ts`, `convex/schema.ts` | Update quarantine rule inventory, orphan/study invalidation tables, 5-state operational-status invariants (`configured` vs `enabled` vs `effectively running` vs `paused` vs `last-successful`), Convex schema summary, or claim-level quarantine status in [evidence-governance.md](./references/evidence-governance.md), [graph-data-contracts.md](./references/graph-data-contracts.md), and [acceptance-tests.md](./references/acceptance-tests.md). |
 | **Evidence-Locked Chat & Dashboard Alignment** | `lib/graph/evidence-chat-contracts.ts`, `lib/graph/evidence-retrieval-gateway.ts`, `lib/graph/question-aware-evidence-synthesis.ts`, `lib/graph/evidence-answer-validator.ts`, `lib/graph/nvidia-dashboard-alignment.ts`, `app/page.tsx`, `app/data-room/page.tsx` | Update retrieval/budget ceilings, validator checks, diagnostic bounds, `/` vs `/data-room` parity rules, and the 10-probe benchmark in [graph-data-contracts.md](./references/graph-data-contracts.md) and [acceptance-tests.md](./references/acceptance-tests.md). |
 | **Environment Promotion Milestones** | Verified Convex Dev / TypeDB Cloud Dev / Vercel Preview / Production promotions | Promote affected capability labels (`LOCALLY_VERIFIED` -> `DEV_VERIFIED` -> `PREVIEW_VERIFIED` -> `PRODUCTION_VERIFIED`) only after independent read-back evidence is recorded; update Open Release Blockers. |
 

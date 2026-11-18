@@ -1,6 +1,6 @@
 # ACI Graph Data Contracts (`TypeDB 3.14.2` & TypeScript/Convex Schemas)
 
-**Skill Version:** `1.1.1` (`macro-intelligence-graph-3.14-v1`)  
+**Skill Version:** `1.1.2` (`macro-intelligence-graph-3.14-v1`)  
 **Authoritative Code Sources:**
 - Canonical TypeQL 3 Schema: `data/graph/macro-intelligence-schema.tql` & `lib/graph/typedb-schema.ts` (`EMBEDDED_PINNED_TYPEQL_SCHEMA` + `ADDITIVE_CASE_007_SCHEMA_EXTENSION`)
 - Core Graph Zod Contracts: `lib/graph/contracts.ts`
