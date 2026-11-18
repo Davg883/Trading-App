@@ -18,9 +18,12 @@ import {
 import { processProjectionOutboxBatch } from '../lib/graph/projection-engine';
 import {
   CASE_007_VERIFIED_DEV_DATABASE,
+  CASE_007B_VERIFIED_DEV_DATABASE,
   PRODUCTION_TYPEDB_DATABASE,
   STAGING_TYPEDB_DATABASE,
   TypeDbSchemaOrHydrationError,
+  assertCanRecreateTypeDbDatabase,
+  assertIsolatedCase007BWriteTarget,
   assertIsolatedCase007WriteTarget,
   executeWriteStatementsOnLiveServer,
   hydrateMacroDatasetFromLiveTypeDb,
@@ -32,9 +35,12 @@ import {
   CASE_007_BUNDLE_ID,
   CASE_007_POST_RESULTS_BUNDLE_ID,
   CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+  CASE_007B_POST_EARNINGS_INGESTED_AT_MS,
   NVDA_Q3_FY27_SCHEDULED_RELEASE_MS,
   appendPostEarningsQ3ResultsBatch,
   assertNoDisputedG9SecRecords,
+  assertNoDisputedG9SecRecordsPostEarnings,
+  runCase007PostEarningsPipeline,
   runCase007PreEarningsPipeline,
 } from '../lib/remote-ops/case-007-nvidia-ingestor';
 
@@ -781,4 +787,155 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     },
     60_000,
   );
+
+  it('6. Validates Case 007-B post-earnings batch (9 new sources, 17 observations, 10 relationships), blocklist retention of 0001045810-26-000078, SHA-256 reconciliation, and 2026-11-17T20:59:30Z temporal isolation in MacroDataRoom', async () => {
+    const postRun = runCase007PostEarningsPipeline();
+
+    expect(postRun.bundleId).toBe(CASE_007_POST_RESULTS_BUNDLE_ID);
+    expect(postRun.executionAuthority).toBe('none');
+    expect(postRun.newPrimarySources).toHaveLength(9);
+    expect(postRun.newObservations).toHaveLength(17);
+    expect(postRun.newRelationships).toHaveLength(10);
+    expect(postRun.dataset.sources).toHaveLength(16);
+    expect(postRun.dataset.observations).toHaveLength(21);
+    expect(postRun.dataset.relationships).toHaveLength(30);
+    expect(postRun.outboxItems).toHaveLength(30);
+    expect(postRun.additiveOutboxItems).toHaveLength(10);
+
+    // Isolated write-target & non-destructive protections
+    expect(() =>
+      assertIsolatedCase007BWriteTarget(CASE_007B_VERIFIED_DEV_DATABASE),
+    ).not.toThrow();
+    expect(() => assertIsolatedCase007BWriteTarget(CASE_007_VERIFIED_DEV_DATABASE)).toThrow(
+      /aci_case007b_verified_dev/,
+    );
+    expect(() => assertIsolatedCase007BWriteTarget(STAGING_TYPEDB_DATABASE)).toThrow(
+      /aci_case007b_verified_dev/,
+    );
+    expect(() => assertIsolatedCase007BWriteTarget(PRODUCTION_TYPEDB_DATABASE)).toThrow(
+      /aci_case007b_verified_dev/,
+    );
+    expect(() => assertCanRecreateTypeDbDatabase(CASE_007_VERIFIED_DEV_DATABASE)).toThrow(
+      /destructive recreateDatabase is forbidden/,
+    );
+    expect(() => assertCanRecreateTypeDbDatabase(CASE_007B_VERIFIED_DEV_DATABASE)).toThrow(
+      /destructive recreateDatabase is forbidden/,
+    );
+
+    // Blocklist retains 0001045810-26-000078 and all 7 disputed G9 records
+    expect(() => assertNoDisputedG9SecRecordsPostEarnings(postRun.dataset)).not.toThrow();
+    expect(() =>
+      assertNoDisputedG9SecRecordsPostEarnings({
+        ...postRun.dataset,
+        sources: [
+          ...postRun.dataset.sources,
+          {
+            ...postRun.dataset.sources[0]!,
+            sourceDocId: 'blocked-hf-000078',
+            title: 'Blocked accession 0001045810-26-000078',
+          },
+        ],
+      }),
+    ).toThrow(/0001045810-26-000078/);
+
+    // Hugging Face pending acquisition represented with principalAmount: null and proposed/contingent_signed
+    const hfRel = postRun.dataset.relationships.find(
+      (r) => r.relationshipId === 'rel-case007b-nvda-huggingface-pending-acq-r1',
+    )!;
+    expect(hfRel.principalAmount).toBeNull();
+    expect(hfRel.epistemicStatus).toBe('proposed');
+    expect(hfRel.contractualStatus).toBe('contingent_signed');
+    expect(hfRel.bindingObligation).toBe(false);
+
+    // Historical $108B Q3 forecast preserved alongside $115.844B Q3 actual and $130B Q4 official 14-week forecast
+    const q3Forecast = postRun.dataset.observations.find(
+      (o) => o.observationId === 'obs-nvda-q3fy27-guidance-rev',
+    )!;
+    const q3Actual = postRun.dataset.observations.find(
+      (o) => o.observationId === 'obs-nvda-q3fy27-actual-rev',
+    )!;
+    const q4Forecast = postRun.dataset.observations.find(
+      (o) => o.observationId === 'obs-nvda-q4fy27-guidance-rev',
+    )!;
+    expect(q3Forecast.metricValue).toBe(108_000_000_000);
+    expect(q3Forecast.observationKind).toBe('forecast');
+    expect(q3Actual.metricValue).toBe(115_844_000_000);
+    expect(q3Actual.observationKind).toBe('reported');
+    expect(q4Forecast.metricValue).toBe(130_000_000_000);
+    expect(q4Forecast.observationKind).toBe('forecast');
+
+    // Analytical $668B envelope & 13-week Q4 scenario are NOT stored as official observations
+    expect(
+      postRun.dataset.observations.some(
+        (o) => o.metricValue === 668_000_000_000 || o.observationId.includes('13wk'),
+      ),
+    ).toBe(false);
+    expect(postRun.omittedClaims).toHaveLength(3);
+    expect(
+      postRun.leadershipSha256Reconciliation.nvda20261111Htm
+        .edgarOriginExactByteIdentityVerified,
+    ).toBe(true);
+
+    // Quarantine candidates block unverified oral call claims and proposed-as-funded ownership
+    const qIds = postRun.quarantinedCandidates.map((q) => q.candidateId);
+    expect(qIds).toEqual(
+      expect.arrayContaining([
+        'rel-case007b-quarantined-prompt-injection-r1',
+        'rel-case007b-quarantined-oral-fy28-confirmed',
+        'rel-case007b-quarantined-huggingface-marked-funded',
+        'rel-case007b-quarantined-sbenergy-105b-marked-funded',
+        'staged-e2523ed83a7c0247',
+      ]),
+    );
+
+    // UI Temporal Isolation Proof in MacroDataRoom at 2026-11-17T20:59:30Z vs 2026-11-18T01:35:00Z
+    const benchmark = await runGraphVsConvexBenchmark(postRun.dataset);
+    const preHtml = renderToStaticMarkup(
+      createElement(MacroDataRoom, {
+        dataset: postRun.dataset,
+        benchmark,
+        graphSourceMode: 'LIVE_GRAPH',
+        initialFocalId: 'org-nvda',
+        initialAsOfMs: CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+        initialTemporalBasis: 'receipt',
+        liveTypeDbStatus: {
+          reachable: true,
+          authenticated: true,
+          databaseExists: true,
+          databaseName: CASE_007B_VERIFIED_DEV_DATABASE,
+          distribution: 'TypeDB',
+          version: '3.14.2',
+          tlsEnabled: true,
+        },
+      }),
+    );
+    expect(preHtml).toContain('obs-nvda-q3fy27-guidance-rev');
+    expect(preHtml).not.toContain('obs-nvda-q3fy27-actual-rev');
+    expect(preHtml).not.toContain('obs-nvda-q4fy27-guidance-rev');
+    expect(preHtml).not.toContain('rel-case007b-nvda-sbenergy-openai-ports-guarantee-r1');
+
+    const postHtml = renderToStaticMarkup(
+      createElement(MacroDataRoom, {
+        dataset: postRun.dataset,
+        benchmark,
+        graphSourceMode: 'LIVE_GRAPH',
+        initialFocalId: 'org-nvda',
+        initialAsOfMs: CASE_007B_POST_EARNINGS_INGESTED_AT_MS,
+        initialTemporalBasis: 'receipt',
+        liveTypeDbStatus: {
+          reachable: true,
+          authenticated: true,
+          databaseExists: true,
+          databaseName: CASE_007B_VERIFIED_DEV_DATABASE,
+          distribution: 'TypeDB',
+          version: '3.14.2',
+          tlsEnabled: true,
+        },
+      }),
+    );
+    expect(postHtml).toContain('obs-nvda-q3fy27-guidance-rev');
+    expect(postHtml).toContain('obs-nvda-q3fy27-actual-rev');
+    expect(postHtml).toContain('obs-nvda-q4fy27-guidance-rev');
+    expect(postHtml).toContain('rel-case007b-nvda-sbenergy-openai-ports-guarantee-r1');
+  });
 });

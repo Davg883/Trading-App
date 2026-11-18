@@ -109,18 +109,18 @@ export default async function DataRoomPage({
         resolvedParams?.focal ??
         (graphSourceMode === 'LIVE_GRAPH' &&
         activeDataset.organisations.some((o) => o.orgId === 'org-nvda') &&
-        !activeDataset.relationships.some((r) =>
-          r.participants.some((p) => p.entityId === 'org-nscale'),
-        )
+        !activeDataset.relationships.some((r) => r.relationshipId === 'rel-loughton-msft-r2')
           ? 'org-nvda'
           : undefined)
       }
       initialAsOfMs={
         parsedAsOf && Number.isFinite(parsedAsOf)
           ? parsedAsOf
-          : latestRelMs && latestRelMs > 1794146400000
-            ? 1794949170000
-            : undefined
+          : latestRelMs && latestRelMs > 1794949170000
+            ? 1794965700000
+            : latestRelMs && latestRelMs > 1794146400000
+              ? 1794949170000
+              : undefined
       }
       initialSelectedRelationshipId={
         graphSourceMode === 'LIVE_GRAPH' &&

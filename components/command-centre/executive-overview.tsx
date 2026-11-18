@@ -968,6 +968,22 @@ export function ExecutiveOverviewSections({
                             Open Live Graph in Macro Data Room →
                           </Link>
                         </li>
+                        <li>
+                          <b>Post-Earnings Update (Form 8-K 0001045810-26-000088, Q3 FY27 Batch v2):</b>{' '}
+                          Reported Q3 FY27 GAAP revenue USD 115.844B (+7.26% vs preserved USD 108.0B Q3 forecast; Data Center USD 107.610B), GAAP GM 74.8%, FCF USD 43.777B; Q4 FY27 14-week official outlook USD 130.0B ± 3% and 71.0%–72.0% GM. Direct commitments (USD 518B incl. USD 390B supply), contingent neocloud commitments (USD 32B), and maximum gross credit guarantees (USD 118.0B cap, USD 0 paid) remain separately classified and are not recognised additive liabilities.{' '}
+                          <a
+                            href="https://www.sec.gov/Archives/edgar/data/1045810/000104581026000088/q3fy27pr.htm"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="case-007b-sec-link-q3pr"
+                          >
+                            SEC Q3 FY27 8-K Ex. 99.1 →
+                          </a>{' '}
+                          ·{' '}
+                          <Link href="/data-room?focal=org-nvda&asOf=1794965700000">
+                            Open Post-Earnings Graph →
+                          </Link>
+                        </li>
                       </ul>
                     </article>
                   )}

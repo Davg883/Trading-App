@@ -33,8 +33,10 @@ import {
 } from '../lib/graph/query-gateway';
 import {
   CASE_007_VERIFIED_DEV_DATABASE,
+  CASE_007B_VERIFIED_DEV_DATABASE,
   TypeDbSchemaOrHydrationError,
   assertCanRecreateTypeDbDatabase,
+  assertIsolatedCase007BWriteTarget,
   assertIsolatedCase007WriteTarget,
   defaultTypeDbConfig,
   describeTypeDbTransport,
@@ -51,8 +53,12 @@ import {
 import { runMacroCase001GraphInvestigations } from '../lib/graph/macro-case-001';
 import {
   CASE_007_BUNDLE_ID,
+  CASE_007_POST_RESULTS_BUNDLE_ID,
   CASE_007_PRE_EARNINGS_CAPTURED_AT_MS,
+  CASE_007B_POST_EARNINGS_INGESTED_AT_MS,
   assertNoDisputedG9SecRecords,
+  assertNoDisputedG9SecRecordsPostEarnings,
+  runCase007PostEarningsPipeline,
   runCase007PreEarningsPipeline,
 } from '../lib/remote-ops/case-007-nvidia-ingestor';
 
@@ -1079,6 +1085,7 @@ const allowlistedReadDatabaseOverride = v.optional(
   v.union(
     v.literal(STAGING_TYPEDB_DATABASE),
     v.literal(CASE_007_VERIFIED_DEV_DATABASE),
+    v.literal(CASE_007B_VERIFIED_DEV_DATABASE),
   ),
 );
 
@@ -1500,6 +1507,365 @@ export const promoteCase007ToVerifiedDevCloud = internalAction({
         stagingCountsAfter: stagingCountsAfter.counts,
         stagingRelationshipsIntact,
       },
+      executionAuthority: 'none' as const,
+    };
+  },
+});
+
+export const stageAndEnqueueCase007BInternal = internalMutation({
+  args: {
+    owner: v.optional(v.string()),
+    dryRun: v.optional(v.boolean()),
+    nowMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun ?? true;
+    const owner = requireExplicitOwner(args.owner);
+    const pipeline = runCase007PostEarningsPipeline({
+      owner: 'public_research',
+      nowMs: args.nowMs,
+    });
+    assertNoDisputedG9SecRecords(pipeline.preEarningsDataset);
+    assertNoDisputedG9SecRecordsPostEarnings(pipeline.dataset);
+    const nowMs = args.nowMs ?? pipeline.ingestedAtMs;
+
+    const existingOutbox = await ctx.db
+      .query('graphProjectionOutbox')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .collect();
+    const existingKeys = new Set(existingOutbox.map((i) => i.projectionKey));
+
+    let enqueuedCount = 0;
+    let deduplicatedCount = 0;
+    const itemSummaries: Array<{
+      outboxId?: ReturnType<typeof v.id<'graphProjectionOutbox'>>['type'];
+      relationshipId: string;
+      projectionKey: string;
+      deduplicated: boolean;
+      epistemicStatus: string;
+      contractualStatus: string;
+    }> = [];
+
+    if (dryRun) {
+      for (const item of pipeline.outboxItems) {
+        const isDup = existingKeys.has(item.projectionKey);
+        if (isDup) deduplicatedCount += 1;
+        else enqueuedCount += 1;
+        const rel = pipeline.dataset.relationships.find(
+          (r) => r.relationshipId === item.relationshipId,
+        )!;
+        itemSummaries.push({
+          relationshipId: item.relationshipId,
+          projectionKey: item.projectionKey,
+          deduplicated: isDup,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+        });
+      }
+    } else {
+      for (const rel of pipeline.dataset.relationships) {
+        const isPost = rel.relationshipId.startsWith('rel-case007b-');
+        const res = await insertOrDeduplicateOutboxRelationship(ctx, {
+          owner,
+          visibility: 'public_research',
+          sourceTable: 'researchStagingItems',
+          sourceRecordId: `${isPost ? 'case007b' : 'case007'}:${rel.relationshipId}`,
+          parsedRel: rel,
+          reviewedAtMs: nowMs,
+          reviewNote: isPost
+            ? 'Case 007-B deterministic primary SEC/IR filing verification (post-Q3 FY27 batch v2)'
+            : 'Case 007 deterministic primary SEC filing verification (pre-Q3 FY27 snapshot)',
+          nowMs,
+        });
+        if (res.deduplicated) deduplicatedCount += 1;
+        else enqueuedCount += 1;
+        itemSummaries.push({
+          outboxId: res.outboxId,
+          relationshipId: rel.relationshipId,
+          projectionKey: res.projectionKey,
+          deduplicated: res.deduplicated,
+          epistemicStatus: rel.epistemicStatus,
+          contractualStatus: rel.contractualStatus,
+        });
+      }
+    }
+
+    return {
+      dryRun,
+      bundleId: pipeline.bundleId,
+      ingestedAtMs: pipeline.ingestedAtMs,
+      validatedSourceCount: pipeline.dataset.sources.length,
+      validatedObservationCount: pipeline.dataset.observations.length,
+      validatedRelationshipCount: pipeline.dataset.relationships.length,
+      quarantinedCandidateCount: pipeline.quarantinedCandidates.length,
+      quarantinedCandidates: pipeline.quarantinedCandidates,
+      omittedClaims: pipeline.omittedClaims,
+      enqueuedCount,
+      deduplicatedCount,
+      beforeOutboxRowCount: existingOutbox.length,
+      afterOutboxRowCount: dryRun
+        ? existingOutbox.length
+        : existingOutbox.length + enqueuedCount,
+      itemSummaries,
+      executionAuthority: 'none' as const,
+    };
+  },
+});
+
+/**
+ * Controlled Case 007-B post-earnings promotion into the separate development-only TypeDB database
+ * `aci_case007b_verified_dev`.
+ * - Explicitly confirms target database === `aci_case007b_verified_dev` before any write.
+ * - Preserves `aci_case007_verified_dev` (20 rels), `aci_macro_intelligence_staging` (23 rels), and
+ *   `aci_macro_intelligence_prod` completely untouched, capturing before & after counts on both dev/staging DBs.
+ * - Projects verified Case 007-A first, followed additively by Case 007-B (`recreateDatabase: false`).
+ */
+export const promoteCase007BToVerifiedDevCloud = internalAction({
+  args: {
+    expectedTargetDatabase: v.literal(CASE_007B_VERIFIED_DEV_DATABASE),
+    dryRun: v.optional(v.boolean()),
+    owner: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun ?? true;
+    assertIsolatedCase007BWriteTarget(args.expectedTargetDatabase);
+
+    const owner = requireExplicitOwner(args.owner);
+    const baseConfig = defaultTypeDbConfig(CASE_007B_VERIFIED_DEV_DATABASE);
+    const targetConfig = {
+      ...baseConfig,
+      databaseName: CASE_007B_VERIFIED_DEV_DATABASE,
+    };
+    const case007AConfig = {
+      ...baseConfig,
+      databaseName: CASE_007_VERIFIED_DEV_DATABASE,
+    };
+    const stagingConfig = {
+      ...baseConfig,
+      databaseName: STAGING_TYPEDB_DATABASE,
+    };
+    assertIsolatedCase007BWriteTarget(targetConfig.databaseName);
+
+    const pipeline = runCase007PostEarningsPipeline({
+      owner: 'public_research',
+      nowMs: CASE_007B_POST_EARNINGS_INGESTED_AT_MS,
+    });
+    if (
+      pipeline.bundleId !== CASE_007_POST_RESULTS_BUNDLE_ID ||
+      pipeline.preEarningsBoundaryMs !== CASE_007_PRE_EARNINGS_CAPTURED_AT_MS
+    ) {
+      throw new Error('Case 007-B bundle identity or pre-earnings boundary invariant violated');
+    }
+    assertNoDisputedG9SecRecords(pipeline.preEarningsDataset);
+    assertNoDisputedG9SecRecordsPostEarnings(pipeline.dataset);
+
+    const [
+      targetProbeBefore,
+      targetCountsBefore,
+      case007ACountsBefore,
+      case007ADetailsBefore,
+      stagingCountsBefore,
+      stagingDetailsBefore,
+    ] = await Promise.all([
+      probeTypeDbServer(targetConfig),
+      inspectLiveTypeDbGraphCounts(targetConfig),
+      inspectLiveTypeDbGraphCounts(case007AConfig),
+      inspectLiveTypeDbReconciliationDetails(case007AConfig),
+      inspectLiveTypeDbGraphCounts(stagingConfig),
+      inspectLiveTypeDbReconciliationDetails(stagingConfig),
+    ]);
+
+    if (!targetProbeBefore.reachable || !targetProbeBefore.authenticated) {
+      return {
+        ok: false,
+        dryRun,
+        stage: 'typedb_unreachable_or_unauthenticated',
+        targetDatabaseName: targetConfig.databaseName,
+        targetProbeBefore,
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    if (dryRun) {
+      const outboxDryRun = await ctx.runMutation(
+        graphMRef('stageAndEnqueueCase007BInternal'),
+        { owner, dryRun: true, nowMs: CASE_007B_POST_EARNINGS_INGESTED_AT_MS },
+      );
+      return {
+        ok: true,
+        dryRun: true,
+        targetDatabaseName: targetConfig.databaseName,
+        clusterDatabasesBefore: stagingDetailsBefore.clusterDatabases,
+        targetExistedBefore: targetProbeBefore.databaseExists,
+        targetCountsBefore: targetCountsBefore.counts,
+        case007ACountsBefore: case007ACountsBefore.counts,
+        case007ARelationshipCountBefore: case007ADetailsBefore.relationshipIds.length,
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingRelationshipCountBefore: stagingDetailsBefore.relationshipIds.length,
+        outboxDryRun,
+        validatedNewSourceCount: pipeline.newPrimarySources.length,
+        validatedNewObservationCount: pipeline.newObservations.length,
+        validatedNewRelationshipCount: pipeline.newRelationships.length,
+        totalSourceCount: pipeline.dataset.sources.length,
+        totalObservationCount: pipeline.dataset.observations.length,
+        totalRelationshipCount: pipeline.dataset.relationships.length,
+        omittedClaims: pipeline.omittedClaims,
+        leadershipSha256Reconciliation: pipeline.leadershipSha256Reconciliation,
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    // Re-confirm isolated target explicitly before creating/projecting into `aci_case007b_verified_dev`
+    assertIsolatedCase007BWriteTarget(targetConfig.databaseName);
+    if (
+      targetConfig.databaseName === STAGING_TYPEDB_DATABASE ||
+      targetConfig.databaseName === PRODUCTION_TYPEDB_DATABASE ||
+      targetConfig.databaseName === CASE_007_VERIFIED_DEV_DATABASE
+    ) {
+      throw new Error('Refused write to protected TypeDB database');
+    }
+
+    let preBaselineReport;
+    let postAdditiveReport;
+    try {
+      // Step A: Project verified Case 007-A dataset first (`recreateDatabase: false`)
+      const preRes = await projectDatasetIntoLiveTypeDb(pipeline.preEarningsDataset, {
+        config: targetConfig,
+        recreateDatabase: false,
+      });
+      preBaselineReport = preRes.report;
+
+      // Step B: Project accepted Case 007-B additions additively (`recreateDatabase: false`)
+      const postRes = await projectDatasetIntoLiveTypeDb(pipeline.dataset, {
+        config: targetConfig,
+        recreateDatabase: false,
+      });
+      postAdditiveReport = postRes.report;
+    } catch (err) {
+      const [case007ACountsOnErr, stagingCountsOnErr] = await Promise.all([
+        inspectLiveTypeDbGraphCounts(case007AConfig),
+        inspectLiveTypeDbGraphCounts(stagingConfig),
+      ]);
+      return {
+        ok: false,
+        dryRun: false,
+        stage: 'create_database_or_projection_failed',
+        targetDatabaseName: targetConfig.databaseName,
+        error: err instanceof Error ? err.message : String(err),
+        case007ACountsBefore: case007ACountsBefore.counts,
+        case007ACountsAfter: case007ACountsOnErr.counts,
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingCountsAfter: stagingCountsOnErr.counts,
+        executionAuthority: 'none' as const,
+      };
+    }
+
+    const [
+      targetCountsAfter,
+      targetDetailsAfter,
+      case007ACountsAfter,
+      case007ADetailsAfter,
+      stagingCountsAfter,
+      stagingDetailsAfter,
+    ] = await Promise.all([
+      inspectLiveTypeDbGraphCounts(targetConfig),
+      inspectLiveTypeDbReconciliationDetails(targetConfig),
+      inspectLiveTypeDbGraphCounts(case007AConfig),
+      inspectLiveTypeDbReconciliationDetails(case007AConfig),
+      inspectLiveTypeDbGraphCounts(stagingConfig),
+      inspectLiveTypeDbReconciliationDetails(stagingConfig),
+    ]);
+
+    const targetRelSet = new Set(targetDetailsAfter.relationshipIds);
+    const all30PresentInTarget =
+      pipeline.dataset.relationships.length === 30 &&
+      pipeline.dataset.relationships.every((r) => targetRelSet.has(r.relationshipId)) &&
+      (targetCountsAfter.counts?.observations ?? 0) === 21 &&
+      (targetCountsAfter.counts?.sources ?? 0) === 16;
+
+    const outboxEnqueue = (await ctx.runMutation(
+      graphMRef('stageAndEnqueueCase007BInternal'),
+      { owner, dryRun: false, nowMs: CASE_007B_POST_EARNINGS_INGESTED_AT_MS },
+    )) as {
+      enqueuedCount: number;
+      deduplicatedCount: number;
+      beforeOutboxRowCount: number;
+      afterOutboxRowCount: number;
+      itemSummaries: Array<{
+        outboxId?: ReturnType<typeof v.id<'graphProjectionOutbox'>>['type'];
+        relationshipId: string;
+        projectionKey: string;
+        deduplicated: boolean;
+      }>;
+    };
+
+    let markedProjectedCount = 0;
+    if (all30PresentInTarget) {
+      for (const item of outboxEnqueue.itemSummaries) {
+        if (item.outboxId && targetRelSet.has(item.relationshipId)) {
+          await ctx.runMutation(graphMRef('recordProjectionOutcomeInternal'), {
+            outboxId: item.outboxId,
+            succeeded: true,
+          });
+          markedProjectedCount += 1;
+        }
+      }
+    }
+
+    const case007AIntact =
+      case007ADetailsBefore.relationshipIds.length === 20 &&
+      case007ADetailsAfter.relationshipIds.length === 20 &&
+      JSON.stringify(case007ADetailsBefore.relationshipIds) ===
+        JSON.stringify(case007ADetailsAfter.relationshipIds) &&
+      JSON.stringify(case007ACountsBefore.counts) ===
+        JSON.stringify(case007ACountsAfter.counts);
+
+    const stagingRelationshipsIntact =
+      stagingDetailsBefore.relationshipIds.length === 23 &&
+      stagingDetailsAfter.relationshipIds.length === 23 &&
+      JSON.stringify(stagingDetailsBefore.relationshipIds) ===
+        JSON.stringify(stagingDetailsAfter.relationshipIds) &&
+      JSON.stringify(stagingCountsBefore.counts) ===
+        JSON.stringify(stagingCountsAfter.counts);
+
+    return {
+      ok:
+        all30PresentInTarget &&
+        preBaselineReport.outboxDeadLetterCount === 0 &&
+        postAdditiveReport.outboxDeadLetterCount === 0 &&
+        case007AIntact &&
+        stagingRelationshipsIntact,
+      dryRun: false,
+      targetDatabaseName: targetConfig.databaseName,
+      tlsEnabled: describeTypeDbTransport(targetConfig).tlsEnabled,
+      clusterDatabasesAfter: targetDetailsAfter.clusterDatabases,
+      targetExistedBefore: targetProbeBefore.databaseExists,
+      targetCountsBefore: targetCountsBefore.counts,
+      targetCountsAfter: targetCountsAfter.counts,
+      targetRelationshipIdsAfter: targetDetailsAfter.relationshipIds,
+      all30PresentInTarget,
+      preBaselineProjectionReport: preBaselineReport,
+      postAdditiveProjectionReport: postAdditiveReport,
+      outboxEnqueue: {
+        beforeOutboxRowCount: outboxEnqueue.beforeOutboxRowCount,
+        afterOutboxRowCount: outboxEnqueue.afterOutboxRowCount,
+        enqueuedCount: outboxEnqueue.enqueuedCount,
+        deduplicatedCount: outboxEnqueue.deduplicatedCount,
+        markedProjectedCount,
+      },
+      case007AIsolationProof: {
+        databaseName: CASE_007_VERIFIED_DEV_DATABASE,
+        countsBefore: case007ACountsBefore.counts,
+        countsAfter: case007ACountsAfter.counts,
+        intact: case007AIntact,
+      },
+      stagingIsolationProof: {
+        stagingDatabaseName: STAGING_TYPEDB_DATABASE,
+        stagingCountsBefore: stagingCountsBefore.counts,
+        stagingCountsAfter: stagingCountsAfter.counts,
+        stagingRelationshipsIntact,
+      },
+      omittedClaims: pipeline.omittedClaims,
       executionAuthority: 'none' as const,
     };
   },

@@ -52,6 +52,7 @@ import {
 export const PRODUCTION_TYPEDB_DATABASE = 'aci_macro_intelligence_prod';
 export const STAGING_TYPEDB_DATABASE = 'aci_macro_intelligence_staging';
 export const CASE_007_VERIFIED_DEV_DATABASE = 'aci_case007_verified_dev';
+export const CASE_007B_VERIFIED_DEV_DATABASE = 'aci_case007b_verified_dev';
 
 /**
  * Enforces strict database target isolation for Case 007 development promotion:
@@ -66,11 +67,26 @@ export function assertIsolatedCase007WriteTarget(databaseName: string): void {
   }
 }
 
+/**
+ * Enforces strict database target isolation for Case 007-B post-earnings development promotion:
+ * writes are permitted ONLY to `aci_case007b_verified_dev`, preserving `aci_case007_verified_dev`,
+ * `aci_macro_intelligence_staging`, and `aci_macro_intelligence_prod` completely untouched.
+ */
+export function assertIsolatedCase007BWriteTarget(databaseName: string): void {
+  if (databaseName !== CASE_007B_VERIFIED_DEV_DATABASE) {
+    throw new Error(
+      `Security/isolation violation: Case 007-B write target must be "${CASE_007B_VERIFIED_DEV_DATABASE}" (refused "${databaseName}" to preserve production, staging, and Case 007-A isolated databases).`,
+    );
+  }
+}
+
 export function assertCanRecreateTypeDbDatabase(databaseName: string): void {
   if (
     databaseName === PRODUCTION_TYPEDB_DATABASE ||
     databaseName.endsWith('_prod') ||
-    databaseName === 'aci_macro_intelligence'
+    databaseName === 'aci_macro_intelligence' ||
+    databaseName === CASE_007_VERIFIED_DEV_DATABASE ||
+    databaseName === CASE_007B_VERIFIED_DEV_DATABASE
   ) {
     throw new Error(
       `Security violation: destructive recreateDatabase is forbidden on production TypeDB database "${databaseName}". Development/test replays may only recreate staging databases.`,

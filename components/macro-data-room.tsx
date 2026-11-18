@@ -86,7 +86,11 @@ export type ReviewerDecisionRecord = {
 
 const AS_OF_PRESETS = [
   {
-    label: '2026-11-17 — NVIDIA Case 007 Pre-Earnings Snapshot (20:59 UTC)',
+    label: '2026-11-18 — NVIDIA Case 007-B Post-Earnings Snapshot (01:35 UTC)',
+    asOfMs: 1794965700000,
+  },
+  {
+    label: '2026-11-17 — NVIDIA Case 007-A Pre-Earnings Snapshot (20:59:30 UTC)',
     asOfMs: 1794949170000,
   },
   {
@@ -405,6 +409,17 @@ export default function MacroDataRoom({
     [dataset.relationships, asOfMs, temporalBasis, includeSuperseded],
   );
 
+  // Reconstruct point-in-time observations strictly enforcing publication & receipt clocks at `asOfMs`
+  const temporalObservations = useMemo(
+    () =>
+      dataset.observations.filter((obs) => {
+        if (obs.publishedAtMs > asOfMs) return false;
+        if (temporalBasis === 'receipt' && obs.receivedAtMs > asOfMs) return false;
+        return true;
+      }),
+    [dataset.observations, asOfMs, temporalBasis],
+  );
+
   const conflictGroups = useMemo(() => {
     const groups = new Map<string, MacroRelationship[]>();
     for (const rel of temporalSlice.activeRelationships) {
@@ -514,7 +529,7 @@ export default function MacroDataRoom({
     return generateBoundedGraphTldr({
       nodes,
       edges: edgeViews,
-      observations: dataset.observations,
+      observations: temporalObservations,
       conflicts: conflictGroups.map((cg) => ({
         conflictGroupId: cg.conflictGroupId,
         logicalEventId: cg.logicalEventId,
@@ -794,7 +809,9 @@ export default function MacroDataRoom({
       .map((id) => sourcesById.get(id))
       .filter((s): s is NonNullable<typeof s> => Boolean(s));
     const isVerifiedCase007LiveRecord =
-      graphSourceMode === 'LIVE_GRAPH' && rel.relationshipId.startsWith('rel-case007-');
+      graphSourceMode === 'LIVE_GRAPH' &&
+      (rel.relationshipId.startsWith('rel-case007-') ||
+        rel.relationshipId.startsWith('rel-case007b-'));
     const supersededTarget = rel.supersedesRelationshipId
       ? dataset.relationships.find((r) => r.relationshipId === rel.supersedesRelationshipId)
       : null;
@@ -1679,12 +1696,33 @@ export default function MacroDataRoom({
                         LIVE TYPEDB 3.14 OBSERVATIONS &amp; CONCEPT LEDGER ({liveTypeDbStatus.databaseName ?? 'live'})
                       </span>
                       <h2 style={{ fontSize: '17px', marginTop: '4px' }}>
-                        Financial &amp; Operational Observations Hydrated from TypeDB ({dataset.observations.length})
+                        Financial &amp; Operational Observations Hydrated from TypeDB ({temporalObservations.length} active at {new Date(asOfMs).toISOString()} / {dataset.observations.length} stored)
                       </h2>
                       <p style={{ fontSize: '12px', color: '#425265', marginTop: '4px' }}>
                         Every observation row below is read directly from live TypeDB{' '}
-                        <code>financial_observation</code> concepts; static repository fixtures are excluded.
+                        <code>financial_observation</code> concepts and filtered by{' '}
+                        <code>{temporalBasis}</code> clock &le; <code>{new Date(asOfMs).toISOString()}</code>; static repository fixtures are excluded. Direct commitments, contingent obligations, and maximum guarantees remain separately classified.
                       </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className={`button ${asOfMs === 1794949170000 ? 'primary' : 'secondary'}`}
+                        data-testid="snapshot-btn-case007a-pre"
+                        style={{ padding: '6px 10px', fontSize: '11px' }}
+                        onClick={() => setAsOfMs(1794949170000)}
+                      >
+                        Pre-Earnings Snapshot (2026-11-17 20:59:30Z)
+                      </button>
+                      <button
+                        type="button"
+                        className={`button ${asOfMs === 1794965700000 ? 'primary' : 'secondary'}`}
+                        data-testid="snapshot-btn-case007b-post"
+                        style={{ padding: '6px 10px', fontSize: '11px' }}
+                        onClick={() => setAsOfMs(1794965700000)}
+                      >
+                        Post-Earnings Snapshot (2026-11-18 01:35:00Z)
+                      </button>
                     </div>
                   </div>
                   <div style={{ overflowX: 'auto' }}>
@@ -1700,7 +1738,7 @@ export default function MacroDataRoom({
                         </tr>
                       </thead>
                       <tbody>
-                        {dataset.observations.map((obs) => (
+                        {temporalObservations.map((obs) => (
                           <tr key={obs.observationId} data-testid={`live-obs-${obs.observationId}`}>
                             <td>
                               <code>{obs.observationId}</code>
@@ -1719,7 +1757,9 @@ export default function MacroDataRoom({
                                 data-testid={`obs-kind-${obs.observationId}`}
                               >
                                 {obs.observationKind === 'forecast'
-                                  ? 'forecast (pre-results guidance)'
+                                  ? obs.observationId.includes('q4fy27')
+                                    ? 'forecast (forward outlook)'
+                                    : 'forecast (pre-results guidance)'
                                   : obs.observationKind === 'reported'
                                     ? 'reported actual'
                                     : obs.observationKind}
