@@ -99,6 +99,138 @@ export function computeCanonicalSha256(value: unknown): string {
   return sha256Hex(canonicalJson(value));
 }
 
+export const MAX_DATA_QUALITY_WARNING_CHARS = 480;
+export const MAX_DATA_QUALITY_WARNINGS_COUNT = 12;
+
+export type DataQualityWarningSeverity = 'INFO' | 'WARN' | 'CRITICAL';
+
+/**
+ * Formats a single data-quality warning with a deterministic `[SEVERITY:CODE]` prefix
+ * and guarantees `1 <= length <= maxChars <= MAX_DATA_QUALITY_WARNING_CHARS` (`480`).
+ */
+export function formatBoundedDataQualityWarning(
+  severity: DataQualityWarningSeverity,
+  code: string,
+  message: string,
+  maxChars: number = MAX_DATA_QUALITY_WARNING_CHARS,
+): string {
+  const limit = Math.max(80, Math.min(MAX_DATA_QUALITY_WARNING_CHARS, Math.floor(maxChars)));
+  const cleanMessage = message.replace(/\s+/g, ' ').trim();
+  const full = `[${severity}:${code}] ${cleanMessage}`;
+  if (full.length <= limit) {
+    return full;
+  }
+  const suffix = ` … [truncated to <=${limit} chars]`;
+  const headBudget = Math.max(1, limit - suffix.length);
+  return `${full.slice(0, headBudget).trimEnd()}${suffix}`;
+}
+
+/**
+ * Deterministically summarises a potentially large list of warning items (such as
+ * `25` non-confirmed relationships or `>20` quarantined sources) while preserving
+ * `[SEVERITY:CODE]`, sorted category counts, leading items, and explicit truncation metadata
+ * within `<= maxChars` (`480` default).
+ */
+export function summarizeBoundedWarningItems(params: {
+  severity: DataQualityWarningSeverity;
+  code: string;
+  leadText: string;
+  categoryCounts?: ReadonlyArray<readonly [string, number]>;
+  items: readonly string[];
+  maxItemChars?: number;
+  maxChars?: number;
+}): string {
+  const limit = Math.max(
+    120,
+    Math.min(MAX_DATA_QUALITY_WARNING_CHARS, Math.floor(params.maxChars ?? MAX_DATA_QUALITY_WARNING_CHARS)),
+  );
+  const maxItemChars = Math.max(24, Math.min(120, Math.floor(params.maxItemChars ?? 96)));
+  const categoryPart =
+    params.categoryCounts && params.categoryCounts.length > 0
+      ? ` [${params.categoryCounts.map(([k, v]) => `${k}=${v}`).join(', ')}]`
+      : '';
+  const lead = `${params.leadText.replace(/\s+/g, ' ').trim()}${categoryPart}`;
+  if (params.items.length === 0) {
+    return formatBoundedDataQualityWarning(params.severity, params.code, `${lead}.`, limit);
+  }
+
+  let anyItemClipped = false;
+  const sanitisedItems = params.items.map((raw) => {
+    const clean = raw.replace(/\s+/g, ' ').trim();
+    if (clean.length <= maxItemChars) return clean;
+    anyItemClipped = true;
+    return `${clean.slice(0, maxItemChars - 1)}…`;
+  });
+
+  const prefix = `[${params.severity}:${params.code}] ${lead}: `;
+  if (!anyItemClipped) {
+    const fullCandidate = `${prefix}${sanitisedItems.join(', ')}.`;
+    if (fullCandidate.length <= limit) {
+      return fullCandidate;
+    }
+  }
+
+  const preview: string[] = [];
+  for (let idx = 0; idx < sanitisedItems.length; idx += 1) {
+    const nextItem = sanitisedItems[idx]!;
+    const remainingAfterNext = sanitisedItems.length - (idx + 1);
+    const suffix =
+      remainingAfterNext > 0
+        ? `, … (+${remainingAfterNext} more omitted; truncated to <=${limit} chars).`
+        : anyItemClipped
+          ? ` (item IDs clipped; truncated to <=${limit} chars).`
+          : '.';
+    const candidate = `${prefix}${[...preview, nextItem].join(', ')}${suffix}`;
+    if (candidate.length <= limit) {
+      preview.push(nextItem);
+    } else {
+      if (preview.length === 0) {
+        const reserveSuffix = `, … (+${Math.max(0, sanitisedItems.length - 1)} more omitted; truncated to <=${limit} chars).`;
+        const itemBudget = Math.max(8, limit - prefix.length - reserveSuffix.length);
+        if (prefix.length + 8 + reserveSuffix.length <= limit) {
+          preview.push(`${nextItem.slice(0, Math.max(1, itemBudget - 1))}…`);
+        }
+      }
+      break;
+    }
+  }
+
+  const omittedCount = Math.max(0, sanitisedItems.length - preview.length);
+  const body =
+    preview.length > 0
+      ? omittedCount > 0
+        ? `${lead}: ${preview.join(', ')}, … (+${omittedCount} more omitted; truncated to <=${limit} chars).`
+        : anyItemClipped
+          ? `${lead}: ${preview.join(', ')} (item IDs clipped; truncated to <=${limit} chars).`
+          : `${lead}: ${preview.join(', ')}.`
+      : `${lead} (${sanitisedItems.length} item(s) omitted; truncated to <=${limit} chars).`;
+
+  return formatBoundedDataQualityWarning(params.severity, params.code, body, limit);
+}
+
+export function finalizeBoundedDataQualityWarnings(rawWarnings: readonly string[]): string[] {
+  const bounded = rawWarnings
+    .filter((w) => w.trim().length > 0)
+    .map((w) =>
+      w.length <= MAX_DATA_QUALITY_WARNING_CHARS
+        ? w
+        : formatBoundedDataQualityWarning('WARN', 'WARNING_CLAMPED', w, MAX_DATA_QUALITY_WARNING_CHARS),
+    );
+  if (bounded.length <= MAX_DATA_QUALITY_WARNINGS_COUNT) {
+    return bounded;
+  }
+  const keptCount = MAX_DATA_QUALITY_WARNINGS_COUNT - 1;
+  const omittedCount = bounded.length - keptCount;
+  return [
+    ...bounded.slice(0, keptCount),
+    formatBoundedDataQualityWarning(
+      'INFO',
+      'WARNINGS_TRUNCATED',
+      `+${omittedCount} additional data-quality warning(s) omitted to stay within the ${MAX_DATA_QUALITY_WARNINGS_COUNT}-warning bundle ceiling (truncated to <=${MAX_DATA_QUALITY_WARNING_CHARS} chars).`,
+    ),
+  ];
+}
+
 /**
  * Deterministic, allowlisted intent selector.
  * Maps a natural-language question to one of the 6 allowlisted graph query types and safe parameters.
@@ -833,22 +965,38 @@ export async function retrieveClosedEvidenceBundle(
     }
   }
   let quarantinedAdversarialSourcesCount = 0;
-  const warnings: string[] = [];
+  const rawWarnings: string[] = [];
 
   if (intent.securityBlockedReason) {
-    warnings.push(intent.securityBlockedReason);
+    rawWarnings.push(
+      formatBoundedDataQualityWarning(
+        'CRITICAL',
+        'SECURITY_BLOCKED',
+        intent.securityBlockedReason,
+        340,
+      ),
+    );
   }
   if (
     options.simulateTypeDbOutage === true ||
     (options.preferLiveTypeDb && gatewayRes.backendMode !== 'typedb_live')
   ) {
-    warnings.push(
-      'TypeDB Cloud read endpoint was unreachable or timed out during retrieval; served from verified Convex deterministic outbox mirror without graph data loss.',
+    rawWarnings.push(
+      formatBoundedDataQualityWarning(
+        'WARN',
+        'TYPEDB_MIRROR_FALLBACK',
+        'TypeDB Cloud read endpoint was unreachable or timed out during retrieval; served from verified Convex deterministic outbox mirror without graph data loss.',
+      ),
     );
   }
   if (excludedByHistoricalCutoffCount > 0) {
-    warnings.push(
-      `Historical cutoff (${new Date(historicalCutoffMs).toISOString().slice(0, 10)}, ${temporalBasis} clock) excluded ${excludedByHistoricalCutoffCount} later-dated relationship record(s) to prevent hindsight leakage.`,
+    rawWarnings.push(
+      formatBoundedDataQualityWarning(
+        'INFO',
+        'HISTORICAL_CUTOFF_APPLIED',
+        `Historical cutoff (${new Date(historicalCutoffMs).toISOString().slice(0, 10)}, ${temporalBasis} clock) excluded ${excludedByHistoricalCutoffCount} later-dated relationship record(s) to prevent hindsight leakage.`,
+        340,
+      ),
     );
   }
 
@@ -869,6 +1017,7 @@ export async function retrieveClosedEvidenceBundle(
     }
   }
 
+  const quarantinedSourceSummaries: Array<{ docId: string; reasons: string[] }> = [];
   const eligibleSources: EvidenceBundleV1['sources'] = [];
   for (const src of allCandidateSources) {
     const rawExcerpt =
@@ -878,9 +1027,10 @@ export async function retrieveClosedEvidenceBundle(
     const check = detectAdversarialContent(`${src.title} ${rawExcerpt}`);
     if (check.blocked) {
       quarantinedAdversarialSourcesCount += 1;
-      warnings.push(
-        `Quarantined untrusted source document '${src.sourceDocId}' due to adversarial instruction pattern (${check.reasons.join(', ')}).`,
-      );
+      quarantinedSourceSummaries.push({
+        docId: src.sourceDocId,
+        reasons: [...check.reasons],
+      });
       continue;
     }
     if (
@@ -917,6 +1067,36 @@ export async function retrieveClosedEvidenceBundle(
       sha256Hash: src.contentSha256,
       excerpt: rawExcerpt.slice(0, EVIDENCE_RETRIEVAL_LIMITS.maxExcerptCharsPerDoc),
     });
+  }
+
+  if (quarantinedSourceSummaries.length === 1) {
+    const only = quarantinedSourceSummaries[0]!;
+    rawWarnings.push(
+      formatBoundedDataQualityWarning(
+        'CRITICAL',
+        'ADVERSARIAL_SOURCE_QUARANTINED',
+        `Quarantined untrusted source document '${only.docId}' due to adversarial instruction pattern (${only.reasons.join(', ')}).`,
+      ),
+    );
+  } else if (quarantinedSourceSummaries.length > 1) {
+    const reasonTally = new Map<string, number>();
+    for (const q of quarantinedSourceSummaries) {
+      for (const reason of q.reasons) {
+        reasonTally.set(reason, (reasonTally.get(reason) ?? 0) + 1);
+      }
+    }
+    const sortedReasonCounts = [...reasonTally.entries()].sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    rawWarnings.push(
+      summarizeBoundedWarningItems({
+        severity: 'CRITICAL',
+        code: 'ADVERSARIAL_SOURCE_QUARANTINED',
+        leadText: `Quarantined ${quarantinedSourceSummaries.length} untrusted source documents due to adversarial instruction patterns`,
+        categoryCounts: sortedReasonCounts,
+        items: quarantinedSourceSummaries.map((q) => `'${q.docId}' (${q.reasons.join('+')})`),
+      }),
+    );
   }
 
   // Sort focal-relationship & scenario sources first, then referenced sources, and cap at maxEvidenceDocuments
@@ -974,7 +1154,7 @@ export async function retrieveClosedEvidenceBundle(
     EVIDENCE_RETRIEVAL_LIMITS.maxEvidenceDocuments,
   );
 
-  // Check for reported/unverified or conflicting claims in scope
+  // Check for reported/unverified or conflicting claims in scope (bounded to <=480 chars)
   const unverifiedOrReportedInScope = boundedRels.filter(
     (r) =>
       r.epistemicStatus === 'reported' ||
@@ -983,13 +1163,76 @@ export async function retrieveClosedEvidenceBundle(
       r.contractualStatus === 'cancelled',
   );
   if (unverifiedOrReportedInScope.length > 0) {
-    warnings.push(
-      `Bundle includes ${unverifiedOrReportedInScope.length} relationship(s) with non-confirmed or cancelled status (${unverifiedOrReportedInScope.map((r) => `${r.relationshipId}:${r.epistemicStatus}/${r.contractualStatus}`).join(', ')}).`,
+    const statusTally = new Map<string, number>();
+    for (const rel of unverifiedOrReportedInScope) {
+      const statusKey = `${rel.epistemicStatus}/${rel.contractualStatus}`;
+      statusTally.set(statusKey, (statusTally.get(statusKey) ?? 0) + 1);
+    }
+    const sortedStatusCounts = [...statusTally.entries()].sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    rawWarnings.push(
+      summarizeBoundedWarningItems({
+        severity: 'WARN',
+        code: 'NON_CONFIRMED_STATUS',
+        leadText: `Bundle includes ${unverifiedOrReportedInScope.length} relationship(s) with non-confirmed or cancelled status`,
+        categoryCounts: sortedStatusCounts,
+        items: unverifiedOrReportedInScope.map(
+          (r) => `${r.relationshipId}:${r.epistemicStatus}/${r.contractualStatus}`,
+        ),
+      }),
     );
   }
 
   // Scenarios (filtered by temporal eligibility of their source documents)
   const allEligibleSourceDocIds = new Set(eligibleSources.map((s) => s.docId));
+
+  // Detect any referenced primary source documents missing or quarantined out of the eligible source pool
+  if (
+    intent.intentCategory !== 'out_of_scope_or_unsupported' &&
+    intent.intentCategory !== 'security_blocked'
+  ) {
+    const missingDocRefs: string[] = [];
+    const seenMissingPairs = new Set<string>();
+    const missingDocIdSet = new Set<string>();
+    for (const rel of boundedRels) {
+      for (const docId of rel.sourceDocIds) {
+        if (!allEligibleSourceDocIds.has(docId)) {
+          missingDocIdSet.add(docId);
+          const pair = `${docId}<-${rel.relationshipId}`;
+          if (!seenMissingPairs.has(pair)) {
+            seenMissingPairs.add(pair);
+            missingDocRefs.push(pair);
+          }
+        }
+      }
+    }
+    for (const claim of eligibleClaims) {
+      for (const docId of claim.sourceDocIds) {
+        if (!allEligibleSourceDocIds.has(docId)) {
+          missingDocIdSet.add(docId);
+          const pair = `${docId}<-${claim.claimId}`;
+          if (!seenMissingPairs.has(pair)) {
+            seenMissingPairs.add(pair);
+            missingDocRefs.push(pair);
+          }
+        }
+      }
+    }
+    if (missingDocIdSet.size > 0) {
+      rawWarnings.push(
+        summarizeBoundedWarningItems({
+          severity: 'WARN',
+          code: 'MISSING_EVIDENCE_SOURCE',
+          leadText: `Unavailable or quarantined primary source document(s) referenced in bundle`,
+          categoryCounts: [['missing_docs', missingDocIdSet.size]],
+          items: missingDocRefs,
+          maxChars: 360,
+        }),
+      );
+    }
+  }
+
   const eligibleScenarios =
     intent.intentCategory === 'out_of_scope_or_unsupported' ||
     intent.intentCategory === 'security_blocked' ||
@@ -1011,6 +1254,26 @@ export async function retrieveClosedEvidenceBundle(
           fiscalAndTaxChannelSummary: sc.fiscalAndTaxChannelSummary,
           sourceDocIds: sc.sourceDocIds,
         }));
+
+  if (
+    boundedRels.length === 0 &&
+    eligibleClaims.length === 0 &&
+    boundedSources.length === 0 &&
+    eligibleScenarios.length === 0 &&
+    intent.intentCategory !== 'out_of_scope_or_unsupported' &&
+    intent.intentCategory !== 'security_blocked'
+  ) {
+    rawWarnings.push(
+      formatBoundedDataQualityWarning(
+        'INFO',
+        'EMPTY_EVIDENCE_BUNDLE',
+        'No temporally eligible relationships, quantitative observations, or primary source documents matched the closed query scope; synthesis must abstain.',
+        320,
+      ),
+    );
+  }
+
+  const warnings = finalizeBoundedDataQualityWarnings(rawWarnings);
 
   // Compute non-double-counted commitment arithmetic strictly on temporally eligible relationships
   const filteredDatasetForLedger: MacroGraphDataset = {

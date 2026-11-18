@@ -31,13 +31,17 @@ export function isLegacyMacroCase001Bundle(bundle: EvidenceBundleV1): boolean {
   );
 }
 
-function formatUsdCompact(valueUsd: number): string {
+function formatUsdCompact(valueUsd: number, maxBillionDecimals: 2 | 3 = 3): string {
   const abs = Math.abs(valueUsd);
   const sign = valueUsd < 0 ? '-' : '';
   if (abs >= 1_000_000_000) {
-    const b3 = Number((abs / 1_000_000_000).toFixed(3));
     const b2 = Number((abs / 1_000_000_000).toFixed(2));
     const b1 = Number((abs / 1_000_000_000).toFixed(1));
+    if (maxBillionDecimals === 2) {
+      if (Math.abs(b2 - b1) < 1e-6) return `${sign}$${b1.toFixed(1)}B`;
+      return `${sign}$${b2.toFixed(2)}B`;
+    }
+    const b3 = Number((abs / 1_000_000_000).toFixed(3));
     if (Math.abs(b3 - b1) < 1e-6) return `${sign}$${b1.toFixed(1)}B`;
     if (Math.abs(b3 - b2) < 1e-6) return `${sign}$${b2.toFixed(2)}B`;
     return `${sign}$${b3.toFixed(3)}B`;
@@ -405,7 +409,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         periodOrAsOf: q3Fcf.asOfDate,
       });
       tldrBullets.push(
-        `Q3 Profitability & Cash Conversion (Reported): Data Center revenue ${formatClaimValue(q3Dc)}, GAAP GM ${formatClaimValue(q3GaapGm)} (Non-GAAP ${q3NonGaapGm ? formatClaimValue(q3NonGaapGm) : '74.9%'}), and Free Cash Flow ${formatClaimValue(q3Fcf)}.`,
+        `Q3 Profitability & Cash Conversion (Reported): Data Center revenue ${formatClaimValue(q3Dc)}, GAAP GM ${formatClaimValue(q3GaapGm)}${q3NonGaapGm ? ` (Non-GAAP ${formatClaimValue(q3NonGaapGm)})` : ''}, and Free Cash Flow ${formatClaimValue(q3Fcf)}.`,
       );
     }
 
@@ -422,7 +426,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         periodOrAsOf: cutoffIsoDate,
       });
       tldrBullets.push(
-        `Q4 FY27 Official Outlook (Forecast Only, 14-Week Quarter): ${formatClaimValue(q4GuideRev)} (+/- 3%, ex-China DC compute) revenue and 71.0%-72.0% gross margin (-330 to -340 bps Q/Q compression on Rubin ramp).`,
+        `Q4 FY27 Official Outlook (Forecast Only, 14-Week Quarter): ${formatClaimValue(q4GuideRev)} (+/- 3%, ex-China DC compute) revenue${q4GuideGm ? ' and 71.0%-72.0% gross margin (-330 to -340 bps Q/Q compression on Rubin ramp)' : ''}.`,
       );
     }
   }
@@ -440,7 +444,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     if (q3Capex) {
       pushClaim({
         claimId: 'sc-q3fy27-capex-actual',
-        statement: `[Reported Cash CapEx] Q3 FY27 purchases of property, equipment, and intangible assets were ${formatClaimValue(q3Capex)} (up from $2,677M in Q2 FY27 and $1,637M in Q3 FY26; 9M FY27 cumulative $8,856M, EX-99.1 & EX-99.2).`,
+        statement: `[Reported Cash CapEx] Q3 FY27 purchases of property, equipment, and intangible assets were ${formatClaimValue(q3Capex)} (EX-99.1 & EX-99.2).`,
         distinction: 'source_fact',
         evidenceIds: [...q3Capex.sourceDocIds, q3Capex.claimId],
         relationshipIds: [],
@@ -452,9 +456,12 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     }
     if (supplyTotal || directTotal) {
       const primaryClaim = directTotal ?? supplyTotal!;
+      const directLead = directTotal
+        ? `NVIDIA's direct commitments total ${formatClaimValue(directTotal)}${supplyTotal ? `, led by ${formatClaimValue(supplyTotal)} in multi-year supply and capacity purchase obligations` : ''}`
+        : `NVIDIA's multi-year supply and capacity purchase obligations total ${formatClaimValue(supplyTotal!)}`;
       pushClaim({
         claimId: 'sc-q3fy27-supply-and-direct-commitments',
-        statement: `[Direct Contractual Commitments — Separate Accounting Class] As of 2026-10-25 (EX-99.2), NVIDIA's direct commitments total ${directTotal ? formatClaimValue(directTotal) : '$518.0B'}, led by ${supplyTotal ? formatClaimValue(supplyTotal) : '$390.0B'} in multi-year supply and capacity purchase obligations ($203B due in FY28, $92B in FY29), alongside $74B uncommenced data-center leases, $28B cloud service agreements, $20B equity investment commitments, and $6B committed capex.`,
+        statement: `[Direct Contractual Commitments — Separate Accounting Class] As of 2026-10-25 (EX-99.2), ${directLead} ($203B due in FY28, $92B in FY29), alongside $74B uncommenced data-center leases, $28B cloud service agreements, $20B equity investment commitments, and $6B committed capex.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...primaryClaim.sourceDocIds,
@@ -467,15 +474,23 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         currency: 'USD',
         periodOrAsOf: primaryClaim.asOfDate,
       });
-      tldrBullets.push(
-        `CapEx & Supply Commitments (Reported): Q3 cash PP&E/intangible capex was ${q3Capex ? formatClaimValue(q3Capex) : '$4,422M'}, while undiscounted direct contractual commitments rose to ${directTotal ? formatClaimValue(directTotal) : '$518.0B'} (including ${supplyTotal ? formatClaimValue(supplyTotal) : '$390.0B'} supply obligations).`,
-      );
+      const capexPart = q3Capex ? `Q3 cash PP&E/intangible capex was ${formatClaimValue(q3Capex)}, while ` : '';
+      const commitPart = directTotal
+        ? `undiscounted direct contractual commitments rose to ${formatClaimValue(directTotal)}${supplyTotal ? ` (including ${formatClaimValue(supplyTotal)} supply obligations)` : ''}`
+        : `multi-year supply obligations reached ${formatClaimValue(supplyTotal!)}`;
+      tldrBullets.push(`CapEx & Supply Commitments (Reported): ${capexPart}${commitPart}.`);
     }
     if (custConc || arClaim) {
       const refClaim = custConc ?? arClaim!;
+      const concSentence = custConc
+        ? `three unnamed direct customers accounted for 14%, 11%, and 11% (${formatClaimValue(custConc)} combined) of total revenue`
+        : 'major direct customer revenue shares remain anonymised';
+      const arSentence = arClaim
+        ? `, while two unnamed direct customers represented 18% and 17% (35% combined) of ${formatClaimValue(arClaim)} net accounts receivable (64 DSO on extended payment terms)`
+        : '';
       pushClaim({
         claimId: 'sc-q3fy27-customer-and-ar-concentration',
-        statement: `[Reported Customer & AR Concentration — Unnamed Counterparties] In Q3 FY27 (EX-99.3 p. 7), three unnamed direct customers accounted for 14%, 11%, and 11% (${custConc ? formatClaimValue(custConc) : '36%'} combined) of total revenue in Compute & Networking, while two unnamed direct customers represented 18% and 17% (35% combined) of ${arClaim ? formatClaimValue(arClaim) : '$81.033B'} net accounts receivable (64 DSO on extended payment terms).`,
+        statement: `[Reported Customer & AR Concentration — Unnamed Counterparties] In Q3 FY27 (EX-99.3), ${concSentence}${arSentence}.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...refClaim.sourceDocIds,
@@ -489,7 +504,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         periodOrAsOf: refClaim.asOfDate,
       });
       tldrBullets.push(
-        `Customer & Receivable Concentration (EX-99.3): Top 3 unnamed direct customers generated 14%, 11%, and 11% (36%) of Q3 revenue; top 2 represented 18% and 17% (35%) of $81.033B net AR (64 DSO).`,
+        `Customer & Receivable Concentration (EX-99.3): ${custConc ? `Top 3 unnamed direct customers generated 14%, 11%, and 11% (${formatClaimValue(custConc)}) of Q3 revenue` : 'Direct customer identities are unnamed'}${arClaim ? `; top 2 represented 18% and 17% (35%) of ${formatClaimValue(arClaim)} net AR (64 DSO)` : ''}.`,
       );
       if (!missingInformation.some((m) => m.includes('Specific legal identities'))) {
         missingInformation.push(
@@ -514,12 +529,21 @@ export function synthesizeQuestionAwareEvidenceAnswer(
 
     if (directTotal || supplyTotal || notesRel) {
       const baseClaim = directTotal ?? supplyTotal;
+      const notesAmtStr =
+        notesRel?.principalAmount != null ? `${formatUsdCompact(notesRel.principalAmount)} in ` : '';
       const debtPhrase = ltDebtObs
-        ? `${notesRel?.principalAmount ? formatUsdCompact(notesRel.principalAmount) : '$25.0B'} in funded senior notes (${formatClaimValue(ltDebtObs)} carrying long-term debt, EX-99.3)`
-        : `${notesRel?.principalAmount ? formatUsdCompact(notesRel.principalAmount) : '$25.0B'} in funded senior notes (Form 8-K 0001045810-26-000083)`;
+        ? `${notesAmtStr}funded senior notes (${formatClaimValue(ltDebtObs)} carrying long-term debt, EX-99.3)`
+        : notesRel
+          ? `${notesAmtStr}funded senior notes (Form 8-K 0001045810-26-000083)`
+          : 'recognised balance-sheet debt';
+      const directAmtStr = directTotal
+        ? `${formatClaimValue(directTotal)} in direct contractual commitments`
+        : supplyTotal
+          ? `${formatClaimValue(supplyTotal)} in direct supply commitments`
+          : 'direct contractual commitments';
       pushClaim({
         claimId: 'sc-class1-direct-commitments-and-funded-debt',
-        statement: `[Class 1 — Direct Contractual Commitments & Funded Debt] NVIDIA reports ${directTotal ? formatClaimValue(directTotal) : '$518.0B'} in direct contractual commitments as of 2026-10-25 (Supply $390B, Uncommenced DC Leases $74B, Cloud Services $28B, Equity Investments $20B, CapEx $6B; EX-99.2), separate from ${debtPhrase}.`,
+        statement: `[Class 1 — Direct Contractual Commitments & Funded Debt] NVIDIA reports ${directAmtStr} as of 2026-10-25 (${supplyTotal ? `Supply ${formatClaimValue(supplyTotal)}, ` : ''}Uncommenced DC Leases $74B, Cloud Services $28B, Equity Investments $20B, CapEx $6B; EX-99.2), separate from ${debtPhrase}.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(baseClaim ? [...baseClaim.sourceDocIds, baseClaim.claimId] : []),
@@ -528,54 +552,77 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         ],
         relationshipIds: notesRel ? [notesRel.relationshipId] : [],
         quantitativeValue: baseClaim?.quantitativeValue ?? notesRel?.principalAmount ?? null,
-        unit: 'USD',
-        currency: 'USD',
+        unit: baseClaim?.quantitativeValue != null || notesRel?.principalAmount != null ? 'USD' : null,
+        currency: baseClaim?.quantitativeValue != null || notesRel?.principalAmount != null ? 'USD' : null,
         periodOrAsOf: baseClaim?.asOfDate ?? cutoffIsoDate,
       });
     }
 
     if (neocloudRel || neocloudObs) {
+      const neocloudVal = neocloudObs?.quantitativeValue ?? neocloudRel?.principalAmount ?? null;
+      const neocloudValStr = neocloudVal !== null ? `Up to ${formatUsdCompact(neocloudVal)}` : 'Contingent commitments';
       pushClaim({
         claimId: 'sc-class2-contingent-neocloud-backstop',
-        statement: `[Class 2 — Contingent Neocloud Commitments, Non-Binding Until Deployed] Up to ${neocloudObs ? formatClaimValue(neocloudObs) : '$32.0B'} across unnamed neocloud agreements (FY28 $6B, FY29 $7B, FY30 $6B, FY31 $5B, FY32+ $8B; EX-99.2 Additional Commitments) takes effect ONLY if neoclouds secure financing and deploy operational capacity accepted by NVIDIA (bindingObligation: false).`,
+        statement: `[Class 2 — Contingent Neocloud Commitments, Non-Binding Until Deployed] ${neocloudValStr} across unnamed neocloud agreements (EX-99.2 Additional Commitments) takes effect ONLY if neoclouds secure financing and deploy operational capacity accepted by NVIDIA (bindingObligation: false).`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(neocloudObs ? [...neocloudObs.sourceDocIds, neocloudObs.claimId] : []),
           ...(neocloudRel ? neocloudRel.sourceDocIds : []),
         ],
         relationshipIds: neocloudRel ? [neocloudRel.relationshipId] : [],
-        quantitativeValue: neocloudObs?.quantitativeValue ?? neocloudRel?.principalAmount ?? 32_000_000_000,
-        unit: 'USD',
-        currency: 'USD',
+        quantitativeValue: neocloudVal,
+        unit: neocloudVal !== null ? 'USD' : null,
+        currency: neocloudVal !== null ? 'USD' : null,
         periodOrAsOf: neocloudObs?.asOfDate ?? cutoffIsoDate,
       });
     }
 
     if (sbGuarRel || maxGuarObs) {
+      const guarVal = maxGuarObs?.quantitativeValue ?? sbGuarRel?.principalAmount ?? null;
+      const maxCapStr = maxGuarObs ? `is capped at ${formatClaimValue(maxGuarObs)}` : 'is tracked separately';
+      const sbPartStr =
+        sbGuarRel?.principalAmount != null
+          ? `comprising ${formatUsdCompact(sbGuarRel.principalAmount)} SB Energy residual-value lease guaranties for OpenAI's 4.25 GW Ohio PORTS campus (effective phase-by-phase only upon FY2029+ ready-for-service, indemnified by OpenAI, 0001045810-26-000069)`
+          : 'including SB Energy / OpenAI Ohio lease residual guaranties';
       pushClaim({
         claimId: 'sc-class3-off-balance-sheet-guarantees',
-        statement: `[Class 3 — Off-Balance-Sheet Credit Guarantees, $0 Paid] Maximum gross guarantee exposure is capped at ${maxGuarObs ? formatClaimValue(maxGuarObs) : '$118.0B'} ($0 paid to date; EX-99.2), comprising ${sbGuarRel?.principalAmount ? formatUsdCompact(sbGuarRel.principalAmount) : '$105.0B'} SB Energy residual-value lease guaranties for OpenAI's 4.25 GW Ohio PORTS campus (effective phase-by-phase only upon FY2029+ ready-for-service, indemnified by OpenAI, 0001045810-26-000069), $9.5B power/systems guarantees, and $3.5B neocloud shell guarantees.`,
+        statement: `[Class 3 — Off-Balance-Sheet Credit Guarantees, $0 Paid] Maximum gross guarantee exposure ${maxCapStr} ($0 paid to date; EX-99.2), ${sbPartStr}, $9.5B power/systems guarantees, and $3.5B neocloud shell guarantees.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(sbGuarRel ? sbGuarRel.sourceDocIds : []),
           ...(maxGuarObs ? [...maxGuarObs.sourceDocIds, maxGuarObs.claimId] : []),
         ],
         relationshipIds: sbGuarRel ? [sbGuarRel.relationshipId] : [],
-        quantitativeValue: maxGuarObs?.quantitativeValue ?? sbGuarRel?.principalAmount ?? 118_000_000_000,
-        unit: 'USD',
-        currency: 'USD',
+        quantitativeValue: guarVal,
+        unit: guarVal !== null ? 'USD' : null,
+        currency: guarVal !== null ? 'USD' : null,
         periodOrAsOf: maxGuarObs?.asOfDate ?? cutoffIsoDate,
       });
     }
 
+    const class1TldrAmt = directTotal ? ` (${formatClaimValue(directTotal)})` : '';
+    const notesTldrAmt =
+      notesRel?.principalAmount != null
+        ? ` (${formatUsdCompact(notesRel.principalAmount)} Notes${ltDebtObs ? ` / ${formatClaimValue(ltDebtObs)} LT Debt` : ''})`
+        : '';
+    const class2TldrAmt =
+      neocloudObs?.quantitativeValue != null
+        ? ` (${formatClaimValue(neocloudObs)} Cap)`
+        : neocloudRel?.principalAmount != null
+          ? ` (${formatUsdCompact(neocloudRel.principalAmount)} Cap)`
+          : '';
+    const class3TldrAmt = maxGuarObs ? ` (${formatClaimValue(maxGuarObs)} Cap, $0 Paid)` : ' ($0 Paid)';
+    const sbTldrAmt =
+      sbGuarRel?.principalAmount != null ? `${formatUsdCompact(sbGuarRel.principalAmount)} ` : '';
+
     tldrBullets.push(
-      `Direct Contractual Commitments (${directTotal ? formatClaimValue(directTotal) : '$518.0B'}) & Funded Debt (${notesRel?.principalAmount ? formatUsdCompact(notesRel.principalAmount) : '$25.0B'} Notes${ltDebtObs ? ` / ${formatClaimValue(ltDebtObs)} LT Debt` : ''}): Fixed/scheduled procurement ($390B supply) and uncommenced lease ($74B) obligations.`,
+      `Direct Contractual Commitments${class1TldrAmt} & Funded Debt${notesTldrAmt}: Fixed/scheduled procurement${supplyTotal ? ` (${formatClaimValue(supplyTotal)} supply)` : ''} and uncommenced lease obligations.`,
     );
     tldrBullets.push(
-      'Contingent Neocloud Commitments ($32.0B Cap): Unrecognised off-balance-sheet exposure conditioned on third-party financing and NVIDIA acceptance of operational capacity.',
+      `Contingent Neocloud Commitments${class2TldrAmt}: Unrecognised off-balance-sheet exposure conditioned on third-party financing and NVIDIA acceptance of operational capacity.`,
     );
     tldrBullets.push(
-      'Maximum Gross Credit Guarantees ($118.0B Cap, $0 Paid): Includes $105.0B SB Energy / OpenAI 4.25 GW Ohio residual-value lease guarantee (FY2029+ RFS trigger), $9.5B power/systems, and $3.5B neocloud guarantees — never summed into recognised debt.',
+      `Maximum Gross Credit Guarantees${class3TldrAmt}: Includes ${sbTldrAmt}SB Energy / OpenAI Ohio residual-value lease guarantee (FY2029+ RFS trigger) — never summed into recognised debt.`,
     );
   }
 
@@ -661,6 +708,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
 
   // =========================================================================
   // TOPIC 5: Counterparty Ecosystem & Shared Financial Counterparties (Q5, Q5b)
+  // B-007 Invariant: Never emit a financial quantity for any relationship or observation absent from `bundle`.
   // =========================================================================
   if (isNvidiaFocalBundle && (signals.asksCounterparties || signals.asksSharedCounterparties)) {
     const anthropicHw =
@@ -670,6 +718,23 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     const msftPp = findRel('rel-case007-msft-anthropic-pp-r1');
     const googlPp = findRel('rel-case007-googl-anthropic-pp-r1');
     const amdPp = findRel('rel-case007-amd-anthropic-pp-r1');
+    const orgNameById = new Map(bundle.organisations.map((o) => [o.orgId, o.displayName]));
+    const extraAnthropicPpRels = bundle.relationships.filter(
+      (r) =>
+        r.relationshipType === 'ownership_stake' &&
+        r.epistemicStatus === 'proposed' &&
+        r.participants.some(
+          (p) =>
+            (p.role === 'investee_or_issuer' || p.role === 'owned_entity') &&
+            p.entityId === 'org-anthropic',
+        ) &&
+        ![
+          anthropicPp?.relationshipId,
+          msftPp?.relationshipId,
+          googlPp?.relationshipId,
+          amdPp?.relationshipId,
+        ].includes(r.relationshipId),
+    );
     const crwv13f = findRel('rel-case007-nvda-13f-crwv-r1');
     const crwvCloud = findRel('rel-case007b-nvda-crwv-vera-rubin-cloud-r1');
     const googlCloud = findRel('rel-case007b-nvda-googl-vera-rubin-a5x-r1');
@@ -678,36 +743,90 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     const nbis13f = findRel('rel-case007-nvda-13f-nbis-r1');
     const intc13f = findRel('rel-case007-nvda-13f-intc-r1');
     const spacex13f = findRel('rel-case007-nvda-13f-spacex-r1');
+    const cohr13f = findRel('rel-case007-nvda-13f-cohr-r1');
+    const snps13f = findRel('rel-case007-nvda-13f-snps-r1');
+    const nok13f = findRel('rel-case007-nvda-13f-nok-r1');
+    const genb13f = findRel('rel-case007-nvda-13f-genb-r1');
     const portfolio13f = findClaim('obs-nvda-13f-q3-2026-total-portfolio');
     const sbGuarRel = findRel('rel-case007b-nvda-sbenergy-openai-ports-guarantee-r1');
     const ex991Src = sourceById.get('doc-nvda-q3fy27-ex991-20261117');
+    const s1a2Src = sourceById.get('doc-anthropic-s1a2-20261110');
 
-    const nvdaPpStr = anthropicPp?.principalAmount ? formatUsdCompact(anthropicPp.principalAmount) : '$10.0B';
-    const googlPpStr = googlPp?.principalAmount ? formatUsdCompact(googlPp.principalAmount) : '$10.0B';
-    const amdPpStr = amdPp?.principalAmount ? formatUsdCompact(amdPp.principalAmount) : '$2.5B';
-    const msftPpStr = msftPp?.principalAmount ? formatUsdCompact(msftPp.principalAmount) : '$1.0B';
+    const formatGroundedCoInvestor = (
+      label: string,
+      rel: EvidenceBundleV1['relationships'][number] | null,
+      approx = true,
+    ): string => {
+      if (rel && rel.principalAmount !== null && rel.principalAmount > 0) {
+        return `${label} (${approx ? '~' : ''}${formatUsdCompact(rel.principalAmount, 2)})`;
+      }
+      return label;
+    };
 
-    if (anthropicHw || anthropicPp) {
+    const nvdaSyndicateLabel = formatGroundedCoInvestor('NVIDIA', anthropicPp);
+    const googlSyndicateLabel = formatGroundedCoInvestor('Alphabet', googlPp);
+    const amdSyndicateLabel = formatGroundedCoInvestor('AMD', amdPp);
+    const msftSyndicateLabel = formatGroundedCoInvestor('Microsoft', msftPp);
+
+    const syndicateMemberLabels: string[] = [];
+    if (anthropicPp || s1a2Src) syndicateMemberLabels.push(nvdaSyndicateLabel);
+    if (googlPp || s1a2Src) syndicateMemberLabels.push(googlSyndicateLabel);
+    if (amdPp || s1a2Src) syndicateMemberLabels.push(amdSyndicateLabel);
+    if (msftPp || s1a2Src) syndicateMemberLabels.push(msftSyndicateLabel);
+    for (const extraRel of extraAnthropicPpRels) {
+      const investorPart = extraRel.participants.find(
+        (p) => p.role === 'investor_or_lender' || p.role === 'owner_entity',
+      );
+      const ownerLabel =
+        (investorPart ? orgNameById.get(investorPart.entityId) : undefined) ??
+        investorPart?.entityLabel ??
+        'Co-Investor';
+      syndicateMemberLabels.push(formatGroundedCoInvestor(ownerLabel, extraRel));
+    }
+    const has26bInS1Source =
+      s1a2Src !== undefined &&
+      /\b26(?:\.0)?\s*(?:B|billion)\b/i.test(`${s1a2Src.title} ${s1a2Src.excerpt}`);
+    const syndicateTotalPrefix = has26bInS1Source ? '$26.0B ' : '';
+    const syndicateListText =
+      syndicateMemberLabels.length > 1
+        ? `${syndicateMemberLabels.slice(0, -1).join(', ')}, and ${syndicateMemberLabels[syndicateMemberLabels.length - 1]}`
+        : (syndicateMemberLabels[0] ?? 'strategic co-investors');
+
+    if (anthropicHw || anthropicPp || msftPp || googlPp || amdPp || extraAnthropicPpRels.length > 0) {
       const coRels = [
         ...(anthropicHw ? [anthropicHw.relationshipId] : []),
         ...(anthropicPp ? [anthropicPp.relationshipId] : []),
         ...(msftPp ? [msftPp.relationshipId] : []),
         ...(googlPp ? [googlPp.relationshipId] : []),
         ...(amdPp ? [amdPp.relationshipId] : []),
+        ...extraAnthropicPpRels.map((r) => r.relationshipId),
       ];
+      const primaryQuantPp =
+        anthropicPp?.principalAmount ??
+        googlPp?.principalAmount ??
+        amdPp?.principalAmount ??
+        msftPp?.principalAmount ??
+        extraAnthropicPpRels[0]?.principalAmount ??
+        null;
       pushClaim({
         claimId: 'sc-cp-anthropic-co-investors-and-hardware',
-        statement: `[Anthropic & Shared Co-Investors — Confirmed Collaboration vs Contingent Placement] NVIDIA maintains a confirmed Grace Blackwell & Vera Rubin cloud/engineering collaboration with Anthropic (${anthropicHw?.relationshipId ?? 'r2'}) while sharing Anthropic's $26.0B IPO-contingent Class N private-placement syndicate (proposed/contingent_signed, not completed ownership) alongside NVIDIA (~${nvdaPpStr}), Alphabet (~${googlPpStr}), AMD (~${amdPpStr}), and Microsoft (~${msftPpStr}) (S-1/A-2 0001628280-26-072484).`,
-        distinction: anthropicPp ? 'reported_unverified' : 'source_fact',
+        statement: `[Anthropic & Shared Co-Investors — Confirmed Collaboration vs Contingent Placement] NVIDIA maintains a confirmed Grace Blackwell & Vera Rubin cloud/engineering collaboration with Anthropic (${anthropicHw?.relationshipId ?? 'cloud partnership'}) while sharing Anthropic's ${syndicateTotalPrefix}IPO-contingent Class N private-placement syndicate (proposed/contingent_signed, not completed ownership) alongside ${syndicateListText} (S-1/A-2 0001628280-26-072484).`,
+        distinction:
+          anthropicPp || msftPp || googlPp || amdPp || extraAnthropicPpRels.length > 0
+            ? 'reported_unverified'
+            : 'source_fact',
         evidenceIds: [
           ...(anthropicHw ? anthropicHw.sourceDocIds : []),
           ...(anthropicPp ? anthropicPp.sourceDocIds : []),
           ...(msftPp ? msftPp.sourceDocIds : []),
+          ...(googlPp ? googlPp.sourceDocIds : []),
+          ...(amdPp ? amdPp.sourceDocIds : []),
+          ...extraAnthropicPpRels.flatMap((r) => r.sourceDocIds),
         ],
         relationshipIds: coRels,
-        quantitativeValue: anthropicPp?.principalAmount ?? null,
-        unit: anthropicPp?.principalAmount ? 'USD' : null,
-        currency: anthropicPp?.principalAmount ? 'USD' : null,
+        quantitativeValue: primaryQuantPp,
+        unit: primaryQuantPp !== null ? 'USD' : null,
+        currency: primaryQuantPp !== null ? 'USD' : null,
         periodOrAsOf: cutoffIsoDate,
       });
     }
@@ -719,78 +838,153 @@ export function synthesizeQuestionAwareEvidenceAnswer(
         ...(nbisWarrant ? [nbisWarrant.relationshipId] : []),
         ...(nbis13f ? [nbis13f.relationshipId] : []),
       ];
+      const crwvDesc =
+        crwv13f?.principalAmount != null
+          ? `NVIDIA holds ${formatUsdCompact(crwv13f.principalAmount, 2)} in CoreWeave Class A shares on Form 13F-HR (0001045810-26-000084)${crwvCloud ? ' plus confirmed Vera Rubin NVL72 production racks at CoreWeave (EX-99.1)' : ''}`
+          : crwvCloud
+            ? 'NVIDIA confirmed Vera Rubin NVL72 production racks running at CoreWeave (EX-99.1)'
+            : null;
+      const nbisHas93PctInSummary = Boolean(nbisWarrant && /\b9\.3%/.test(nbisWarrant.summary));
+      const nbisDesc =
+        nbisWarrant && nbis13f?.principalAmount != null
+          ? `beneficially owns Nebius Class A shares (${nbisHas93PctInSummary ? '9.3% combined: ' : ''}${formatUsdCompact(nbis13f.principalAmount, 2)} 13F stake + Schedule 13G pre-funded warrant shares, 0001045810-26-000062)`
+          : nbis13f?.principalAmount != null
+            ? `holds ${formatUsdCompact(nbis13f.principalAmount, 2)} in Nebius Class A shares on Form 13F-HR`
+            : nbisWarrant
+              ? `holds Schedule 13G pre-funded warrant shares in Nebius (${nbisHas93PctInSummary ? '9.3% beneficial stake, ' : ''}0001045810-26-000062)`
+              : null;
+      const neocloudStatement = [crwvDesc, nbisDesc].filter(Boolean).join(', and ');
+      const neocloudQuant = crwv13f?.principalAmount ?? nbis13f?.principalAmount ?? null;
       pushClaim({
         claimId: 'sc-cp-neoclouds-crwv-and-nebius',
-        statement: `[CoreWeave & Nebius — Confirmed 13F/13G Equity + Vera Rubin Deployments] NVIDIA holds $4.11B in CoreWeave Class A shares on Form 13F-HR (0001045810-26-000084) plus confirmed Vera Rubin NVL72 production racks at CoreWeave (EX-99.1), and beneficially owns 22,256,412 Nebius Class A shares (9.3%: $281M / 1.19M 13F shares + 21.07M Schedule 13G pre-funded warrant shares, 0001045810-26-000062).`,
+        statement: `[CoreWeave & Nebius — Confirmed 13F/13G Equity + Vera Rubin Deployments] ${neocloudStatement}.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(crwv13f ? crwv13f.sourceDocIds : []),
           ...(crwvCloud ? crwvCloud.sourceDocIds : []),
           ...(nbisWarrant ? nbisWarrant.sourceDocIds : []),
+          ...(nbis13f ? nbis13f.sourceDocIds : []),
         ],
         relationshipIds: rels,
-        quantitativeValue: crwv13f?.principalAmount ?? null,
-        unit: crwv13f?.principalAmount ? 'USD' : null,
-        currency: crwv13f?.principalAmount ? 'USD' : null,
+        quantitativeValue: neocloudQuant,
+        unit: neocloudQuant !== null ? 'USD' : null,
+        currency: neocloudQuant !== null ? 'USD' : null,
         periodOrAsOf: cutoffIsoDate,
       });
     }
 
-    if (googlCloud || orclCloud || msftPp || ex991Src) {
+    if (googlCloud || orclCloud || msftPp || googlPp || ex991Src) {
       const rels = [
         ...(googlCloud ? [googlCloud.relationshipId] : []),
         ...(orclCloud ? [orclCloud.relationshipId] : []),
         ...(msftPp ? [msftPp.relationshipId] : []),
+        ...(googlPp ? [googlPp.relationshipId] : []),
+        ...(anthropicPp ? [anthropicPp.relationshipId] : []),
       ];
+      const hyperQuant = msftPp?.principalAmount ?? googlPp?.principalAmount ?? null;
       pushClaim({
         claimId: 'sc-cp-hyperscalers-msft-googl-orcl',
-        statement: `[Hyperscalers — Microsoft, Alphabet & Oracle] Q3 FY27 Ex. 99.1 confirms Vera Rubin NVL72 production racks running at Microsoft Azure, Google Cloud (A5X general availability), and Oracle Cloud Infrastructure (NVL72 & Vera CPU GA), while Microsoft (~${msftPpStr}) and Alphabet (~${googlPpStr}) co-participate with NVIDIA (~${nvdaPpStr}) in Anthropic's IPO-contingent Class N syndicate.`,
+        statement: `[Hyperscalers — Microsoft, Alphabet & Oracle] Q3 FY27 Ex. 99.1 confirms Vera Rubin NVL72 production racks running at Microsoft Azure, Google Cloud (A5X general availability), and Oracle Cloud Infrastructure (NVL72 & Vera CPU GA), while ${msftSyndicateLabel} and ${googlSyndicateLabel} co-participate with ${nvdaSyndicateLabel} in Anthropic's IPO-contingent Class N syndicate.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(ex991Src ? [ex991Src.docId] : []),
           ...(googlCloud ? googlCloud.sourceDocIds : []),
           ...(orclCloud ? orclCloud.sourceDocIds : []),
           ...(msftPp ? msftPp.sourceDocIds : []),
+          ...(googlPp ? googlPp.sourceDocIds : []),
+          ...(anthropicPp ? anthropicPp.sourceDocIds : []),
         ],
         relationshipIds: rels,
-        quantitativeValue: msftPp?.principalAmount ?? null,
-        unit: msftPp?.principalAmount ? 'USD' : null,
-        currency: msftPp?.principalAmount ? 'USD' : null,
+        quantitativeValue: hyperQuant,
+        unit: hyperQuant !== null ? 'USD' : null,
+        currency: hyperQuant !== null ? 'USD' : null,
         periodOrAsOf: cutoffIsoDate,
       });
     }
 
+    const portfolio13fFormatted =
+      portfolio13f?.quantitativeValue != null
+        ? formatUsdCompact(portfolio13f.quantitativeValue, 2)
+        : null;
+
     if (spacex13f || intc13f || portfolio13f || sbGuarRel) {
+      const other13fRels = [
+        { label: 'Coherent', rel: cohr13f },
+        { label: 'Synopsys', rel: snps13f },
+        { label: 'Nokia', rel: nok13f },
+        { label: 'Generate', rel: genb13f },
+      ].filter((x) => x.rel !== null);
       const rels = [
         ...(spacex13f ? [spacex13f.relationshipId] : []),
         ...(intc13f ? [intc13f.relationshipId] : []),
+        ...other13fRels.map((x) => x.rel!.relationshipId),
         ...(sbGuarRel ? [sbGuarRel.relationshipId] : []),
       ];
+      const anchorHoldings = [
+        ...(spacex13f
+          ? [formatGroundedCoInvestor('SpaceX', spacex13f, false)]
+          : []),
+        ...(intc13f ? [formatGroundedCoInvestor('Intel', intc13f, false)] : []),
+      ];
+      const extraHoldingsStr =
+        other13fRels.length > 0
+          ? ` (alongside ${other13fRels.map((x) => formatGroundedCoInvestor(x.label, x.rel, false)).join(', ')})`
+          : '';
+      const portfolioTotalStr = portfolio13fFormatted ? ` (${portfolio13fFormatted} Total)` : '';
+      const sbPhrase = sbGuarRel
+        ? `, while NVIDIA backs OpenAI's SB Energy Ohio lease with${sbGuarRel.principalAmount != null ? ` up to ${formatUsdCompact(sbGuarRel.principalAmount)} in` : ''} contingent residual-value guaranties ($0 paid)`
+        : '';
+      const anchorQuant =
+        portfolio13f?.quantitativeValue ??
+        spacex13f?.principalAmount ??
+        intc13f?.principalAmount ??
+        sbGuarRel?.principalAmount ??
+        null;
       pushClaim({
         claimId: 'sc-cp-13f-spacex-intel-and-sbenergy-openai',
-        statement: `[Form 13F Stakes ($48.33B Total) & SB Energy/OpenAI Guarantee] NVIDIA's Q3 2026 Form 13F-HR ($48.33B across 8 holdings) is anchored by SpaceX ($19.68B) and Intel ($19.37B, alongside Coherent $2.24B, Synopsys $1.89B, Nokia $739M, Generate $12.5M), while NVIDIA backs OpenAI's 4.25 GW SB Energy Ohio lease with up to $105.0B in contingent residual-value guaranties ($0 paid).`,
+        statement: `[Form 13F Stakes${portfolioTotalStr} & SB Energy/OpenAI Guarantee] NVIDIA's Q3 2026 Form 13F-HR${portfolio13fFormatted ? ` (${portfolio13fFormatted})` : ''} includes ${anchorHoldings.length > 0 ? anchorHoldings.join(' and ') : 'reported public equity holdings'}${extraHoldingsStr}${sbPhrase}.`,
         distinction: 'source_fact',
         evidenceIds: [
           ...(spacex13f ? spacex13f.sourceDocIds : []),
+          ...(intc13f ? intc13f.sourceDocIds : []),
           ...(sbGuarRel ? sbGuarRel.sourceDocIds : []),
           ...(portfolio13f ? [portfolio13f.claimId] : []),
         ],
         relationshipIds: rels,
-        quantitativeValue: portfolio13f?.quantitativeValue ?? spacex13f?.principalAmount ?? null,
-        unit: 'USD',
-        currency: 'USD',
+        quantitativeValue: anchorQuant,
+        unit: anchorQuant !== null ? 'USD' : null,
+        currency: anchorQuant !== null ? 'USD' : null,
         periodOrAsOf: cutoffIsoDate,
       });
     }
 
     tldrBullets.push(
-      `Shared Frontier Syndicate (Anthropic S-1/A-2): NVIDIA (~${nvdaPpStr}), Alphabet (~${googlPpStr}), AMD (~${amdPpStr}), and Microsoft (~${msftPpStr}) share IPO-contingent Class N placements (proposed, not completed ownership) alongside NVIDIA’s confirmed Rubin cloud partnership (r2).`,
+      `Shared Frontier Syndicate (Anthropic S-1/A-2): ${syndicateListText} share IPO-contingent Class N placements (proposed, not completed ownership) alongside NVIDIA’s confirmed Rubin cloud partnership (${anthropicHw?.relationshipId ? 'r2' : 'cloud'}).`,
     );
+    const crwvTldr =
+      crwv13f?.principalAmount != null
+        ? `CoreWeave (${formatUsdCompact(crwv13f.principalAmount, 2)} 13F${crwvCloud ? ' + Rubin racks' : ''})`
+        : 'CoreWeave (Rubin racks)';
+    const nbisTldr =
+      nbisWarrant && /\b9\.3%/.test(nbisWarrant.summary)
+        ? 'Nebius (9.3% 13F+13G warrant stake + Rubin racks)'
+        : nbis13f?.principalAmount != null
+          ? `Nebius (${formatUsdCompact(nbis13f.principalAmount, 2)} 13F stake)`
+          : 'Nebius';
     tldrBullets.push(
-      'Dual Equity + Compute Neoclouds & Hyperscalers: CoreWeave ($4.11B 13F + Rubin racks), Nebius (9.3% 13F+13G warrant stake + Rubin racks), plus confirmed Vera Rubin deployments at Microsoft Azure, Google Cloud (A5X), and Oracle OCI.',
+      `Dual Equity + Compute Neoclouds & Hyperscalers: ${crwvTldr}, ${nbisTldr}, plus confirmed Vera Rubin deployments at Microsoft Azure, Google Cloud (A5X), and Oracle OCI.`,
     );
+    const anchorsTldr = [
+      ...(spacex13f ? [formatGroundedCoInvestor('SpaceX', spacex13f, false)] : []),
+      ...(intc13f ? [formatGroundedCoInvestor('Intel', intc13f, false)] : []),
+    ].join(' and ');
+    const portTldr = portfolio13fFormatted ? `${portfolio13fFormatted} ` : '';
+    const sbTldr =
+      sbGuarRel?.principalAmount != null
+        ? `${formatUsdCompact(sbGuarRel.principalAmount)} contingent Ohio lease guarantee ($0 paid)`
+        : 'contingent Ohio lease guarantee ($0 paid)';
     tldrBullets.push(
-      'Strategic 13F Anchors & Infrastructure Credit Support: SpaceX ($19.68B) and Intel ($19.37B) lead NVIDIA’s $48.33B 13F portfolio, while SB Energy and OpenAI share NVIDIA’s $105.0B contingent Ohio lease guarantee ($0 paid).',
+      `Strategic 13F Anchors & Infrastructure Credit Support: ${anchorsTldr || 'Reported 13F holdings'} lead NVIDIA’s ${portTldr}13F portfolio, while SB Energy and OpenAI share NVIDIA’s ${sbTldr}.`,
     );
   }
 
@@ -812,7 +1006,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     if (q3Actual && q3Fcf) {
       pushClaim({
         claimId: 'sc-bullish-revenue-rubin-and-fcf',
-        statement: `[Bullish Interpretation — Grounded in Reported Q3 Actuals & Q4 Outlook] Demand and cash generation remain exceptional: Q3 FY27 revenue rose 103.21% Y/Y to ${formatClaimValue(q3Actual)} (+7.26% above $108.0B guidance midpoint; Data Center $107.61B with ~$20B Q/Q Vera Rubin debut ramp, IR Pres. Slide 3), generating ${formatClaimValue(q3Fcf)} in Q3 Free Cash Flow and supporting a ${q4GuideRev ? formatClaimValue(q4GuideRev) : '$130.0B'} (+/- 3%, 14-week) Q4 revenue outlook.`,
+        statement: `[Bullish Interpretation — Grounded in Reported Q3 Actuals & Q4 Outlook] Demand and cash generation remain exceptional: Q3 FY27 revenue rose 103% Y/Y to ${formatClaimValue(q3Actual)} (Data Center $107.61B with ~$20B Q/Q Vera Rubin debut ramp, IR Pres. Slide 3), generating ${formatClaimValue(q3Fcf)} in Q3 Free Cash Flow${q4GuideRev ? ` and supporting a ${formatClaimValue(q4GuideRev)} (+/- 3%, 14-week) Q4 revenue outlook` : ''}.`,
         distinction: 'interpretation',
         evidenceIds: [
           ...q3Actual.sourceDocIds,
@@ -841,7 +1035,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
       ];
       pushClaim({
         claimId: 'sc-bearish-margin-credit-and-governance-risks',
-        statement: `[Bearish Interpretation — Margin Compression, Counterparty Credit & Governance Risk] Key primary-filing risks include: (1) Q4 gross margin guided down -330 to -340 bps Q/Q to 71.0%-72.0% (${q4GuideGm ? formatClaimValue(q4GuideGm) : '71.5%'} midpoint); (2) ${directTotal ? formatClaimValue(directTotal) : '$518.0B'} direct commitments ($390B supply) plus $32B contingent neocloud and ${maxGuarObs ? formatClaimValue(maxGuarObs) : '$118.0B'} max guarantee caps amid CFO-noted customer credit strain ($81.033B AR at 64 DSO; $1,846M Q3 private-equity impairments; 36% top-3 customer share); and (3) Jensen Huang's departure, dual CEO/CFO concentration, and an ongoing independent board committee investigation.`,
+        statement: `[Bearish Interpretation — Margin Compression, Counterparty Credit & Governance Risk] Key primary-filing risks include: (1) Q4 gross margin guided down -330 to -340 bps Q/Q to 71.0%-72.0%${q4GuideGm ? ` (${formatClaimValue(q4GuideGm)} midpoint)` : ''}; (2) ${directTotal ? `${formatClaimValue(directTotal)} direct commitments` : 'multi-year supply commitments'}${maxGuarObs ? ` plus ${formatClaimValue(maxGuarObs)} max guarantee caps` : ''} amid CFO-noted customer credit strain (${arClaim ? `${formatClaimValue(arClaim)} AR at 64 DSO; ` : ''}$1,846M Q3 private-equity impairments${custConc ? `; ${formatClaimValue(custConc)} top-3 customer share` : ''}); and (3) Jensen Huang's departure, dual CEO/CFO concentration, and an ongoing independent board committee investigation.`,
         distinction: 'interpretation',
         evidenceIds: bearEv,
         relationshipIds: [
@@ -866,8 +1060,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
       if (contraEv.length > 0) {
         contradictoryEvidence.push({
           topic: 'Vera Rubin Revenue Acceleration vs Margin, Working-Capital & Credit-Support Offsets',
-          description:
-            'While Vera Rubin drove Q3 revenue to $115.844B (74.8% GAAP GM, $43.777B FCF) and Q4 guidance to $130.0B (14 weeks), the same transition compresses Q4 guided GM to 71.0%-72.0%, expands AR to $81.033B (64 DSO on extended terms), and requires $118.0B in gross customer credit-support guarantees.',
+          description: `While Vera Rubin drove Q3 revenue to ${formatClaimValue(q3Actual)} (${q3Fcf ? `${formatClaimValue(q3Fcf)} FCF` : 'strong FCF'})${q4GuideRev ? ` and Q4 guidance to ${formatClaimValue(q4GuideRev)} (14 weeks)` : ''}, the same transition compresses Q4 guided GM to 71.0%-72.0%${arClaim ? `, expands AR to ${formatClaimValue(arClaim)} (64 DSO on extended terms)` : ''}${maxGuarObs ? `, and requires ${formatClaimValue(maxGuarObs)} in gross customer credit-support guarantees` : ''}.`,
           relationshipIds: sbGuarRel ? [sbGuarRel.relationshipId] : [],
           evidenceIds: contraEv,
         });
@@ -875,10 +1068,14 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     }
 
     tldrBullets.push(
-      'Bullish Case (Primary Actuals & Guidance): +103% Y/Y Q3 revenue ($115.844B), ~$20B Q/Q Vera Rubin debut ramp, 74.8% GAAP GM, $43.777B FCF, and $130.0B (+/- 3%, 14-week) Q4 revenue outlook.',
+      `Bullish Case (Primary Actuals & Guidance): +103% Y/Y Q3 revenue${q3Actual ? ` (${formatClaimValue(q3Actual)})` : ''}, ~$20B Q/Q Vera Rubin debut ramp, 74.8% GAAP GM${q3Fcf ? `, ${formatClaimValue(q3Fcf)} FCF` : ''}${q4GuideRev ? `, and ${formatClaimValue(q4GuideRev)} (+/- 3%, 14-week) Q4 revenue outlook` : ''}.`,
     );
+    const maxGuarRoundedB =
+      maxGuarObs?.quantitativeValue != null
+        ? `$${Math.round(maxGuarObs.quantitativeValue / 1_000_000_000)}B`
+        : null;
     tldrBullets.push(
-      'Bearish Case (Margins, Credit & Concentration): Guided Q4 GM drops -330 to -340 bps to 71.0%-72.0%; AR rose to $81.033B (64 DSO on extended payment terms); top 3 customers = 36% of revenue; $518B direct commitments + $118B guarantee cap + $1.846B private-equity impairments.',
+      `Bearish Case (Margins, Credit & Concentration): Guided Q4 GM drops -330 to -340 bps to 71.0%-72.0%${arClaim ? `; AR rose to ${formatClaimValue(arClaim)} (64 DSO on extended payment terms)` : ''}${custConc ? `; top 3 customers = ${formatClaimValue(custConc)} of revenue` : ''}${directTotal ? `; ${formatClaimValue(directTotal)} direct commitments` : ''}${maxGuarRoundedB ? ` + ${maxGuarRoundedB} guarantee cap` : ''} + $1.846B private-equity impairments.`,
     );
     tldrBullets.push(
       'Governance Overhang (Confirmed Filing Risk): Founder CEO resignation, Colette Kress dual Interim CEO/CFO role, and an undisclosed ongoing independent board committee investigation.',
