@@ -1,6 +1,6 @@
 # ACI Evidence Governance, SEC Ingestion, Chronology & Quarantine Standards
 
-**Skill Version:** `1.1.0`  
+**Skill Version:** `1.1.1`  
 **Authoritative Code Sources:**
 - Canonical Identity & Supersession Governance: `lib/graph/identity-governance.ts`
 - General-Purpose SEC Discovery & Extractor: `lib/remote-ops/sec-filing-graph-extractor.ts` & `lib/remote-ops/sec-xbrl-fact-selector.ts`
@@ -42,7 +42,7 @@ Never collapse timestamps into a single date field or invent missing timestamps:
 **Point-in-Time (`asOfMs`) Eligibility (`isRelationshipEligibleAtCutoff` & `reconstructGraphRelationshipsAtDate`):**
 - Under `temporalBasis = "receipt"` (default in `graphQueryRequestSchema`): requires `publishedAtMs <= asOfMs && receivedAtMs <= asOfMs`.
 - Under `temporalBasis = "publication"`: requires `publishedAtMs <= asOfMs`.
-- Both relationships and `GraphObservation` records published/received after `asOfMs` are withheld (`DEV_VERIFIED` / `PREVIEW_VERIFIED` on `/data-room` at `bd38833`; `LOCALLY_VERIFIED` for `/` `?asOfMs=` parity and RC002 `Q1b` observation synthesis at `f43c313`).
+- Both relationships and `GraphObservation` records published/received after `asOfMs` are withheld (`DEV_VERIFIED` & `PREVIEW_VERIFIED` on `/data-room?focal=org-nvda&asOf=1794949170000`, `/?asOf=1794949170000` RSC payload, and live Preview `Q1b` `/api/graph/chat` at `3222376`).
 
 ---
 
@@ -63,25 +63,25 @@ Implemented in `lib/remote-ops/sec-filing-graph-extractor.ts` and `lib/remote-op
 
 | Filing / Step | Verification Status | Exact Deterministic Behaviour & Refusal Rules |
 | :--- | :---: | :--- |
-| **Multi-filing EDGAR window (`discoverSecFilingWindow`)** | `LOCALLY_VERIFIED` (`1427321`, pending RC002 Dev deploy) | Scans up to `maxFilingsPerCik` (`1..100`, default `25`) across `filings.recent` **plus** bounded `filings.files` overflow JSON pages (`CIK*-submissions-*.json`, `maxOverflowPages` `0..3`), skipping non-allowlisted noise (`Form 4` at `recent[0]`) and deduplicating seen accessions/URLs. |
+| **Multi-filing EDGAR window (`discoverSecFilingWindow`)** | `DEV_VERIFIED` (code deployed at `3222376`); `LOCALLY_VERIFIED` (unseen `ANET` E2E) | Scans up to `maxFilingsPerCik` (`1..100`, default `25`) across `filings.recent` **plus** bounded `filings.files` overflow JSON pages (`CIK*-submissions-*.json`, `maxOverflowPages` `0..3`), skipping non-allowlisted noise (`Form 4` at `recent[0]`) and deduplicating seen accessions/URLs. |
 | **Periodic `10-Q` / `10-K` XBRL (`extractPeriodicXbrlGraphCandidates`)** | Selector `DEV_VERIFIED`; unseen-issuer extractor `LOCALLY_VERIFIED` | Extracts current-period `GraphObservation`s (revenue, operating income, net income, operating cash flow, capex, cash) via `selectCurrentSecXbrlFact`. **Refuses:** (a) facts from non-periodic forms (`8-K`), (b) comparative prior-year facts (`|end - reportDate| > 15`d or `filed - end > 190`d), and (c) YTD cumulative facts (`160–295`d `cumulative_ytd`) mislabelled as single-quarter (`70–110`d `three_month` for quarterly flow metrics, `340–380`d `full_year` for annual `10-K`). |
 | **Form `13F-HR` XML (`extractForm13fXmlGraphCandidates`)** | Case 007 `DEV_VERIFIED`; general XML parser `LOCALLY_VERIFIED` | Parses `infoTable` XML positions, verifies monetary scale (`1x` post-2023 SEC XML standard vs legacy `x1000` anomalies), emits portfolio fair-value `GraphObservation` + `pending_review` `ownership_stake` candidates (`SH` / `PRN` share counts, voting authority). |
-| **Form `8-K` / `8-K/A` headers (`registerForm8kReviewCandidate`)** | `LOCALLY_VERIFIED` (`1427321`) | Classifies SEC items (`1.01`, `2.02`, `2.03`, `5.02`, `8.01`, etc.) and registers `pending_human_factual_review` source candidates **without** extracting XBRL `companyfacts` capex or hallucinating counterparties/amounts from unstructured prose. |
-| **Curated multi-exhibit earnings/contract extraction (Case 007-A / 007-B)** | `27` rels + `21` obs `DEV_VERIFIED` / `PREVIEW_VERIFIED`; `+3` Q3 obs `LOCALLY_VERIFIED` | Primary-source manifests (`data/graph/case-007-*.json`, `case-007-nvidia-ingestor.ts`) backed by exact SEC exhibit SHA-256 digests (`EX-99.1`, `EX-99.2`, `EX-99.3`, `13F-HR`, `SC 13G`, `8-K`). |
+| **Form `8-K` / `8-K/A` headers (`registerForm8kReviewCandidate`)** | `DEV_VERIFIED` (deployed at `3222376`); `LOCALLY_VERIFIED` (`ANET` E2E) | Classifies SEC items (`1.01`, `2.02`, `2.03`, `5.02`, `8.01`, etc.) and registers `pending_human_factual_review` source candidates **without** extracting XBRL `companyfacts` capex or hallucinating counterparties/amounts from unstructured prose. |
+| **Curated multi-exhibit earnings/contract extraction (Case 007-A / 007-B)** | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (`30` stored rels [`28` active / `27` 2-hop focal / `<= 25` bundle], `24` obs, `16` stored sources [`<= 15` bundle]) | Primary-source manifests (`data/graph/case-007-*.json`, `case-007-nvidia-ingestor.ts`) backed by exact SEC exhibit SHA-256 digests (`EX-99.1`, `EX-99.2`, `EX-99.3`, `13F-HR`, `SC 13G`, `8-K`). |
 | **Unassisted LLM hyperedge extraction from arbitrary unstructured `8-K` / `S-1` prose** | **`PLANNED`** | Not permitted to auto-promote. Any prose-derived N-ary relationship requires explicit structured extraction + human `reviewer` approval before entering `graphProjectionOutbox`. |
 
 ---
 
 ## 5. Financial & Epistemic Classification Rules
 
-1. **Reported Actual vs Forecast vs Derived vs Scenario vs Interpretation (`DEV_VERIFIED` schema; RC002 synthesis `LOCALLY_VERIFIED`):**
+1. **Reported Actual vs Forecast vs Derived vs Scenario vs Interpretation (`DEV_VERIFIED` / `PREVIEW_VERIFIED` at `3222376`):**
    - `GraphObservation.observationKind`: `'reported'` (filed historical actual), `'forecast'` (management outlook, e.g. Q4 FY27 `$130.0B +/- 3%`), `'derived'` (deterministic calculation, e.g. Free Cash Flow or beat variance `+$7.844B / +7.26%`).
    - `SupportingClaimItem.distinction`: `'source_fact'`, `'deterministic_arithmetic'`, `'modelled_scenario'`, `'reported_unverified'`, `'interpretation'`.
-   - In `evidence-answer-validator.ts`, deterministic variance between an `'observed'` actual and `'proposed'` forecast in the same bundle is verified arithmetically (`collectAllowedNumbers`, `LOCALLY_VERIFIED`).
+   - In `evidence-answer-validator.ts`, deterministic variance between an `'observed'` actual and `'proposed'` forecast in the same bundle is verified arithmetically (`collectAllowedNumbers`, `PREVIEW_VERIFIED` on live `Q1`).
 2. **Proposed / Contingent Deals vs Completed Ownership (`DEV_VERIFIED` / `PREVIEW_VERIFIED`):**
    - Pending acquisitions (e.g. Hugging Face Item `8.01` `principalAmount: null`) or IPO-contingent placements (e.g. Anthropic Class N) must carry `epistemicStatus: "proposed"` and `contractualStatus: "contingent_signed"` (`bindingObligation: false`).
    - `validateRelationshipGovernance` rejects `epistemicStatus === "proposed"` paired with `contractualStatus === "funded"`.
-3. **Three-Class Commitment & Guarantee Separation (`DEV_VERIFIED` graph; RC002 `commitmentLedger` fix `LOCALLY_VERIFIED`):**
+3. **Three-Class Commitment & Guarantee Separation (`DEV_VERIFIED` / `PREVIEW_VERIFIED` at `3222376`):**
    - **Class 1 — Funded Debt & Direct Contractual Commitments:** Recognised debt (`senior_notes_issuance`, e.g. `$25.0B` notes) and scheduled supply/uncommenced lease purchase obligations (`$518.0B` total / `$390.0B` supply).
    - **Class 2 — Contingent Off-Balance-Sheet Commitments:** Conditioned on counterparty financing and capacity acceptance (`bindingObligation: false`, e.g. `$32.0B` neocloud cap).
    - **Class 3 — Maximum Gross Credit / Lease Residual Guarantees:** Off-balance-sheet guarantee exposure (`guarantee_arrangement` / `leasing_agreement` `lease_guarantor`, e.g. `$118.0B` gross cap incl. `$105.0B` SB Energy / OpenAI Ohio lease guarantee, `$0` paid). Recorded in `commitmentLedger.signedGuaranteesUsd`, never added to recognised debt or treated as realised loss.
@@ -94,13 +94,13 @@ Implemented in `lib/remote-ops/sec-filing-graph-extractor.ts` and `lib/remote-op
 
 1. **Prompt-Injection Quarantine (`DEV_VERIFIED` / `PREVIEW_VERIFIED`):**
    - `validateStagedItem` (`lib/remote-ops/staging-validator.ts`) and `detectAdversarialContent` (`lib/graph/evidence-retrieval-gateway.ts`) inspect untrusted text for instruction overrides (`ignore previous instructions`, `system prompt`, role mutations, trading commands) and block/quarantine immediately.
-2. **Non-Destructive SEC/XBRL Quarantine (`LOCALLY_VERIFIED` in `129243a` — Cloud Execution Pending Authorisation):**
+2. **Non-Destructive SEC/XBRL Quarantine (`DEV_VERIFIED` on `dev:prestigious-dragon-8` at `3222376`; Production Execution Pending Separate Authorisation):**
    - Originals are **never deleted** (`rowsDeletedCount === 0`).
-   - `operations:quarantineStagedEvidenceInternal` supports `dryRun: true` (verified locally against `dev:prestigious-dragon-8` backup `pre-rc002-20261118T1230Z.zip`) and `dryRun: false` (requires pre-remediation Convex snapshot and separate authorisation; **not yet executed on `dev:prestigious-dragon-8` or `prod:benevolent-magpie-921`**).
-   - Patches `quarantinedAt` and `quarantineId` onto **both** `researchStagingItems` (`7` items) and **all** matching `evidence` rows (`8` rows) — including **orphaned forward-frozen `evidence` rows** created by `storeForwardResearchEventInternal` outside `promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` in Dev; `ms71z2vm0nhq2850kvr3pym65s8hr3wb` in Prod).
+   - `operations:quarantineStagedEvidenceInternal` supports `dryRun: true` and `dryRun: false`: executed and independently read-back verified on `dev:prestigious-dragon-8` (`7` staging items + `8` `evidence` rows quarantined, `7` `evidenceQuarantines` ledger rows, `0` rows deleted); **not yet executed on `prod:benevolent-magpie-921`** (`NO-GO` pending separate Production authorisation).
+   - Patches `quarantinedAt` and `quarantineId` onto **both** `researchStagingItems` (`7` items) and **all** matching `evidence` rows (`8` rows) — including **orphaned forward-frozen `evidence` rows** created by `storeForwardResearchEventInternal` outside `promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` quarantined in Dev; `ms71z2vm0nhq2850kvr3pym65s8hr3wb` still active in Prod).
    - Records affected `morningBriefings`, `forwardResearchEvents`, `experiments`, and `forecasts` on the `evidenceQuarantines` ledger and withholds/flags invalidated facts and studies in `operations:overview` and `research:dashboard`.
 3. **Claim-Level vs Accession-Level Quarantine:**
-   - **NVIDIA `0001045810-26-000078` Policy (`LOCALLY_VERIFIED` in `129243a`):** `evaluateNvidia000078ClaimPolicy` blocks XBRL `capital_expenditures` claims (`$0.24B` / `$1.07B`) on Form 8-K `0001045810-26-000078` while permitting SHA-256-verified (`17fe107f9113be5c57673d0a591ea49e87a667ea357de3959eeb91142c49280c`) Item `8.01` pending M&A relationship evidence strictly as `proposed` / `contingent_signed` (`principalAmount: null`, `bindingObligation: false`).
+   - **NVIDIA `0001045810-26-000078` Policy (`DEV_VERIFIED` at `3222376`):** `evaluateNvidia000078ClaimPolicy` blocks XBRL `capital_expenditures` claims (`$0.24B` / `$1.07B`) on Form 8-K `0001045810-26-000078` while permitting SHA-256-verified (`17fe107f9113be5c57673d0a591ea49e87a667ea357de3959eeb91142c49280c`) Item `8.01` pending M&A relationship evidence strictly as `proposed` / `contingent_signed` (`principalAmount: null`, `bindingObligation: false`).
    - **General Multi-Accession Claim-Level Table (`PLANNED`):** A generic Convex table parameterising per-claim quarantine predicates across arbitrary future accessions without code-defined rules is not yet implemented.
 
 ---
@@ -109,9 +109,9 @@ Implemented in `lib/remote-ops/sec-filing-graph-extractor.ts` and `lib/remote-op
 
 1. **Supersession Lineage (`DEV_VERIFIED`):**
    - Amended or cancelled relationships increment `version = prior.version + 1`, set `supersedesRelationshipId = prior.relationshipId` under the same `logicalEventId`, require `publishedAtMs >= prior.publishedAtMs`, keep `prior` intact in Convex and TypeDB, and emit a `supersession_link` relation.
-2. **Human Reviewer Gate (`convex/graph.ts` `reviewAndPromoteRelationship` — Base `DEV_VERIFIED`; Dynamic Staged Sources `LOCALLY_VERIFIED`):**
+2. **Human Reviewer Gate (`convex/graph.ts` `reviewAndPromoteRelationship` — `DEV_VERIFIED` at `3222376`; Unseen-Issuer E2E `LOCALLY_VERIFIED`):**
    - Requires `reviewer` role (`convex/authz.ts`), resolves primary sources from approved staged items or canonical registries (rejecting quarantined sources via `isQuarantined`), runs `validateRelationshipGovernance`, logs to `graphRelationshipReviews`, and enqueues `graphProjectionOutbox` only when `decision === "approved"`.
-3. **Target-Safe Idempotent Projection (`LOCALLY_VERIFIED` in `1427321`):**
+3. **Target-Safe Idempotent Projection (`DEV_VERIFIED` on `aci_case007b_verified_dev` at `3222376`; Unseen-Issuer E2E `LOCALLY_VERIFIED`):**
    - `computeDeterministicProjectionKey` (`proj:<sha256>`) prevents duplicate outbox rows (`by_projection_key`).
    - `compileSelfContainedProjectionStatements` compiles idempotent TypeQL `put` statements for all prerequisite sectors, organisations, executives, projects, instruments, sources, observations, and relationships **without** bootstrapping synthetic Macro Case 001 data (`syncAndVerifyTypeDbCloud`).
    - Every live TypeDB write calls `assertExplicitTypeDbWriteTarget(config, expectedDatabase)` before opening a `WRITE` or `SCHEMA` transaction.

@@ -1,6 +1,6 @@
 # ACI Permanent Source-to-Dashboard & Research-Answer Acceptance Requirements
 
-**Skill Version:** `1.1.0`
+**Skill Version:** `1.1.1`
 
 Every graph, ingestion, quarantine, Evidence-Locked Chat, or dashboard alignment change must pass the permanent verification gates and regression scenarios documented below before any shared Development write or Preview deployment is proposed.
 
@@ -10,9 +10,9 @@ Every graph, ingestion, quarantine, Evidence-Locked Chat, or dashboard alignment
 
 | Capability / Environment | Current Status | Notes & Open Blockers |
 | :--- | :---: | :--- |
-| **RC002 Local Remediations (`B-001`–`B-005`, `c6c1a62..f43c313`)** | `LOCALLY_VERIFIED` | Passed all 7 CLI gates, disposable local TypeDB `3.14.2` (`ANET` unseen ingestion), local `dev:prestigious-dragon-8` backup quarantine dry run, and local `293/300` investor rubric. **Blocker 1:** Not yet deployed or re-scored on shared Convex Development, `aci_case007b_verified_dev` (`21 -> 24` obs), or Vercel Preview. |
-| **Case 007-A / 007-B Graph (`bd38833`)** | `DEV_VERIFIED` / `PREVIEW_VERIFIED` | `aci_case007_verified_dev` (`20` rels, `4` obs) and `aci_case007b_verified_dev` (`27` rels, `21` obs) verified on TypeDB Cloud + `/data-room` Preview (`LIVE_GRAPH` + disconnect -> `GRAPH_UNAVAILABLE`). |
-| **Production (`main` `639a2ed`, `prod:benevolent-magpie-921`)** | **NO-GO** (`PRODUCTION_VERIFIED` for Clerk auth & `executionAuthority: "none"` only) | **Blocker 2:** Read-only audit confirmed `7` active invalid SEC/XBRL staging items, `8` active contaminated `evidence` rows (incl. forward-frozen orphan `ms71z2vm0nhq2850kvr3pym65s8hr3wb`), `9` contaminated `morningBriefings` (unattended daily cron still active on `2026-11-18`), and `4` contaminated forward-study rows. |
+| **RC002 Development & Preview (`B-001`–`B-005`, `3222376`)** | `DEV_VERIFIED` / `PREVIEW_VERIFIED` *(SSR/API)* | Deployed to `dev:prestigious-dragon-8` (`85f665a3...`), `aci_case007b_verified_dev` (`21 -> 24` obs, `72 -> 77` support links), and Vercel Preview (`https://trading-iqrskwacf-david-grannums-projects.vercel.app`, `COMPATIBLE`). Live 10-probe `/api/graph/chat` benchmark scored `297/300` (`10/10` `validationValid: true`); controlled `TYPEDB_BRIDGE_SECRET` disconnect/recovery verified. **Pending Gate 4 UI Item:** Interactive signed-in browser click-through requires owner Vercel SSO + Clerk session (`AUTH_GATE_REQUIRES_OWNER_SESSION`). |
+| **Case 007-A / 007-B Graph (`aci_case007_verified_dev` / `aci_case007b_verified_dev`)** | `DEV_VERIFIED` / `PREVIEW_VERIFIED` | `aci_case007_verified_dev` (`20` stored rels, `4` obs) and `aci_case007b_verified_dev` (`30` stored rels = `20 + 10`, `28` active non-superseded, `27` 2-hop `org-nvda` focal-reachable, `<= 25` in `EvidenceBundleV1`; `24` obs; `16` stored sources / `<= 15` in `EvidenceBundleV1`) verified on TypeDB Cloud `3.14.2` + Preview SSR/API. |
+| **Production (`main` `639a2ed`, `prod:benevolent-magpie-921`)** | **NO-GO** (`PRODUCTION_VERIFIED` for Clerk auth & `executionAuthority: "none"` only) | **Active Production Blocker:** Read-only audit confirmed `7` active invalid SEC/XBRL staging items, `8` active contaminated `evidence` rows (incl. forward-frozen orphan `ms71z2vm0nhq2850kvr3pym65s8hr3wb`), `9` contaminated `morningBriefings` (unattended daily cron active on `2026-11-18`, next run `2026-11-19T07:30:00Z`), and `4` contaminated forward-study rows. Separate Production containment & quarantine authorisation required. |
 
 ---
 
@@ -59,15 +59,15 @@ Any change to `lib/graph/evidence-retrieval-gateway.ts`, `lib/graph/question-awa
 
 Never delete, skip, or weaken assertions covering these 7 historical failure modes:
 
-### Scenario 1 — NVIDIA Case 007-A (Pre-Earnings) & Case 007-B (Post-Earnings) Intelligence (`DEV_VERIFIED` `21` obs / `LOCALLY_VERIFIED` `24` obs)
+### Scenario 1 — NVIDIA Case 007-A (Pre-Earnings) & Case 007-B (Post-Earnings) Intelligence (`DEV_VERIFIED` / `PREVIEW_VERIFIED` at `3222376`)
 - **Suites:** [case-007-nvidia-typedb.test.ts](../../../../tests/case-007-nvidia-typedb.test.ts), [rc002-evidence-chat-integrity.test.ts](../../../../tests/rc002-evidence-chat-integrity.test.ts), [rc002-dashboard-alignment.test.ts](../../../../tests/rc002-dashboard-alignment.test.ts).
 - **Required Proofs:**
-  - Exact primary-filing provenance across `15` SEC/IR sources (`0001045810-26-000073`, `13F-HR`, `SC 13G`, `0001045810-26-000083`, `0001045810-26-000088` `EX-99.1`/`99.2`/`99.3`), `27` relationships, and `24` observations (`$115,844M` Q3 rev, `74.8%` GAAP GM, `$43,777M` FCF, `$4,422M` capex, `$518.0B` direct commitments, `36%` top-3 customer rev share, `35%` top-2 AR share, `$130.0B +/- 3%` Q4 outlook).
+  - Exact primary-filing provenance across `16` stored SEC/IR sources (`<= 15` selected in `EvidenceBundleV1`: `0001045810-26-000073`, `13F-HR`, `SC 13G`, `0001045810-26-000083`, `0001045810-26-000088` `EX-99.1`/`99.2`/`99.3`), `30` stored `macro_relationship` rows (`28` active non-superseded, `27` 2-hop `org-nvda` focal-reachable, `<= 25` in `EvidenceBundleV1`), and `24` observations (`$115,844M` Q3 rev, `74.8%` GAAP GM, `$43,777M` FCF, `$4,422M` capex, `$518.0B` direct commitments, `36%` top-3 customer rev share, `35%` top-2 AR share, `$130.0B +/- 3%` Q4 outlook).
   - Proposed/IPO-contingent Anthropic Class N placements (`~$10B` / `~$5B`) remain `proposed` / `contingent_signed`, never completed ownership.
   - Three-class separation preserved between `$518.0B` direct commitments + `$25.0B` funded notes, `$32.0B` contingent neocloud cap (`bindingObligation: false`), and `$118.0B` max gross guarantee cap (`$105.0B` SB Energy / OpenAI Ohio lease guarantee, `$0` paid).
   - Leadership transition (`executive_person` + `leadership_appointment`: Jensen Huang resignation `2026-11-11`, Colette Kress Interim CEO + CFO, Harvey C. Jones Board Chair) and ongoing board committee investigation risk surfaced accurately (`Q4` `partially_supported` because investigation scope is undisclosed).
 
-### Scenario 2 — The 7 Invalid SEC/XBRL Disclosures (`B-003`, `LOCALLY_VERIFIED` — Cloud Execution Pending)
+### Scenario 2 — The 7 Invalid SEC/XBRL Disclosures (`B-003`, `DEV_VERIFIED` on `dev:prestigious-dragon-8`; Production Execution Pending)
 - **Suites:** [rc002-xbrl-quarantine-remediation.test.ts](../../../../tests/rc002-xbrl-quarantine-remediation.test.ts), [sprint-g9-2-research-integrity.test.ts](../../../../tests/sprint-g9-2-research-integrity.test.ts), [phase-g7-1-sec-xbrl-and-thesis-gate.test.ts](../../../../tests/phase-g7-1-sec-xbrl-and-thesis-gate.test.ts).
 - **Required Proofs:**
   - Deterministic rejection on ingestion **and** non-destructive quarantine discovery across both Development and Production `externalId`s for all 7 historical misattributions:
@@ -79,30 +79,30 @@ Never delete, skip, or weaken assertions covering these 7 historical failure mod
     6. `INTC` `10-Q` `0000050863-26-000191` (`staged-adfd0a710e5538b2` Dev / `staged-84349400e88f3423` Prod, 9M YTD `$11.16B` mislabelled as single-quarter Q3)
     7. `AMD` `10-Q` `0000002488-26-000191` (`staged-39bf33eb27445eee` Dev / `staged-e28936b38824c3e3` Prod, 9M YTD `$0.75B` mislabelled as single-quarter Q3)
 
-### Scenario 3 — Orphaned Forward-Frozen Evidence & Downstream Study Invalidation (`LOCALLY_VERIFIED`)
+### Scenario 3 — Orphaned Forward-Frozen Evidence & Downstream Study Invalidation (`DEV_VERIFIED` on `dev:prestigious-dragon-8`; Production Execution Pending)
 - **Suite:** [rc002-xbrl-quarantine-remediation.test.ts](../../../../tests/rc002-xbrl-quarantine-remediation.test.ts).
 - **Required Proofs:**
-  - Quarantine discovery catches forward-frozen `evidence` rows not referenced in `researchStagingItems.promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` in Dev / `ms71z2vm0nhq2850kvr3pym65s8hr3wb` in Prod, `$1.07B` NVDA `sec_xbrl_primary_disclosure`).
+  - Quarantine discovery catches forward-frozen `evidence` rows not referenced in `researchStagingItems.promotedEvidenceIds` (`md7ah8t1nmryeqt0c06wjq9c6x8hpgsb` quarantined in Dev / `ms71z2vm0nhq2850kvr3pym65s8hr3wb` pending in Prod, `$1.07B` NVDA `sec_xbrl_primary_disclosure`).
   - Dependent `morningBriefings`, `forwardResearchEvents` (`forward-004-nvda-qqq-5d-2026-11-05`), `experiments`, and `forecasts` are recorded on `evidenceQuarantines`, flagged/withheld in `operations:overview` and `research:dashboard`, and `rowsDeletedCount === 0`.
 
-### Scenario 4 — Synthetic Macro Case 001 Leakage Prevention (`B-002`, `B-004`, `B-005`, `LOCALLY_VERIFIED`)
+### Scenario 4 — Synthetic Macro Case 001 Leakage Prevention (`B-002`, `B-004`, `B-005`, `DEV_VERIFIED` / `PREVIEW_VERIFIED`)
 - **Suites:** [rc002-dashboard-alignment.test.ts](../../../../tests/rc002-dashboard-alignment.test.ts), [rc002-unseen-filing-ingestion.test.ts](../../../../tests/rc002-unseen-filing-ingestion.test.ts), [rc002-evidence-chat-integrity.test.ts](../../../../tests/rc002-evidence-chat-integrity.test.ts).
 - **Required Proofs:**
   - `syncAndVerifyTypeDbCloud` never bootstraps `MACRO_CASE_001` into target TypeDB databases.
-  - NVIDIA views on `/` and `/data-room` and Evidence Chat answers (`Q1`–`Q7b`, including `Q5b` shared-counterparty routing) contain zero synthetic Case 001 strings (`Nscale`, `Loughton`, `EirGrid`, `Monarch`, `$895.4B`).
+  - NVIDIA views on `/` and `/data-room` and Evidence Chat answers (`Q1`–`Q7b`, including `Q5b` shared-counterparty routing) contain zero synthetic Case 001 entities (`EirGrid`, `Monarch`, `$895.4B`; note `org-nscale` is a verified Q3 FY27 Ex. 99.1 Vera Rubin counterparty).
 
-### Scenario 5 — Unsupported & Within-Scope Undisclosed Investor Questions (`LOCALLY_VERIFIED`)
+### Scenario 5 — Unsupported & Within-Scope Undisclosed Investor Questions (`DEV_VERIFIED` / `PREVIEW_VERIFIED` on `Q7` & `Q7b`)
 - **Suites:** [rc002-evidence-chat-integrity.test.ts](../../../../tests/rc002-evidence-chat-integrity.test.ts), [evidence-locked-chat.test.ts](../../../../tests/evidence-locked-chat.test.ts).
 - **Required Proofs:**
   - Out-of-scope prompts (`Q7`: FY2028 net income, 2028 share-price target) and within-scope undisclosed prompts (`Q7b`: legal names of anonymised `14%/11%/11%` Customers A/B/C and confirmed Hugging Face purchase price) return `supportStatus: "unsupported"` and `supportingClaims: []` — never returning `fully_supported` over unrelated bundle observations.
 
-### Scenario 6 — Historical Point-in-Time Forecast-vs-Actual Reconstruction (`DEV_VERIFIED` `/data-room` / `LOCALLY_VERIFIED` `/` & `Q1b`)
+### Scenario 6 — Historical Point-in-Time Forecast-vs-Actual Reconstruction (`DEV_VERIFIED` / `PREVIEW_VERIFIED` on `/data-room`, `/` RSC, & `Q1b`)
 - **Suites:** [rc002-evidence-chat-integrity.test.ts](../../../../tests/rc002-evidence-chat-integrity.test.ts), [rc002-dashboard-alignment.test.ts](../../../../tests/rc002-dashboard-alignment.test.ts), [typedb-graph.test.ts](../../../../tests/typedb-graph.test.ts).
 - **Required Proofs:**
-  - At `asOfMs = 1794949170000` (`2026-11-17T20:59:30Z`, pre-Q3 release), `/` (`?asOfMs=1794949170000`), `/data-room`, and Evidence Chat (`Q1b`) report `FY2027 Q2` actual revenue (`$96,221M`) and `FY2027 Q3` forecast (`$108,000M +/- 2%`), withholding all `11` post-cutoff Case 007-B relationships and `20` post-earnings observations (`0` hindsight leakage).
+  - At `asOf = 1794949170000` (`2026-11-17T20:59:30Z`, pre-Q3 release), `/` (`?asOf=1794949170000`), `/data-room?focal=org-nvda&asOf=1794949170000`, and Evidence Chat (`Q1b`) report `FY2027 Q2` actual revenue (`$96,221M`) and `FY2027 Q3` forecast (`$108,000M +/- 2%`), withholding all `11` post-cutoff Case 007-B relationships and `20` post-earnings observations (`0` hindsight leakage).
   - Post-release (`>= 2026-11-18T01:35:00Z`), `/` and `/data-room` align on `FY2027 Q3` actuals (`$115,844M`, `74.8%` GM, `$43,777M` FCF, `$4,422M` capex) while retaining the preserved `$108.0B` forecast for variance comparison (`+$7.844B / +7.26%`).
 
-### Scenario 7 — Failure-Path, Validator Bounds & Unseen-Issuer End-to-End Ingestion (`B-001`, `B-004`, `LOCALLY_VERIFIED`)
+### Scenario 7 — Failure-Path, Validator Bounds & Unseen-Issuer End-to-End Ingestion (`B-001` `PREVIEW_VERIFIED`; `B-004` Unseen `ANET` `LOCALLY_VERIFIED`)
 - **Suites:** [rc002-unseen-filing-ingestion.test.ts](../../../../tests/rc002-unseen-filing-ingestion.test.ts), [rc002-evidence-chat-integrity.test.ts](../../../../tests/rc002-evidence-chat-integrity.test.ts), [rc002-dashboard-alignment.test.ts](../../../../tests/rc002-dashboard-alignment.test.ts), [security-chat-route-fail-closed.test.ts](../../../../tests/security-chat-route-fail-closed.test.ts), [security-evidence-validation.test.ts](../../../../tests/security-evidence-validation.test.ts).
 - **Required Proofs:**
   - **Oversized Validator Failure Stress Test (`B-001`):** `12` bad claims + `27` out-of-bundle relationship IDs downgrade cleanly to abstention with every `checks[i].detail.length <= 500` (`<= 480` target) and `0` `ZodError` / HTTP 500 crashes.

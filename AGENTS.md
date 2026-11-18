@@ -30,7 +30,7 @@ AI Capital Intelligence (`https://capital.aiguides.co.uk`) is an evidence-locked
 
 Before modifying any code, data fixture, Convex function, API route, or UI view touching SEC ingestion, research staging, quarantine, TypeDB `3.14.2` schemas/queries, Evidence-Locked Chat, `/` NVIDIA summaries, or `/data-room`, **you must read and follow**:
 
-- **Primary Skill (`v1.1.0`):** [.agents/skills/aci-graph-intelligence/SKILL.md](./.agents/skills/aci-graph-intelligence/SKILL.md)
+- **Primary Skill (`v1.1.1`):** [.agents/skills/aci-graph-intelligence/SKILL.md](./.agents/skills/aci-graph-intelligence/SKILL.md)
 - **TypeDB `3.14.2` & Zod Contracts:** [.agents/skills/aci-graph-intelligence/references/graph-data-contracts.md](./.agents/skills/aci-graph-intelligence/references/graph-data-contracts.md)
 - **Provenance, SEC Ingestion, Quarantine & Governance:** [.agents/skills/aci-graph-intelligence/references/evidence-governance.md](./.agents/skills/aci-graph-intelligence/references/evidence-governance.md)
 - **Permanent Acceptance & Regression Suite:** [.agents/skills/aci-graph-intelligence/references/acceptance-tests.md](./.agents/skills/aci-graph-intelligence/references/acceptance-tests.md)
@@ -48,15 +48,15 @@ When inspecting or documenting ACI behaviour, follow this strict precedence orde
 
 Always classify capabilities using these exact **environment-specific verification levels** (never use ambiguous bare `VERIFIED`):
 - **`IMPLEMENTED`**: Present in repository code with unit/schema contract coverage, not yet end-to-end runtime-verified.
-- **`LOCALLY_VERIFIED`**: Proven in local Vitest/Python suites, disposable local TypeDB `3.14.2`, or local Convex snapshot dry runs — **not yet deployed to shared Development or Preview** (includes RC002 commits `c6c1a62..f43c313`).
-- **`DEV_VERIFIED`**: Proven against shared Convex Development (`dev:prestigious-dragon-8`) and/or isolated Development TypeDB Cloud (`aci_case007_verified_dev`, `aci_case007b_verified_dev` at `bd38833`).
-- **`PREVIEW_VERIFIED`**: Proven end-to-end on deployed Vercel Preview (`bd38833`).
+- **`LOCALLY_VERIFIED`**: Proven in local Vitest/Python suites, disposable local TypeDB `3.14.2`, or local Convex snapshot dry runs — **not yet deployed to shared Development or Preview** (e.g. unseen `ANET` disposable local TypeDB E2E test and Python gRPC driver suite).
+- **`DEV_VERIFIED`**: Proven against shared Convex Development (`dev:prestigious-dragon-8` at `3222376`, incl. non-destructive SEC/XBRL quarantine of `7` staging items + `8` `evidence` rows) and isolated Development TypeDB Cloud (`aci_case007_verified_dev` `20` rels / `4` obs; `aci_case007b_verified_dev` `30` stored rels [`28` active / `27` 2-hop focal / `<= 25` bundle], `24` obs, `16` stored sources [`<= 15` bundle]).
+- **`PREVIEW_VERIFIED`**: Proven end-to-end on deployed Vercel Preview (`3222376` at `https://trading-iqrskwacf-david-grannums-projects.vercel.app`: `COMPATIBLE` release health, live 10-probe `/api/graph/chat` `297/300` [`10/10` `validationValid: true`], `/` & `/data-room` SSR/RSC `LIVE_GRAPH`, and controlled `TYPEDB_BRIDGE_SECRET` disconnect -> `GRAPH_UNAVAILABLE` + recovery; interactive signed-in Vercel SSO/Clerk browser click-through pending owner session).
 - **`PRODUCTION_VERIFIED`**: Proven on `prod:benevolent-magpie-921` / `https://capital.aiguides.co.uk` (`main` at `639a2ed`: Clerk auth & `executionAuthority: "none"` boundary only; neither Case 007-A/B nor RC002 is `PRODUCTION_VERIFIED`).
 - **`PLANNED`**: Proposed follow-up work not yet implemented in executable code; never describe `PLANNED` behaviour as active protection.
 
 **Current Open Release Blockers (`PRODUCTION = NO-GO`):**
-1. **RC002 Deployment Pending:** RC002 remediations (`B-001`–`B-005` at `f43c313`) remain `LOCALLY_VERIFIED` only until separately authorised Development/Preview deployment and live scorecard re-verification complete.
-2. **Active Production SEC/XBRL Contamination:** `prod:benevolent-magpie-921` (`639a2ed`) retains `7` unquarantined invalid SEC/XBRL staging rows, `8` active contaminated `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active), and `4` contaminated forward-study rows.
+1. **Interactive Signed-In Browser UI Walkthrough Pending Owner SSO Session:** Deployed Preview SSR/API & live TypeDB `3.14.2` checks at `3222376` passed, while interactive browser click-through paused cleanly at Vercel Deployment Protection (`AUTH_GATE_REQUIRES_OWNER_SESSION`) awaiting an active owner Vercel SSO + Clerk session.
+2. **Active Production SEC/XBRL Contamination & Unpaused Cron:** `prod:benevolent-magpie-921` (`639a2ed`) retains `7` unquarantined invalid SEC/XBRL staging rows, `8` active contaminated `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active, next run `2026-11-19T07:30:00Z`), and `4` contaminated forward-study rows.
 
 ## 4. Core Financial & Graph Invariants (Summary)
 

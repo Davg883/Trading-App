@@ -9,9 +9,9 @@ description: >-
   testing, or auditing any graph, SEC/XBRL ingestion, staging/quarantine,
   /data-room, Evidence Chat, or NVIDIA/issuer intelligence workflow.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
   schemaVersion: "macro-intelligence-graph-3.14-v1"
-  codeBaselineSha: "f43c313"
+  codeBaselineSha: "3222376"
   convexFingerprintSha256: "85f665a324349391b2c582504a02da3af0a55f1878d8236f6c49d8ddcc067875"
   lastReviewedUtc: "2026-11-18"
   pathPatterns:
@@ -28,7 +28,7 @@ metadata:
     - "worker/remote_research.py"
 ---
 
-# ACI Graph Intelligence Development Skill (`v1.1.0`)
+# ACI Graph Intelligence Development Skill (`v1.1.1`)
 
 This skill governs the end-to-end ACI relationship and financial intelligence pipeline:
 
@@ -53,15 +53,15 @@ Read the specific reference manual matching your task before editing code or fix
 Never use an unqualified `VERIFIED` label, and never classify local or disposable-database results as deployed cloud verification:
 
 - **`IMPLEMENTED`**: Present in repository code with unit/schema contract coverage, not yet end-to-end runtime-verified.
-- **`LOCALLY_VERIFIED`**: Proven in local Vitest/Python suites, disposable local TypeDB `3.14.2` (`127.0.0.1:8000` / `127.0.0.1:1729`), or local Convex backup dry runs — **not yet deployed to shared Development or Preview**. All RC002 additions (`c6c1a62..f43c313`, `B-001`–`B-005`) currently hold `LOCALLY_VERIFIED` status.
-- **`DEV_VERIFIED`**: Proven against shared Convex Development (`dev:prestigious-dragon-8`) and/or isolated Development TypeDB Cloud (`aci_case007_verified_dev`, `aci_case007b_verified_dev` at `bd38833`: `27` relationships, `21` observations, G9.3.5 security hardening).
-- **`PREVIEW_VERIFIED`**: Proven end-to-end on deployed Vercel Preview (`bd38833`: Clerk auth, research-only boundary, `/data-room` Case 007-A/007-B `LIVE_GRAPH` hydration and disconnect -> `GRAPH_UNAVAILABLE`).
+- **`LOCALLY_VERIFIED`**: Proven in local Vitest/Python suites, disposable local TypeDB `3.14.2` (`127.0.0.1:8000` / `127.0.0.1:1729`), or local Convex backup dry runs — **not yet deployed to shared Development or Preview** (e.g. unseen `ANET` disposable local TypeDB E2E test and Python gRPC driver suite).
+- **`DEV_VERIFIED`**: Proven against shared Convex Development (`dev:prestigious-dragon-8` at `3222376`, incl. non-destructive SEC/XBRL quarantine of `7` staging items + `8` `evidence` rows) and isolated Development TypeDB Cloud (`aci_case007_verified_dev`: `20` rels, `4` obs; `aci_case007b_verified_dev`: `30` stored `macro_relationship` rows [`28` active non-superseded / `27` 2-hop `org-nvda` focal-reachable / `<= 25` in `EvidenceBundleV1`], `24` observations, `16` stored sources [`<= 15` in `EvidenceBundleV1`], `77` `evidential_support` links).
+- **`PREVIEW_VERIFIED`**: Proven end-to-end on deployed Vercel Preview (`3222376` at `https://trading-iqrskwacf-david-grannums-projects.vercel.app`: `COMPATIBLE` release health, live 10-probe `/api/graph/chat` `297/300` [`10/10` `validationValid: true`], `/` & `/data-room` SSR/RSC `LIVE_GRAPH` + `?asOf=` temporal parity, and controlled `TYPEDB_BRIDGE_SECRET` disconnect -> `GRAPH_UNAVAILABLE` + recovery; interactive signed-in Vercel SSO/Clerk browser click-through pending owner session).
 - **`PRODUCTION_VERIFIED`**: Proven on `prod:benevolent-magpie-921` / `https://capital.aiguides.co.uk` (`main` at `639a2ed`: Clerk Production auth and `executionAuthority: "none"` boundary only; neither Case 007-A/B nor RC002 is `PRODUCTION_VERIFIED`).
 - **`PLANNED`**: Approved follow-up design not yet wired into executable code (e.g. generic multi-accession claim-level quarantine tables beyond `0001045810-26-000078`, unassisted LLM prose-to-hyperedge promotion, public CDN rights-revocation purge).
 
 **Active Open Release Blockers (`PRODUCTION = NO-GO`):**
-1. **RC002 Deployment & Live Re-Verification Pending:** `B-001`–`B-005` (`f43c313`) are `LOCALLY_VERIFIED` only until deployed to `dev:prestigious-dragon-8`, `aci_case007b_verified_dev` (`21 -> 24` observations), and Vercel Preview, and re-scored live.
-2. **Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** `7` invalid staging rows, `8` active `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active on `639a2ed`), and `4` forward-study rows remain unquarantined in Production.
+1. **Interactive Signed-In Browser UI Walkthrough Pending Owner SSO Session:** Deployed Preview SSR/API & live TypeDB `3.14.2` checks at `3222376` passed, while interactive browser click-through paused cleanly at Vercel Deployment Protection (`AUTH_GATE_REQUIRES_OWNER_SESSION`) awaiting an active owner Vercel SSO + Clerk session.
+2. **Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** `7` invalid staging rows, `8` active `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active on `639a2ed`, next run `2026-11-19T07:30:00Z`), and `4` forward-study rows remain unquarantined in Production.
 
 ---
 
@@ -73,7 +73,7 @@ Never use an unqualified `VERIFIED` label, and never classify local or disposabl
 4. **Proposed vs Completed Ownership:** Never represent a `proposed` investment, IPO-contingent placement, or pending M&A signing (`contractualStatus: "contingent_signed"`, `bindingObligation: false`) as completed `funded` ownership (`ownership_stake` with `epistemicStatus: "confirmed"` and `contractualStatus: "funded"`).
 5. **Contingent Guarantees != Realised Losses or Funded Debt:** Keep credit/lease residual guarantees (`guarantee_arrangement`, maximum gross cap, `$0` paid unless drawn) in a separate accounting class from funded debt (`senior_notes_issuance`) and direct purchase/lease commitments.
 6. **Anti-Double-Counting on Commitments:** Never sum overlapping umbrella envelopes and sub-tranches without `economicGroupId` / `parentCommitmentEnvelopeId` deduplication (`commitmentLedger.deduplicatedComputeCommitmentsUsd` vs `naiveComputeCommitmentsSumUsd`) and explicit qualification.
-7. **Point-in-Time (`as-of`) Reconstruction:** Every graph query (`executeAllowlistedGraphQuery`), Evidence Bundle (`assembleEvidenceBundle`), and dashboard loader (`/` and `/data-room` via `?asOfMs=`) must enforce `publishedAtMs <= asOfMs` (plus `receivedAtMs <= asOfMs` when `temporalBasis === "receipt"`) and preserve superseded versions (`v1` -> `v2`) non-destructively for historical queries.
+7. **Point-in-Time (`as-of`) Reconstruction:** Every graph query (`executeAllowlistedGraphQuery`), Evidence Bundle (`assembleEvidenceBundle`), and dashboard loader (`/` and `/data-room` via `?asOf=`) must enforce `publishedAtMs <= asOfMs` (plus `receivedAtMs <= asOfMs` when `temporalBasis === "receipt"`) and preserve superseded versions (`v1` -> `v2`) non-destructively for historical queries.
 8. **Non-Destructive Quarantine Exclusion:** Quarantined `researchStagingItems` and `evidence` rows (including forward-frozen orphan rows outside `promotedEvidenceIds`) must never be deleted, and must be excluded from active research views, `morningBriefings`, `forwardResearchEvents`, `experiments`, `forecasts`, and Evidence Chat bundles.
 9. **Idempotent, Reviewable & Target-Safe Projections:** Graph promotions require human `reviewer` approval (`graphRelationshipReviews`), deterministic `proj:<sha256>` idempotency in `graphProjectionOutbox`, prerequisite-complete TypeQL `put` compilation (`compileSelfContainedProjectionStatements`), and mandatory `assertExplicitTypeDbWriteTarget` verification before any TypeDB write.
 10. **Strict `LIVE_GRAPH` Truthfulness:** Display `LIVE_GRAPH` **only** when `100%` of nodes, edges, and observations derive from live TypeDB concept hydration (`hydrateMacroDatasetFromLiveTypeDb`) and a live allowlisted TypeQL read succeeds. Mere server reachability or static fallback JSON can never carry `LIVE_GRAPH`; when `requireLiveGraph: true` fails, return `GRAPH_UNAVAILABLE` (or throw `TypeDbSchemaOrHydrationError` on schema/concept corruption).
