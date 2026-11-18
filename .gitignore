@@ -4,7 +4,16 @@ node_modules/
 !.env.example
 .convex/
 .vercel/
-.agents/
+.agents/*
+!.agents/rules/
+.agents/rules/*
+!.agents/rules/remote-research-safety.md
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/aci-graph-intelligence/
+!.agents/skills/aci-graph-intelligence/**
+!.agents/skills/remote-research-agent/
+!.agents/skills/remote-research-agent/**
 .claude/
 .tmp/
 tmp/

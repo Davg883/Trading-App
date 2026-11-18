@@ -8,9 +8,27 @@ description: >-
   alignment. Activate this skill before inspecting, designing, modifying,
   testing, or auditing any graph, SEC/XBRL ingestion, staging/quarantine,
   /data-room, Evidence Chat, or NVIDIA/issuer intelligence workflow.
+metadata:
+  version: "1.1.0"
+  schemaVersion: "macro-intelligence-graph-3.14-v1"
+  codeBaselineSha: "f43c313"
+  convexFingerprintSha256: "85f665a324349391b2c582504a02da3af0a55f1878d8236f6c49d8ddcc067875"
+  lastReviewedUtc: "2026-11-18"
+  pathPatterns:
+    - "data/graph/**"
+    - "lib/graph/**"
+    - "lib/remote-ops/**"
+    - "convex/graph.ts"
+    - "convex/remoteOpsCloud.ts"
+    - "convex/operations.ts"
+    - "convex/research.ts"
+    - "app/data-room/**"
+    - "app/api/graph/**"
+    - "worker/graph_projection.py"
+    - "worker/remote_research.py"
 ---
 
-# ACI Graph Intelligence Development Skill
+# ACI Graph Intelligence Development Skill (`v1.1.0`)
 
 This skill governs the end-to-end ACI relationship and financial intelligence pipeline:
 
@@ -21,22 +39,29 @@ This skill governs the end-to-end ACI relationship and financial intelligence pi
 Read the specific reference manual matching your task before editing code or fixtures:
 
 1. **[Graph Data Contracts](./references/graph-data-contracts.md)** — Pinned TypeDB `3.14.2` / driver versions, exact TypeQL 3 PERA entities, subtypes, relations, roles, and attributes (`data/graph/macro-intelligence-schema.tql`, `lib/graph/typedb-schema.ts`), Zod schemas (`lib/graph/contracts.ts`, `lib/graph/evidence-chat-contracts.ts`), allowlisted queries, `GraphSourceMode` rules, TypeDB database isolation targets, Convex outbox/audit tables, and legacy `docs/` drift reconciliation.
-2. **[Evidence Governance](./references/evidence-governance.md)** — Source provenance, 4-clock chronology, canonical identity resolution (`SEC CIK` / `LEI`), SEC multi-filing discovery & XBRL/13F/8-K extraction boundaries, epistemic/contractual/accounting-class separation, prompt-injection defence, non-destructive quarantine & orphan/study invalidation, supersession lineage, reviewer approval, and `IMPLEMENTED` vs `VERIFIED` vs `PLANNED` matrix.
-3. **[Acceptance & Regression Tests](./references/acceptance-tests.md)** — Mandatory build/bundle/test commands, the 5-point `LIVE_GRAPH` gate, the 10-probe (`0–30`) Investor Usefulness Scorecard, and the 7 permanent regression scenarios (NVIDIA Case 007-A/007-B, 7 invalid SEC/XBRL rows, 8th forward-frozen orphan propagation, synthetic Macro Case 001 leakage, undisclosed-fact abstention, historical forecast-vs-actual cutoff, and failure-path / unseen-issuer `ANET` tests).
+2. **[Evidence Governance](./references/evidence-governance.md)** — Source provenance, 4-clock chronology, canonical identity resolution (`SEC CIK` / `LEI`), SEC multi-filing discovery & XBRL/13F/8-K extraction boundaries, epistemic/contractual/accounting-class separation, prompt-injection defence, non-destructive quarantine & orphan/study invalidation, supersession lineage, reviewer approval, and environment-specific verification matrix.
+3. **[Acceptance & Regression Tests](./references/acceptance-tests.md)** — Mandatory build/bundle/test commands, the 5-point `LIVE_GRAPH` gate, the 10-probe (`0–30`) Investor Usefulness Scorecard, open release blockers, and the 7 permanent regression scenarios.
 
-**Relationship to Other Workspace Customizations:**
-- **`.agents/rules/remote-research-safety.md`** (always-on workspace rule): Enforces `executionAuthority: "none"`, secret/credential prohibitions, deterministic price/calculation boundaries, and untrusted-content quarantine.
-- **`.agents/skills/remote-research-agent/SKILL.md`** (workspace staging skill): Covers operational execution of the 10-step remote staging runner (`POST /api/research/staging`, `python -m worker.remote_research`). Any claim staged by that workflow must still pass the deterministic XBRL period/duration/form selectors and human reviewer gates documented in [evidence-governance.md](./references/evidence-governance.md) before entering `evidence` or TypeDB.
+**Portable Workspace Dependencies (Tracked in Git via `.gitignore` Allowlist):**
+- **[.agents/rules/remote-research-safety.md](../../rules/remote-research-safety.md)** (always-on rule): Enforces `executionAuthority: "none"`, secret/credential prohibitions, deterministic price/calculation boundaries, and untrusted-content quarantine.
+- **[.agents/skills/remote-research-agent/SKILL.md](../remote-research-agent/SKILL.md)**: Covers operational execution of the 10-step remote staging runner (`POST /api/research/staging`, `python -m worker.remote_research`). Any claim staged by that workflow must still pass the deterministic XBRL period/duration/form selectors and human reviewer gates documented in [evidence-governance.md](./references/evidence-governance.md) before entering `evidence` or TypeDB.
 
 ---
 
-## 2. Capability Classification Rule (`IMPLEMENTED` vs `VERIFIED` vs `PLANNED`)
+## 2. Environment-Specific Verification Levels & Open Release Blockers
 
-Never describe unbuilt features or draft prose in `docs/*.md` as active system guarantees. Label every capability accurately:
+Never use an unqualified `VERIFIED` label, and never classify local or disposable-database results as deployed cloud verification:
 
-- **`IMPLEMENTED`**: Present in repository TypeScript/Python/TypeQL code and exercised by automated Vitest (`tests/*.test.ts`) or Python (`worker/test_*.py`) tests.
-- **`VERIFIED`**: Proven against real primary filings, live TypeDB `3.14.2` read-back (local disposable or isolated TypeDB Cloud dev database), or read-only Convex environment audits with recorded artefact evidence.
-- **`PLANNED`**: Approved follow-up design not yet wired into executable code (for example, general multi-accession claim-level quarantine tables beyond `0001045810-26-000078`, or automated LLM extraction of N-ary hyperedges from arbitrary unstructured `8-K` prose).
+- **`IMPLEMENTED`**: Present in repository code with unit/schema contract coverage, not yet end-to-end runtime-verified.
+- **`LOCALLY_VERIFIED`**: Proven in local Vitest/Python suites, disposable local TypeDB `3.14.2` (`127.0.0.1:8000` / `127.0.0.1:1729`), or local Convex backup dry runs — **not yet deployed to shared Development or Preview**. All RC002 additions (`c6c1a62..f43c313`, `B-001`–`B-005`) currently hold `LOCALLY_VERIFIED` status.
+- **`DEV_VERIFIED`**: Proven against shared Convex Development (`dev:prestigious-dragon-8`) and/or isolated Development TypeDB Cloud (`aci_case007_verified_dev`, `aci_case007b_verified_dev` at `bd38833`: `27` relationships, `21` observations, G9.3.5 security hardening).
+- **`PREVIEW_VERIFIED`**: Proven end-to-end on deployed Vercel Preview (`bd38833`: Clerk auth, research-only boundary, `/data-room` Case 007-A/007-B `LIVE_GRAPH` hydration and disconnect -> `GRAPH_UNAVAILABLE`).
+- **`PRODUCTION_VERIFIED`**: Proven on `prod:benevolent-magpie-921` / `https://capital.aiguides.co.uk` (`main` at `639a2ed`: Clerk Production auth and `executionAuthority: "none"` boundary only; neither Case 007-A/B nor RC002 is `PRODUCTION_VERIFIED`).
+- **`PLANNED`**: Approved follow-up design not yet wired into executable code (e.g. generic multi-accession claim-level quarantine tables beyond `0001045810-26-000078`, unassisted LLM prose-to-hyperedge promotion, public CDN rights-revocation purge).
+
+**Active Open Release Blockers (`PRODUCTION = NO-GO`):**
+1. **RC002 Deployment & Live Re-Verification Pending:** `B-001`–`B-005` (`f43c313`) are `LOCALLY_VERIFIED` only until deployed to `dev:prestigious-dragon-8`, `aci_case007b_verified_dev` (`21 -> 24` observations), and Vercel Preview, and re-scored live.
+2. **Production SEC/XBRL Contamination (`prod:benevolent-magpie-921`):** `7` invalid staging rows, `8` active `evidence` rows (including `1` forward-frozen orphan), `9` contaminated `morningBriefings` (with unattended daily cron active on `639a2ed`), and `4` forward-study rows remain unquarantined in Production.
 
 ---
 
@@ -65,14 +90,30 @@ Execute these 10 steps in order whenever working on graph, ingestion, quarantine
 1. **Read Skill & References:** Read this `SKILL.md` and the relevant files in `./references/` (`graph-data-contracts.md`, `evidence-governance.md`, `acceptance-tests.md`).
 2. **Inspect Implemented Code & Primary Contracts:** Read the live TypeQL schema (`data/graph/macro-intelligence-schema.tql`, `lib/graph/typedb-schema.ts`), Zod schemas (`lib/graph/contracts.ts`, `lib/graph/evidence-chat-contracts.ts`), and Convex table definitions (`convex/schema.ts`). Do not rely on memory or legacy `docs/*.md` prose.
 3. **Specify Intended Data-Flow Change:** Map exact inputs and outputs across Staging -> Validation -> Reviewer Gate -> Outbox -> TypeDB Projection -> Gateway Retrieval -> Answer Synthesis/Validator -> UI.
-4. **Assess Governance & Financial Blast Radius:** Explicitly evaluate impacts on:
-   - Source provenance (`sourceDocIds`, `contentSha256`, claim-level vs accession-level blocks),
-   - Chronology (`publishedAtMs`, `receivedAtMs`, `periodEndMs`, `asOfMs` hindsight safety),
-   - Tenancy & data isolation (`visibility_scope`, `owner`, `assertNoBrokerOrPrivateAccountData`),
-   - Financial semantics (actual vs forecast, proposed vs funded, direct commitment vs guarantee, double-counting).
+4. **Assess Governance & Financial Blast Radius:** Explicitly evaluate impacts on provenance (`sourceDocIds`, `contentSha256`, claim-level vs accession-level blocks), chronology (`publishedAtMs`, `receivedAtMs`, `periodEndMs`, `asOfMs` hindsight safety), tenancy (`visibility_scope`, `owner`, `assertNoBrokerOrPrivateAccountData`), and financial semantics (actual vs forecast, proposed vs funded, direct commitment vs guarantee, double-counting).
 5. **Implement the Smallest Safe Change:** Keep edits additive and non-destructive; preserve TypeQL `put` idempotency, strict Zod `.strict()` contracts, bounded error strings (`<= 500` chars), and `executionAuthority: "none"`.
 6. **Run Targeted & Regression Suites:** Run the permanent regression tests in [acceptance-tests.md](./references/acceptance-tests.md) plus `npm run convex:fingerprint`, `npm run typecheck`, `npm run lint:baseline`, `npm run test:python`, `npm test`, `npm run build`, and `npm run check:server-bundle`.
-7. **Verify Real TypeDB `3.14.2` Read-Back (Where Applicable):** For schema, compiler, adapter, or ingestion changes, project into an isolated disposable local TypeDB `3.14.2` database (`127.0.0.1:8000` / `127.0.0.1:1729`) and verify live TypeQL read-back counts and `queryBackendMode: "typedb_live"` before touching any cloud target.
+7. **Verify Real TypeDB `3.14.2` Read-Back (Where Applicable):** For schema, compiler, adapter, or ingestion changes, project into an isolated disposable local TypeDB `3.14.2` database (`127.0.0.1:8000` / `127.0.0.1:1729`) and verify live TypeQL read-back counts (`LOCALLY_VERIFIED`) before proposing any cloud target write.
 8. **Verify Investor-Facing Output:** Confirm parity between `/` and `/data-room`, verify historical `?asOfMs=` reconstruction, check `GRAPH_UNAVAILABLE` behaviour when disconnected, and score affected Evidence Chat prompts against the 6-dimension (`0–30`) investor rubric.
-9. **Report Limitations & `IMPLEMENTED` / `VERIFIED` / `PLANNED` Status:** State clearly what was verified locally vs live cloud, any unverified filings/tables, and any remaining blockers.
+9. **Report Limitations & Exact Verification Level:** Label each result strictly as `IMPLEMENTED`, `LOCALLY_VERIFIED`, `DEV_VERIFIED`, `PREVIEW_VERIFIED`, `PRODUCTION_VERIFIED`, or `PLANNED`, noting any unverified filings or open blockers.
 10. **Stop & Request Separate Authorisation for Shared Writes / Deploys:** Present backup hashes, dry-run diffs (`dryRun: true`), exact target database/deployment names, and rollback steps, then **stop** until explicit approval is granted.
+
+---
+
+## 5. Drift-Prevention Triggers & Skill Maintenance Checklist
+
+Whenever a pull request or commit modifies **any** trigger below, update this skill (`metadata.version`, `metadata.codeBaselineSha`, `metadata.convexFingerprintSha256`, `metadata.lastReviewedUtc`, and affected `references/*.md` tables) in the **same branch** before merge:
+
+| Contract Domain | Monitored Files / Constants | Required Documentation Review |
+| :--- | :--- | :--- |
+| **TypeQL 3 & Driver Contracts** | `data/graph/macro-intelligence-schema.tql`, `lib/graph/typedb-schema.ts`, `lib/graph/contracts.ts`, `lib/graph/typedb-driver-adapter.ts`, `worker/graph_projection.py` | Update entity/relation/attribute tables, pinned versions, allowlisted query types, or database target constants in [graph-data-contracts.md](./references/graph-data-contracts.md). |
+| **SEC Discovery, XBRL/13F Parsing & Identity** | `lib/remote-ops/sec-filing-graph-extractor.ts`, `lib/remote-ops/sec-xbrl-fact-selector.ts`, `lib/graph/identity-governance.ts`, `worker/remote_research.py` | Update form support, XBRL duration/period-end gates, CIK/LEI priority, or supersession rules in [evidence-governance.md](./references/evidence-governance.md). |
+| **Quarantine, Staging & Reviewer Governance** | `lib/remote-ops/xbrl-quarantine-remediation.ts`, `lib/remote-ops/staging-validator.ts`, `convex/operations.ts`, `convex/research.ts`, `convex/graph.ts`, `convex/schema.ts` | Update quarantine rule inventory, orphan/study invalidation tables, Convex schema summary, or claim-level quarantine status in [evidence-governance.md](./references/evidence-governance.md) and [graph-data-contracts.md](./references/graph-data-contracts.md). |
+| **Evidence-Locked Chat & Dashboard Alignment** | `lib/graph/evidence-chat-contracts.ts`, `lib/graph/evidence-retrieval-gateway.ts`, `lib/graph/question-aware-evidence-synthesis.ts`, `lib/graph/evidence-answer-validator.ts`, `lib/graph/nvidia-dashboard-alignment.ts`, `app/page.tsx`, `app/data-room/page.tsx` | Update retrieval/budget ceilings, validator checks, diagnostic bounds, `/` vs `/data-room` parity rules, and the 10-probe benchmark in [graph-data-contracts.md](./references/graph-data-contracts.md) and [acceptance-tests.md](./references/acceptance-tests.md). |
+| **Environment Promotion Milestones** | Verified Convex Dev / TypeDB Cloud Dev / Vercel Preview / Production promotions | Promote affected capability labels (`LOCALLY_VERIFIED` -> `DEV_VERIFIED` -> `PREVIEW_VERIFIED` -> `PRODUCTION_VERIFIED`) only after independent read-back evidence is recorded; update Open Release Blockers. |
+
+**Maintenance Sign-Off Checklist (Run Before Committing Skill Updates):**
+- [ ] `hasCurrentAgentRules(process.cwd()) === true` in `AGENTS.md` (Next.js managed markers intact).
+- [ ] Every markdown link across `AGENTS.md` and `.agents/skills/aci-graph-intelligence/**` resolves to a Git-tracked file (`git ls-files`) with zero machine-local paths.
+- [ ] Zero bare `VERIFIED` labels remain; every capability uses one of the 6 environment-specific levels, and unbuilt designs remain `PLANNED`.
+- [ ] `.gitignore` narrow allowlist keeps `.agents/*` ignored except audited `rules/` and `skills/` entries (`git status --ignored` clean of session/secret leakage).

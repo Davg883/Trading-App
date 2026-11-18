@@ -1,5 +1,6 @@
 # ACI Graph Data Contracts (`TypeDB 3.14.2` & TypeScript/Convex Schemas)
 
+**Skill Version:** `1.1.0` (`macro-intelligence-graph-3.14-v1`)  
 **Authoritative Code Sources:**
 - Canonical TypeQL 3 Schema: `data/graph/macro-intelligence-schema.tql` & `lib/graph/typedb-schema.ts` (`EMBEDDED_PINNED_TYPEQL_SCHEMA` + `ADDITIVE_CASE_007_SCHEMA_EXTENSION`)
 - Core Graph Zod Contracts: `lib/graph/contracts.ts`
@@ -9,17 +10,17 @@
 
 ---
 
-## 1. Pinned Platform & Schema Versions (`VERIFIED`)
+## 1. Pinned Platform & Schema Versions
 
-| Component | Pinned Constant / Package | Value | Status |
+| Component | Pinned Constant / Package | Value | Verification Status |
 | :--- | :--- | :--- | :--- |
-| TypeDB Server | `PINNED_TYPEDB_SERVER_VERSION` | `3.14.2` (CE local `127.0.0.1:1729` gRPC / `127.0.0.1:8000` HTTP; TypeDB Cloud HTTPS) | `VERIFIED` |
-| TypeScript HTTP Driver | `PINNED_TYPEDB_HTTP_DRIVER_VERSION` | `@typedb/driver-http@3.14.0` (sessionless `schema` / `write` / `read` transactions) | `VERIFIED` |
-| Python gRPC Driver | `PINNED_TYPEDB_PYTHON_DRIVER_VERSION` | `typedb-driver==3.14.0` | `VERIFIED` |
-| Primary Schema Version | `MACRO_GRAPH_SCHEMA_VERSION` | `macro-intelligence-graph-3.14-v1` (also accepts `macro-intelligence-graph-3.14-v1.1` in `SUPPORTED_MACRO_GRAPH_SCHEMA_VERSIONS`) | `VERIFIED` |
-| Dataset Envelope Version | `MACRO_GRAPH_DATASET_VERSION` | `macro-graph-dataset-g1-v1` | `VERIFIED` |
-| Evidence Bundle Version | `EVIDENCE_BUNDLE_VERSION` | `evidence-bundle-g4-v1` | `VERIFIED` |
-| Evidence Answer Version | `EVIDENCE_LOCKED_ANSWER_VERSION` | `evidence-locked-answer-g4-v1` | `VERIFIED` |
+| TypeDB Server | `PINNED_TYPEDB_SERVER_VERSION` | `3.14.2` (CE local `127.0.0.1:1729` gRPC / `127.0.0.1:8000` HTTP; TypeDB Cloud HTTPS) | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (`bd38833`); not `PRODUCTION_VERIFIED` |
+| TypeScript HTTP Driver | `PINNED_TYPEDB_HTTP_DRIVER_VERSION` | `@typedb/driver-http@3.14.0` (sessionless `schema` / `write` / `read` transactions) | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (`bd38833`) |
+| Python gRPC Driver | `PINNED_TYPEDB_PYTHON_DRIVER_VERSION` | `typedb-driver==3.14.0` | `LOCALLY_VERIFIED` (`worker/test_graph_projection.py` on local TypeDB `3.14.2`) |
+| Primary Schema Version | `MACRO_GRAPH_SCHEMA_VERSION` | `macro-intelligence-graph-3.14-v1` (also accepts `macro-intelligence-graph-3.14-v1.1` in `SUPPORTED_MACRO_GRAPH_SCHEMA_VERSIONS`) | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (`aci_case007_verified_dev`, `aci_case007b_verified_dev`) |
+| Dataset Envelope Version | `MACRO_GRAPH_DATASET_VERSION` | `macro-graph-dataset-g1-v1` | `DEV_VERIFIED` / `PREVIEW_VERIFIED` |
+| Evidence Bundle Version | `EVIDENCE_BUNDLE_VERSION` | `evidence-bundle-g4-v1` | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (RC002 ranking & ledger fixes: `LOCALLY_VERIFIED`) |
+| Evidence Answer Version | `EVIDENCE_LOCKED_ANSWER_VERSION` | `evidence-locked-answer-g4-v1` | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (RC002 question-aware synthesis & `<= 480`-char validator bound: `LOCALLY_VERIFIED`) |
 
 ### TypeQL 3.14 Syntax Mandates
 1. **No TypeDB 2.x syntax:** Never emit `Session` lifecycles, `rule` blocks inside `define`, or role bindings without `links`.
@@ -29,33 +30,33 @@
 
 ---
 
-## 2. TypeDB Environment & Database Isolation Contracts (`VERIFIED`)
+## 2. TypeDB Environment & Database Isolation Contracts
 
 Defined in `lib/graph/typedb-driver-adapter.ts`:
 
-| Constant | Database Name | Purpose & Write Guard |
-| :--- | :--- | :--- |
-| `PRODUCTION_TYPEDB_DATABASE` | `aci_macro_intelligence_prod` | Production graph. Blocked by `assertExplicitTypeDbWriteTarget` unless `allowProductionWrite === true`, and unconditionally blocked from `assertCanRecreateTypeDbDatabase`. |
-| `STAGING_TYPEDB_DATABASE` | `aci_macro_intelligence_staging` | Legacy shared staging database containing `23` synthetic Macro Case 001 relationships (`owner = public_research`). Preserved non-destructively; never silently targeted by live outbox sync (`assertExplicitTypeDbWriteTarget` requires explicit `expectedDatabase`). |
-| `CASE_007_VERIFIED_DEV_DATABASE` | `aci_case007_verified_dev` | Immutable NVIDIA Case 007-A pre-earnings verified dev snapshot (`20` relationships, `4` observations). Guarded by `assertIsolatedCase007WriteTarget`; blocked from `assertCanRecreateTypeDbDatabase`. |
-| `CASE_007B_VERIFIED_DEV_DATABASE` | `aci_case007b_verified_dev` | Isolated NVIDIA Case 007-A + 007-B post-earnings verified dev database (`27` relationships, `21` cloud / `24` local RC002 observations). Guarded by `assertIsolatedCase007BWriteTarget`; blocked from `assertCanRecreateTypeDbDatabase`. |
-| *(Disposable Local Test DBs)* | e.g. `aci_rc002_unseen_disposable_test` | Ephemeral local TypeDB `3.14.2` databases (`127.0.0.1:8000` / `127.0.0.1:1729`) created and dropped inside test `try / finally` blocks. |
+| Constant | Database Name | Purpose & Write Guard | Verification Status |
+| :--- | :--- | :--- | :--- |
+| `PRODUCTION_TYPEDB_DATABASE` | `aci_macro_intelligence_prod` | Production graph target. Blocked by `assertExplicitTypeDbWriteTarget` unless `allowProductionWrite === true`, and unconditionally blocked from `assertCanRecreateTypeDbDatabase`. | `IMPLEMENTED` / `LOCALLY_VERIFIED` (guard); **NO-GO** for Production Case 007 / RC002 writes |
+| `STAGING_TYPEDB_DATABASE` | `aci_macro_intelligence_staging` | Legacy shared staging database containing `23` synthetic Macro Case 001 relationships (`owner = public_research`). Preserved non-destructively; blocked from silent targeting by `assertExplicitTypeDbWriteTarget`. | `DEV_VERIFIED` (read-back); `LOCALLY_VERIFIED` (RC002 explicit target guard) |
+| `CASE_007_VERIFIED_DEV_DATABASE` | `aci_case007_verified_dev` | Immutable NVIDIA Case 007-A pre-earnings dev snapshot (`20` relationships, `4` observations). Guarded by `assertIsolatedCase007WriteTarget`; blocked from `assertCanRecreateTypeDbDatabase`. | `DEV_VERIFIED` / `PREVIEW_VERIFIED` |
+| `CASE_007B_VERIFIED_DEV_DATABASE` | `aci_case007b_verified_dev` | Isolated NVIDIA Case 007-A + 007-B post-earnings dev database (`27` relationships, `21` observations live at `bd38833`; `3` additional RC002 Q3 observations `LOCALLY_VERIFIED`, pending authorised additive `put`). Guarded by `assertIsolatedCase007BWriteTarget`. | `DEV_VERIFIED` / `PREVIEW_VERIFIED` (`21` obs); `LOCALLY_VERIFIED` (`24` obs) |
+| *(Disposable Local Test DBs)* | e.g. `aci_rc002_unseen_disposable_test` | Ephemeral local TypeDB `3.14.2` databases (`127.0.0.1:8000` / `127.0.0.1:1729`) created and dropped inside test `try / finally` blocks. | `LOCALLY_VERIFIED` |
 
-**Connection Fail-Closed Rules (`defaultTypeDbConfig` & `createTypeDbDriver`):**
+**Connection Fail-Closed Rules (`defaultTypeDbConfig` & `createTypeDbDriver` — `DEV_VERIFIED` / `PREVIEW_VERIFIED`):**
 - Required env vars on hosted runtimes (`NODE_ENV === "production"`, `VERCEL_ENV` in `{"production", "preview"}`, or `CONVEX_CLOUD_URL` set): `TYPEDB_HTTP_ADDRESS`, `TYPEDB_USERNAME`, `TYPEDB_PASSWORD`, and `TYPEDB_DATABASE`.
 - Loopback CE defaults (`http://127.0.0.1:8000`, `admin` / `password`) are allowed **only** on non-hosted loopback development; hosted runtimes or non-loopback addresses with missing credentials or `password === "password"` set `blockedReason` and throw `TypeDbConfigurationError`.
 - Server-to-Convex bridge (`resolveConvexCloudBridge` -> `convex/graph.ts` `assertBridgeKey`) requires `NEXT_PUBLIC_CONVEX_URL` (`https://`) and a dedicated `TYPEDB_BRIDGE_SECRET` (`>= 32` chars, distinct from `OPERATIONS_SCHEDULER_SECRET`, `RESEARCH_STAGING_TOKEN`, and `EVIDENCE_CHAT_GATEWAY_SECRET`).
 
 ---
 
-## 3. Canonical TypeQL 3 Entity Contracts (`IMPLEMENTED` & `VERIFIED`)
+## 3. Canonical TypeQL 3 Entity Contracts (`DEV_VERIFIED` on TypeDB Cloud `3.14.2`)
 
 Every entity key uses `@key`. Do **not** reference non-existent attribute names from early Phase G.1 drafts.
 
 | TypeQL Entity | `@key` Attribute | Owned Attributes (`macro-intelligence-schema.tql`) | Subtypes / Notes |
 | :--- | :--- | :--- | :--- |
 | `organisation` | `org_id` | `legal_name`, `display_name`, `org_subtype_label`, `sec_cik`, `lei_code`, `ticker_symbol`, `incorporation_jurisdiction`, `tenant_owner`, `visibility_scope` | Subtypes (`ORGANISATION_SUBTYPES`): `public_company`, `private_company`, `hyperscaler` (`sub public_company`), `semiconductor_supplier` (`sub public_company`), `specialist_compute_provider`, `ai_laboratory` (`sub private_company`), `utility_provider`, `government_body`. *(Note: `aliases` and `sectorIds` live on Zod `organisationSchema`; sector links project as `sector_participation` relations).* |
-| `executive_person` | `person_id` | `full_name`, `display_name`, `affiliated_org_id`, `tenant_owner`, `visibility_scope` | Additive Case 007-B entity (`ADDITIVE_CASE_007_SCHEMA_EXTENSION`); plays `leadership_appointment:officer` and `predecessor_officer`. |
+| `executive_person` | `person_id` | `full_name`, `display_name`, `affiliated_org_id`, `tenant_owner`, `visibility_scope` | Additive Case 007-B entity (`ADDITIVE_CASE_007_SCHEMA_EXTENSION`, `DEV_VERIFIED` / `PREVIEW_VERIFIED`); plays `leadership_appointment:officer` and `predecessor_officer`. |
 | `sector_classification` | `sector_id` | `sector_name`, `industry_group`, `economic_layer` | Plays `sector_participation:target_sector` and `project_dependency:impacted_sector`. |
 | `infrastructure_project` | `project_id` | `project_name`, `project_type`, `project_stage`, `planned_capacity_mw` (`double`), `energised_capacity_mw` (`double`), `tenant_owner`, `visibility_scope` | Linked to `geographical_location` via `location_placement`. |
 | `financial_instrument` | `instrument_id` | `instrument_type`, `instrument_currency`, `ticker_symbol`, `figi_code` | Zod `figiCode` matches `/^BBG[A-Z0-9]{9}$/` or `null`; `instrumentCurrency` matches `/^[A-Z]{3}$/`. |
@@ -66,7 +67,7 @@ Every entity key uses `@key`. Do **not** reference non-existent attribute names 
 
 ---
 
-## 4. Canonical TypeQL 3 Relation Contracts (`IMPLEMENTED` & `VERIFIED`)
+## 4. Canonical TypeQL 3 Relation Contracts (`DEV_VERIFIED` on TypeDB Cloud `3.14.2`)
 
 ### 4.1 Abstract Super-Relation: `macro_relationship @abstract`
 
@@ -110,9 +111,9 @@ Owned attributes on every concrete `macro_relationship` subtype:
 
 ---
 
-## 5. Query Gateway, Provenance Modes & Evidence-Locked Chat Contracts (`VERIFIED`)
+## 5. Query Gateway, Provenance Modes & Evidence-Locked Chat Contracts
 
-### 5.1 Allowlisted Graph Queries (`ALLOWLISTED_QUERY_TYPES` in `lib/graph/contracts.ts`)
+### 5.1 Allowlisted Graph Queries (`ALLOWLISTED_QUERY_TYPES` — `DEV_VERIFIED` / `PREVIEW_VERIFIED`)
 Raw TypeQL queries from clients or agents are rejected. Only these 6 parameter-bound query types exist:
 1. `organisation_relationship_summary` (`organisationId`, `maxDepth` `1..2`)
 2. `project_dependency_network` (`projectId`, `maxDepth` `1..2`)
@@ -121,34 +122,34 @@ Raw TypeQL queries from clients or agents are rejected. Only these 6 parameter-b
 5. `as_known_at_date_graph` (`asOfMs`, `temporalBasis`: `'receipt' | 'publication'`, optional `organisationId` / `projectId`)
 6. `relationship_source_evidence` (`relationshipId`)
 
-**Bounds:** `maxDepth` `1..2` (default `2`), `maxNodes` `1..50` (default `25`), `maxEdges` `1..100` (default `50`), process-local burst limiter `60` req / `60s` per `callerId` (`checkGraphGatewayRateLimit` — documented explicitly as process-local, while shared turn/cost ceilings live in Convex `chatBudgetReservations`).
+**Bounds:** `maxDepth` `1..2` (default `2`), `maxNodes` `1..50` (default `25`), `maxEdges` `1..100` (default `50`), process-local burst limiter `60` req / `60s` per `callerId` (`checkGraphGatewayRateLimit` — process-local per warm instance; shared per-owner turn/cost ceilings live in Convex `chatBudgetReservations`).
 
 ### 5.2 Graph Provenance Modes (`GRAPH_SOURCE_MODES`)
-- **`LIVE_GRAPH`**: Returned **only** when `hydrateMacroDatasetFromLiveTypeDb` succeeds (`backendMode = "typedb_live"`) **and** `executeReadOnlyTypeQlOnLiveServer` succeeds. `100%` of nodes, edges, and observations come from live TypeDB concept rows; static datasets are never merged in.
+- **`LIVE_GRAPH`**: Returned **only** when `hydrateMacroDatasetFromLiveTypeDb` succeeds (`backendMode = "typedb_live"`) **and** `executeReadOnlyTypeQlOnLiveServer` succeeds (`PREVIEW_VERIFIED` on `/data-room` at `bd38833`; `LOCALLY_VERIFIED` for `/` home NVIDIA loader in RC002 `8cf9009`).
 - **`HISTORICAL_MIRROR`**: Returned only when `requireLiveGraph` is `false` and static/mirror datasets are explicitly permitted.
-- **`GRAPH_UNAVAILABLE`**: Returned when `requireLiveGraph: true` (used by `/data-room` and `/` live NVIDIA loaders) and TypeDB is unreachable or uninitialised (`nodes: []`, `edges: []`, `observations: []`). If TypeDB is reachable but schema version or concept hydration is corrupt, `TypeDbSchemaOrHydrationError` fails closed.
+- **`GRAPH_UNAVAILABLE`**: Returned when `requireLiveGraph: true` and TypeDB is unreachable or uninitialised (`nodes: []`, `edges: []`, `observations: []`; `PREVIEW_VERIFIED` on `/data-room`, `LOCALLY_VERIFIED` on `/`). If TypeDB is reachable but schema version or concept hydration is corrupt, `TypeDbSchemaOrHydrationError` fails closed.
 
 ### 5.3 Evidence-Locked Chat (`lib/graph/evidence-chat-contracts.ts` & `evidence-answer-validator.ts`)
-- **Retrieval & Cost Ceilings (`EVIDENCE_RETRIEVAL_LIMITS`):** `maxTraversalDepth: 2`, `maxRelationships: 25`, `maxEvidenceDocuments: 15`, `maxExcerptCharsPerDoc: 600`, `maxTotalInputTokens: 6000`, `maxRequestDurationMs: 15000`, `maxRequestCostGbp: 0.05`, `defaultDailyBudgetCeilingGbp: 2.0`.
-- **Integer Micro-GBP Accounting:** `ACCOUNTING_UNITS_PER_GBP = 1_000_000` (`£0.000001`). Charges round **up** (`costToAccountingUnits` via `Math.ceil`), ceilings round **down** (`ceilingToAccountingUnits` via `Math.floor`).
-- **Bundle & Answer Binding:** `EvidenceLockedAnswer` (`evidence-locked-answer-g4-v1`) binds `bundleId` + `bundleSha256` (`SHA-256` of canonical `EvidenceBundleV1`), enforces `executionAuthority: "none"`, tags every claim with `distinction` (`source_fact` | `deterministic_arithmetic` | `modelled_scenario` | `reported_unverified` | `interpretation`), and sets `supportStatus` (`fully_supported` | `partially_supported` | `unsupported`).
-- **9 Independent Validator Checks (`answerValidationCheckSchema`):** `schema_valid`, `bundle_hash_bound`, `evidence_ids_in_bundle`, `relationship_ids_in_bundle`, `historical_cutoff_respected`, `numerical_claims_verified`, `deterministic_arithmetic_verified`, `epistemic_labels_preserved`, `security_and_isolation_passed`.
-- **Diagnostic Length Invariant (`B-001`):** Every `checks[i].detail` is capped at `z.string().max(500)` in Zod; validator formatters truncate client-facing `detail` to `<= 480` chars with JWT/API-key redaction while logging up to `3,800` chars server-side via `logProtectedValidatorDiagnostics`. Any failed check downgrades the response to `buildEvidenceLimitedAbstentionAnswer` (`actionTaken: "downgraded_to_abstention"`, `supportStatus: "unsupported"`).
+- **Retrieval & Cost Ceilings (`EVIDENCE_RETRIEVAL_LIMITS`, `DEV_VERIFIED`):** `maxTraversalDepth: 2`, `maxRelationships: 25`, `maxEvidenceDocuments: 15`, `maxExcerptCharsPerDoc: 600`, `maxTotalInputTokens: 6000`, `maxRequestDurationMs: 15000`, `maxRequestCostGbp: 0.05`, `defaultDailyBudgetCeilingGbp: 2.0`.
+- **Integer Micro-GBP Accounting (`DEV_VERIFIED`):** `ACCOUNTING_UNITS_PER_GBP = 1_000_000` (`£0.000001`). Charges round **up** (`costToAccountingUnits` via `Math.ceil`), ceilings round **down** (`ceilingToAccountingUnits` via `Math.floor`).
+- **Bundle & Answer Binding (`DEV_VERIFIED` / `PREVIEW_VERIFIED`):** `EvidenceLockedAnswer` (`evidence-locked-answer-g4-v1`) binds `bundleId` + `bundleSha256`, enforces `executionAuthority: "none"`, tags every claim with `distinction` (`source_fact` | `deterministic_arithmetic` | `modelled_scenario` | `reported_unverified` | `interpretation`), and sets `supportStatus` (`fully_supported` | `partially_supported` | `unsupported`).
+- **9 Independent Validator Checks (`answerValidationCheckSchema`, `DEV_VERIFIED`):** `schema_valid`, `bundle_hash_bound`, `evidence_ids_in_bundle`, `relationship_ids_in_bundle`, `historical_cutoff_respected`, `numerical_claims_verified`, `deterministic_arithmetic_verified`, `no_private_or_broker_leakage`, `no_prompt_injection_override`.
+- **Diagnostic Length Invariant (`B-001`, `LOCALLY_VERIFIED` in `c6c1a62`):** Every `checks[i].detail` is capped at `z.string().max(500)` in Zod; validator formatters truncate client-facing `detail` to `<= 480` chars with JWT/API-key redaction while logging up to `3,800` chars server-side via `logProtectedValidatorDiagnostics`.
 
 ---
 
 ## 6. Convex Durability, Outbox & Quarantine Tables (`convex/schema.ts`)
 
-| Convex Table | Role in Graph & Evidence Pipeline |
-| :--- | :--- |
-| `researchStagingItems` | Restricted staging intake (`validationStatus`, `contentSha256`, `publishedAt`, `receivedAt`, `promotedEvidenceIds`, `quarantinedAt`, `quarantineId`, `executionAuthority: "none"`). |
-| `evidence` | Promoted flat metric records (`status`: `'reported' | 'estimated' | 'measured'`, `quarantinedAt`, `quarantineId`, `supersedes`). |
-| `evidenceQuarantines` | Append-only quarantine ledger (`quarantineKey`, `stagingItemId`, `evidenceIds`, `affectedBriefingIds`, `affectedForwardEventIds`, `affectedExperimentIds`, `affectedForecastIds`, `affectedBriefingFactIds`, `reasonCode`, `claimedJson`, `expectedJson`). |
-| `graphRelationshipReviews` | Human `reviewer` approval/rejection audit log (`decision`, `reviewer`, `sourceEvidenceIds`, `sourceDocumentApproved`, `promotedOutboxId`, `projectionKey`). |
-| `graphProjectionOutbox` | Append-only TypeDB projection queue (`sequence`, `projectionKey`, `payloadJson`, `typeqlJson`, `status`: `'pending' | 'retrying' | 'projected' | 'dead_letter'`, `attemptCount`, `maxAttempts`, `nextAttemptAtMs`). |
-| `graphProjectionCheckpoints` | Per-owner sequence & staleness tracker (`lastProjectedSequence`, `projectedCount`, `pendingCount`, `retryingCount`, `deadLetterCount`, `maxProjectionLagMs` with `15`-min staleness threshold). |
-| `graphQueryAudit` | Read-only gateway audit (`queryType`, `asOfMs`, `nodeCount`, `edgeCount`, `backendMode`, `latencyMs`). |
-| `evidenceChatAudit` & `chatBudgetReservations` | Full immutable bundle/answer/validation audit trail and pre-call atomic micro-GBP cost reservations. |
+| Convex Table | Role in Graph & Evidence Pipeline | Verification Status |
+| :--- | :--- | :--- |
+| `researchStagingItems` | Restricted staging intake (`validationStatus`, `contentSha256`, `publishedAt`, `receivedAt`, `promotedEvidenceIds`, `quarantinedAt`, `quarantineId`, `executionAuthority: "none"`). | `DEV_VERIFIED` / `PRODUCTION_VERIFIED` (schema); RC002 quarantine execution pending |
+| `evidence` | Promoted flat metric records (`status`: `'reported' | 'estimated' | 'measured'`, `quarantinedAt`, `quarantineId`, `supersedes`). | `DEV_VERIFIED` / `PRODUCTION_VERIFIED` (schema) |
+| `evidenceQuarantines` | Append-only quarantine ledger (`quarantineKey`, `stagingItemId`, `evidenceIds`, `affectedBriefingIds`, `affectedForwardEventIds`, `affectedExperimentIds`, `affectedForecastIds`, `affectedBriefingFactIds`, `reasonCode`, `claimedJson`, `expectedJson`). | Base schema `DEV_VERIFIED`; RC002 `affectedExperimentIds`/`affectedForecastIds` & 8-row discovery `LOCALLY_VERIFIED` |
+| `graphRelationshipReviews` | Human `reviewer` approval/rejection audit log (`decision`, `reviewer`, `sourceEvidenceIds`, `sourceDocumentApproved`, `promotedOutboxId`, `projectionKey`). | `DEV_VERIFIED`; RC002 dynamic staged-source resolution `LOCALLY_VERIFIED` |
+| `graphProjectionOutbox` | Append-only TypeDB projection queue (`sequence`, `projectionKey`, `payloadJson`, `typeqlJson`, `status`: `'pending' | 'retrying' | 'projected' | 'dead_letter'`, `attemptCount`, `maxAttempts`, `nextAttemptAtMs`). | `DEV_VERIFIED`; RC002 prerequisite-complete TypeQL bundle `LOCALLY_VERIFIED` |
+| `graphProjectionCheckpoints` | Per-owner sequence & staleness tracker (`lastProjectedSequence`, `projectedCount`, `pendingCount`, `retryingCount`, `deadLetterCount`, `maxProjectionLagMs` with `15`-min staleness threshold). | `DEV_VERIFIED` |
+| `graphQueryAudit` | Read-only gateway audit (`queryType`, `asOfMs`, `nodeCount`, `edgeCount`, `backendMode`, `latencyMs`). | `DEV_VERIFIED` / `PREVIEW_VERIFIED` |
+| `evidenceChatAudit` & `chatBudgetReservations` | Full immutable bundle/answer/validation audit trail and pre-call atomic micro-GBP cost reservations. | `DEV_VERIFIED` / `PREVIEW_VERIFIED` |
 
 ---
 
