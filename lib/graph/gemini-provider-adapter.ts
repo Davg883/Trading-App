@@ -16,6 +16,10 @@ import {
   buildEvidenceLimitedAbstentionAnswer,
   validateEvidenceLockedAnswer,
 } from './evidence-answer-validator';
+import {
+  isLegacyMacroCase001Bundle,
+  synthesizeQuestionAwareEvidenceAnswer,
+} from './question-aware-evidence-synthesis';
 
 /**
  * Phase G.4 (Phases A, D & I) — Official Google GenAI (`@google/genai`) Server-Side Provider Adapter
@@ -447,6 +451,16 @@ export function synthesizeDeterministicEvidenceAnswer(
     return buildEvidenceLimitedAbstentionAnswer(bundle, reason);
   }
 
+  // RC002 Workstream A (B-002): Whenever the bundle comes from a live / non-Case-001 TypeDB graph,
+  // delegate directly to question-aware synthesis (including empty/out-of-scope abstention explanations)
+  // so legacy Macro Case 001 wording never leaks into non-Case-001 evidence responses.
+  if (
+    !isLegacyMacroCase001Bundle(bundle) &&
+    !bundle.graphDatabaseName.startsWith('aci_macro_intelligence_')
+  ) {
+    return synthesizeQuestionAwareEvidenceAnswer(bundle);
+  }
+
   if (
     bundle.selectedQuery.intentCategory === 'out_of_scope_or_unsupported' ||
     (bundle.relationships.length === 0 &&
@@ -466,6 +480,10 @@ export function synthesizeDeterministicEvidenceAnswer(
   }
 
   const cat = bundle.selectedQuery.intentCategory;
+
+  if (!isLegacyMacroCase001Bundle(bundle)) {
+    return synthesizeQuestionAwareEvidenceAnswer(bundle);
+  }
 
   // 1. Shared financial counterparties
   if (cat === 'shared_counterparties') {

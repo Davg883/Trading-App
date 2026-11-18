@@ -1,3 +1,5 @@
+import case007PreRaw from '../../data/graph/case-007-nvidia-sec-filings-2026-11-17.json';
+import case007bPostRaw from '../../data/graph/case-007b-nvidia-post-earnings-2026-11-18.json';
 import { sha256Hex } from '../remote-ops/staging-validator';
 import type {
   GraphSourceDocument,
@@ -194,15 +196,15 @@ export function classifyResearchQuestionIntent(
   }
 
   // 3. Reported, unverified, disputed, or cancelled claims (Starter Question 5)
-  if (
-    /\b(reported|unverified|disputed|cancelled|journalism|secondary\s+source|not\s+confirmed|remain\s+reported)\b/i.test(
+  // Note: Do NOT hijack accounting phrases like "reported revenue", "reported actuals", or "forecast vs reported".
+  const isEpistemicStatusQuery =
+    /\b(unverified|disputed|cancelled|superseded|journalism|secondary\s+source|not\s+confirmed|remain\s+reported|reported\s+only|reported\s+or\s+unverified|rumour|rumor)\b/i.test(
       q,
-    ) &&
-    !/\bloughton\b/i.test(q)
-  ) {
+    ) && !/\bloughton\b/i.test(q);
+  if (isEpistemicStatusQuery) {
     return {
       queryType: 'as_known_at_date_graph',
-      focalEntityId: null,
+      focalEntityId: matchOrganisationId(q, dataset),
       sectorId: null,
       relationshipId: null,
       maxDepth: 2,
@@ -214,26 +216,34 @@ export function classifyResearchQuestionIntent(
   }
 
   // 4. Largest compute commitments / deduplicated ledger / S-1/A obligations
+  const hasCase001S1aRel = dataset.relationships.some(
+    (r) => r.relationshipId === 'rel-anthropic-s1a-amzn-compute-r1',
+  );
   if (
     /\b(largest\s+compute|compute\s+commitment|compute-purchase|895\.4|44\.6|double\s*count|commitment\s+ledger|s-1\/a|purchase\s+obligation)\b/i.test(
       q,
-    )
+    ) &&
+    (hasCase001S1aRel || !matchOrganisationId(q, dataset) || matchOrganisationId(q, dataset) === 'org-anthropic')
   ) {
     return {
       queryType: 'organisation_relationship_summary',
-      focalEntityId: 'org-anthropic',
+      focalEntityId: matchOrganisationId(q, dataset) ?? 'org-anthropic',
       sectorId: null,
-      relationshipId: 'rel-anthropic-s1a-amzn-compute-r1',
+      relationshipId: hasCase001S1aRel ? 'rel-anthropic-s1a-amzn-compute-r1' : null,
       maxDepth: 2,
       intentCategory: 'compute_commitments_evidence',
       intentRationale:
-        "Selected allowlisted query 'organisation_relationship_summary' (focal=org-anthropic) and commitment ledger to inspect signed compute-purchase commitments and parent envelope deduplication.",
+        "Selected allowlisted query 'organisation_relationship_summary' and commitment ledger to inspect signed compute-purchase commitments and parent envelope deduplication.",
       securityBlockedReason: null,
     };
   }
 
   // 5. Historical cutoff / "what did our system know on <date>"
-  if (/\b(what\s+did\s+our\s+system\s+know|as\s+of|on\s+31\s+july|july\s+2026|october\s+2026|september\s+2026|historical\s+cutoff|before\s+november)\b/i.test(q)) {
+  if (
+    /\b(what\s+did\s+our\s+system\s+know|as\s+of\s+202\d|on\s+31\s+july|july\s+2026|october\s+2026|september\s+2026|historical\s+cutoff|before\s+november|before\s+q3\s+fy2027\s+results)\b/i.test(
+      q,
+    )
+  ) {
     const focalOrg = matchOrganisationId(q, dataset) ?? 'org-anthropic';
     return {
       queryType: 'as_known_at_date_graph',
@@ -247,13 +257,13 @@ export function classifyResearchQuestionIntent(
     };
   }
 
-  // 6. Infrastructure project dependency network
+  // 6. Infrastructure project dependency network (only when a specific campus/project is focal, not generic "infrastructure spending")
   const matchedProj = matchProjectId(q, dataset);
-  if (matchedProj || /\b(project|campus|substation|monarch|loughton|dublin\s+campus|stargate)\b/i.test(q)) {
+  if (matchedProj || /\b(campus|substation|monarch|loughton|dublin\s+campus|stargate|ports-pike|ports\s+campus)\b/i.test(q)) {
     const explicitRelMatch = q.match(/\b(rel-[a-z0-9-]+)\b/i);
     return {
       queryType: 'project_dependency_network',
-      focalEntityId: matchedProj ?? 'proj-monarch-wv',
+      focalEntityId: matchedProj ?? (dataset.projects[0]?.projectId ?? 'proj-monarch-wv'),
       sectorId: null,
       relationshipId: explicitRelMatch ? explicitRelMatch[1]! : null,
       maxDepth: 2,
@@ -263,8 +273,12 @@ export function classifyResearchQuestionIntent(
     };
   }
 
-  // 7. Default organisation relationship summary
+  // 7. Default organisation relationship & financial observation summary
   const focalOrg = matchOrganisationId(q, dataset) ?? 'org-anthropic';
+  const financialFocus =
+    /\b(forecast|guidance|outlook|reported\s+revenue|gross\s+margin|free\s+cash\s+flow|fcf|capex|capital\s+expenditure|customer\s+concentration|direct\s+commitment|guarantee)\b/i.test(
+      q,
+    );
   return {
     queryType: 'organisation_relationship_summary',
     focalEntityId: focalOrg,
@@ -272,28 +286,67 @@ export function classifyResearchQuestionIntent(
     relationshipId: null,
     maxDepth: 2,
     intentCategory: 'entity_relationships',
-    intentRationale: `Selected allowlisted query 'organisation_relationship_summary' (focal=${focalOrg}, maxDepth=2).`,
+    intentRationale: financialFocus
+      ? `Selected allowlisted query 'organisation_relationship_summary' (focal=${focalOrg}, maxDepth=2) with primary financial observations and contractual exposure schedules.`
+      : `Selected allowlisted query 'organisation_relationship_summary' (focal=${focalOrg}, maxDepth=2).`,
     securityBlockedReason: null,
   };
 }
 
-function matchOrganisationId(q: string, dataset: MacroGraphDataset): string | null {
-  if (q.includes('anthropic')) return 'org-anthropic';
-  if (q.includes('nscale')) return 'org-nscale';
-  if (q.includes('microsoft') || q.includes('msft')) return 'org-msft';
-  if (q.includes('amazon') || q.includes('amzn') || q.includes('aws')) return 'org-amzn';
-  if (q.includes('alphabet') || q.includes('google') || q.includes('googl')) return 'org-googl';
-  if (q.includes('nvidia') || q.includes('nvda')) return 'org-nvda';
-  if (q.includes('coreweave') || q.includes('crwv')) return 'org-crwv';
-  if (q.includes('eirgrid')) return 'org-eirgrid';
-  if (q.includes('central bank of ireland') || q.includes('makhlouf')) return 'org-cbi-ie';
-  if (q.includes('department of finance')) return 'org-dof-ie';
-  if (q.includes('blackstone')) return 'org-bx';
-  if (q.includes('blue owl')) return 'org-owl';
-  for (const org of dataset.organisations) {
-    if (q.includes(org.displayName.toLowerCase())) return org.orgId;
+const ORG_ALIAS_RULES: ReadonlyArray<{ orgId: string; patterns: readonly string[] }> = [
+  { orgId: 'org-nvda', patterns: ['nvidia', 'nvda'] },
+  { orgId: 'org-anthropic', patterns: ['anthropic'] },
+  { orgId: 'org-nscale', patterns: ['nscale'] },
+  { orgId: 'org-msft', patterns: ['microsoft', 'msft', 'azure'] },
+  { orgId: 'org-amzn', patterns: ['amazon', 'amzn', 'aws'] },
+  { orgId: 'org-googl', patterns: ['alphabet', 'google', 'googl'] },
+  { orgId: 'org-crwv', patterns: ['coreweave', 'crwv'] },
+  { orgId: 'org-intc', patterns: ['intel', 'intc'] },
+  { orgId: 'org-amd', patterns: ['advanced micro devices', 'amd'] },
+  { orgId: 'org-orcl', patterns: ['oracle', 'orcl'] },
+  { orgId: 'org-nbis', patterns: ['nebius', 'nbis'] },
+  { orgId: 'org-spacex', patterns: ['spacex'] },
+  { orgId: 'org-openai', patterns: ['openai'] },
+  { orgId: 'org-sb-energy', patterns: ['sb energy'] },
+  { orgId: 'org-huggingface', patterns: ['hugging face', 'huggingface'] },
+  { orgId: 'org-eirgrid', patterns: ['eirgrid'] },
+  { orgId: 'org-cbi-ie', patterns: ['central bank of ireland', 'makhlouf'] },
+  { orgId: 'org-dof-ie', patterns: ['department of finance'] },
+  { orgId: 'org-bx', patterns: ['blackstone'] },
+  { orgId: 'org-owl', patterns: ['blue owl'] },
+];
+
+function matchAllMentionedOrganisationIds(q: string, dataset: MacroGraphDataset): string[] {
+  const hits: Array<{ orgId: string; index: number }> = [];
+  const seen = new Set<string>();
+  for (const rule of ORG_ALIAS_RULES) {
+    let bestIdx = -1;
+    for (const pat of rule.patterns) {
+      const idx = q.indexOf(pat);
+      if (idx >= 0 && (bestIdx === -1 || idx < bestIdx)) {
+        bestIdx = idx;
+      }
+    }
+    if (bestIdx >= 0 && !seen.has(rule.orgId)) {
+      seen.add(rule.orgId);
+      hits.push({ orgId: rule.orgId, index: bestIdx });
+    }
   }
-  return null;
+  for (const org of dataset.organisations) {
+    if (seen.has(org.orgId)) continue;
+    const idx = q.indexOf(org.displayName.toLowerCase());
+    if (idx >= 0) {
+      seen.add(org.orgId);
+      hits.push({ orgId: org.orgId, index: idx });
+    }
+  }
+  hits.sort((a, b) => a.index - b.index);
+  return hits.map((h) => h.orgId);
+}
+
+function matchOrganisationId(q: string, dataset: MacroGraphDataset): string | null {
+  const mentioned = matchAllMentionedOrganisationIds(q, dataset);
+  return mentioned[0] ?? null;
 }
 
 function matchProjectId(q: string, dataset: MacroGraphDataset): string | null {
@@ -322,14 +375,93 @@ function resolveEntityLabel(entityId: string, dataset: MacroGraphDataset): strin
   return entityId;
 }
 
-function isTemporalEligible(
-  publishedAtMs: number,
-  receivedAtMs: number,
-  cutoffMs: number,
-  basis: TemporalBasis,
-): boolean {
-  return basis === 'publication' ? publishedAtMs <= cutoffMs : receivedAtMs <= cutoffMs;
+const VERIFIED_PRIMARY_EXCERPT_BY_DOC_ID: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>();
+  const rawLists: Array<Array<{ sourceDocId?: string; verbatimExcerpt?: string }>> = [
+    ((case007PreRaw as { sources?: Array<{ sourceDocId?: string; verbatimExcerpt?: string }> })
+      .sources ?? []),
+    ((case007bPostRaw as {
+      primarySources?: Array<{ sourceDocId?: string; verbatimExcerpt?: string }>;
+    }).primarySources ?? []),
+  ];
+  for (const list of rawLists) {
+    for (const item of list) {
+      if (item.sourceDocId && item.verbatimExcerpt) {
+        map.set(item.sourceDocId, item.verbatimExcerpt);
+      }
+    }
+  }
+  return map;
+})();
+
+function scoreRelationshipRelevanceForQuestion(
+  rel: MacroRelationship,
+  qLower: string,
+  mentionedOrgs: ReadonlySet<string>,
+  sourcesById: ReadonlyMap<string, GraphSourceDocument>,
+  dataset: MacroGraphDataset,
+): number {
+  let score = 0;
+  // Source authority weight (primary regulator/filing > primary company > secondary)
+  const hasPrimaryFiling = rel.sourceDocIds.some((id) => {
+    const s = sourcesById.get(id);
+    return s?.authority === 'primary' && (s.kind === 'filing' || s.kind === 'regulator');
+  });
+  const hasPrimaryCompany = rel.sourceDocIds.some((id) => {
+    const s = sourcesById.get(id);
+    return s?.authority === 'primary';
+  });
+  if (hasPrimaryFiling) score += 20;
+  else if (hasPrimaryCompany) score += 12;
+
+  // Mentioned counterparty relevance
+  for (const p of rel.participants) {
+    if (mentionedOrgs.has(p.entityId)) score += 18;
+    const label = resolveEntityLabel(p.entityId, dataset).toLowerCase();
+    if (label.length >= 4 && qLower.includes(label)) score += 22;
+  }
+
+  const summaryLower = `${rel.relationshipId} ${rel.relationType} ${rel.category} ${rel.conditionsSummary}`.toLowerCase();
+  if (
+    /\b(leadership|governance|ceo|cfo|chair|board|resign|huang|kress|jones|executive)\b/i.test(
+      qLower,
+    ) &&
+    (rel.relationType === 'executive_role' ||
+      /\b(resign|interim ceo|chair|board|huang|kress|jones)\b/.test(summaryLower))
+  ) {
+    score += 65;
+  }
+  if (
+    /\b(guarantee|contingent|backstop|neocloud|direct\s+commitment|credit|debt|notes)\b/i.test(
+      qLower,
+    ) &&
+    (rel.relationType === 'guarantee_arrangement' ||
+      rel.relationType === 'financing_arrangement' ||
+      rel.contractualStatus === 'contingent_signed' ||
+      /\b(guarant|neocloud|senior notes|contingent)\b/.test(summaryLower))
+  ) {
+    score += 45;
+  }
+  if (
+    /\b(13f|equity|stake|holding|warrant|ownership|counterpart|partnership|cloud|hardware|vera\s+rubin)\b/i.test(
+      qLower,
+    ) &&
+    (rel.relationType === 'ownership_stake' ||
+      rel.relationType === 'supply_relationship' ||
+      rel.relationType === 'investment_backing')
+  ) {
+    score += 30;
+  }
+  return score;
 }
+  function isTemporalEligible(
+    publishedAtMs: number,
+    receivedAtMs: number,
+    cutoffMs: number,
+    basis: TemporalBasis,
+  ): boolean {
+    return basis === 'publication' ? publishedAtMs <= cutoffMs : receivedAtMs <= cutoffMs;
+  }
 
 /**
  * Reconstructs active relationships at `cutoffMs` using either `publication` or `receipt` clock.
@@ -468,12 +600,31 @@ export async function retrieveClosedEvidenceBundle(
     baseDataset.relationships.length - allEligibleRels.length,
   );
 
-  // Prioritise relationships returned by the allowlisted query or matching focal entity/intent
+  // Prioritise relationships by explicit match, question relevance + source authority, focal entity, and recency
   const gatewayEdgeIds = new Set(gatewayRes.edges.map((e) => e.relationshipId));
+  const qLowerForSort = options.question.trim().toLowerCase();
+  const mentionedOrgSet = new Set(matchAllMentionedOrganisationIds(qLowerForSort, baseDataset));
+  const baseSourcesMap = new Map(baseDataset.sources.map((s) => [s.sourceDocId, s]));
+  const relRelevanceCache = new Map<string, number>();
+  for (const rel of allEligibleRels) {
+    relRelevanceCache.set(
+      rel.relationshipId,
+      scoreRelationshipRelevanceForQuestion(
+        rel,
+        qLowerForSort,
+        mentionedOrgSet,
+        baseSourcesMap,
+        baseDataset,
+      ),
+    );
+  }
   const sortedRels = [...allEligibleRels].sort((a, b) => {
     const aExplicit = intent.relationshipId === a.relationshipId ? 0 : 1;
     const bExplicit = intent.relationshipId === b.relationshipId ? 0 : 1;
     if (aExplicit !== bExplicit) return aExplicit - bExplicit;
+    const aScore = relRelevanceCache.get(a.relationshipId) ?? 0;
+    const bScore = relRelevanceCache.get(b.relationshipId) ?? 0;
+    if (Math.abs(aScore - bScore) >= 15) return bScore - aScore;
     const aFocal =
       intent.focalEntityId &&
       a.participants.some((p) => p.entityId === intent.focalEntityId)
@@ -485,6 +636,7 @@ export async function retrieveClosedEvidenceBundle(
         ? 0
         : 1;
     if (aFocal !== bFocal) return aFocal - bFocal;
+    if (aScore !== bScore) return bScore - aScore;
     const aInGateway = gatewayEdgeIds.has(a.relationshipId) ? 0 : 1;
     const bInGateway = gatewayEdgeIds.has(b.relationshipId) ? 0 : 1;
     if (aInGateway !== bInGateway) return aInGateway - bInGateway;
@@ -547,8 +699,18 @@ export async function retrieveClosedEvidenceBundle(
         counterpartyEntityIds: obs.counterpartyOrgId ? [obs.counterpartyOrgId] : [],
         relationshipId: null,
         parentCommitmentEnvelopeId: null,
-        quantitativeValue: obs.metricValue,
-        unit: obs.metricUnit === 'currency' ? ('USD' as const) : null,
+        quantitativeValue:
+          obs.metricUnit === 'ratio' && obs.metricValue !== null
+            ? Number((obs.metricValue * 100).toFixed(4))
+            : obs.metricValue,
+        unit:
+          obs.metricUnit === 'currency'
+            ? ('USD' as const)
+            : obs.metricUnit === 'ratio' || obs.metricUnit === 'percentage'
+              ? ('percent' as const)
+              : obs.metricUnit === 'mw'
+                ? ('MW' as const)
+                : null,
         asOfDate: new Date(obs.periodEndMs).toISOString().slice(0, 10),
         publishedAtMs: obs.publishedAtMs,
         receivedAtMs: obs.receivedAtMs,
@@ -711,6 +873,7 @@ export async function retrieveClosedEvidenceBundle(
   for (const src of allCandidateSources) {
     const rawExcerpt =
       src.excerpt ??
+      VERIFIED_PRIMARY_EXCERPT_BY_DOC_ID.get(src.sourceDocId) ??
       `${src.title} (${src.authority} ${src.kind}, basis: ${src.publicationBasis})`;
     const check = detectAdversarialContent(`${src.title} ${rawExcerpt}`);
     if (check.blocked) {
@@ -764,8 +927,11 @@ export async function retrieveClosedEvidenceBundle(
   for (const s of options.additionalSources ?? []) {
     focalDocIds.add(s.sourceDocId);
   }
-  for (const rel of boundedRels.slice(0, 6)) {
+  for (const rel of boundedRels.slice(0, 8)) {
     for (const d of rel.sourceDocIds) focalDocIds.add(d);
+  }
+  for (const claim of eligibleClaims.slice(0, 8)) {
+    for (const d of claim.sourceDocIds) focalDocIds.add(d);
   }
   if (intent.intentCategory === 'ireland_macro_contagion') {
     for (const sc of MACRO_CASE_001_SCENARIOS) {
@@ -773,12 +939,16 @@ export async function retrieveClosedEvidenceBundle(
     }
   }
   eligibleSources.sort((a, b) => {
+    const aPrimaryFiling = a.sourceTier.startsWith('primary_') && a.sourceTier.includes('filing') ? 0 : a.sourceTier.startsWith('primary_') ? 1 : 2;
+    const bPrimaryFiling = b.sourceTier.startsWith('primary_') && b.sourceTier.includes('filing') ? 0 : b.sourceTier.startsWith('primary_') ? 1 : 2;
     const aFocal = focalDocIds.has(a.docId) ? 0 : 1;
     const bFocal = focalDocIds.has(b.docId) ? 0 : 1;
     if (aFocal !== bFocal) return aFocal - bFocal;
     const aRef = referencedDocIds.has(a.docId) ? 0 : 1;
     const bRef = referencedDocIds.has(b.docId) ? 0 : 1;
-    return aRef - bRef || b.publishedAtMs - a.publishedAtMs;
+    if (aRef !== bRef) return aRef - bRef;
+    if (aPrimaryFiling !== bPrimaryFiling) return aPrimaryFiling - bPrimaryFiling;
+    return b.publishedAtMs - a.publishedAtMs;
   });
   const boundedSources = eligibleSources.slice(
     0,
@@ -933,6 +1103,11 @@ export async function retrieveClosedEvidenceBundle(
 }
 
 function extractExplicitQuestionCutoffMs(question: string): number | null {
+  const isoMatch = question.match(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/i);
+  if (isoMatch) {
+    const parsedIso = Date.parse(isoMatch[1]!);
+    if (Number.isFinite(parsedIso)) return parsedIso;
+  }
   const q = question.toLowerCase();
   if (q.includes('31 july 2026') || q.includes('july 31, 2026') || q.includes('2026-07-31')) {
     return Date.parse('2026-07-31T23:59:59.000Z');

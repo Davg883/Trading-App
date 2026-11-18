@@ -632,14 +632,17 @@ export function computeNonDoubleCountedCommitments(
       (rel) =>
         isAuthoritativeBinding(rel) &&
         rel.principalAmount !== null &&
-        (rel.category === 'borrowing' || rel.category === 'financing'),
+        (rel.category === 'borrowing' ||
+          rel.category === 'financing' ||
+          rel.relationType === 'financing_arrangement'),
     )
     .reduce((sum, rel) => sum + (rel.principalAmount ?? 0), 0);
 
   const signedGuaranteesUsd = dateValidRelationships
     .filter(
       (rel) =>
-        isAuthoritativeBinding(rel) &&
+        rel.epistemicStatus === 'confirmed' &&
+        (isAuthoritativeBinding(rel) || rel.contractualStatus === 'contingent_signed') &&
         rel.principalAmount !== null &&
         (rel.category === 'guarantee' || rel.relationType === 'guarantee_arrangement'),
     )

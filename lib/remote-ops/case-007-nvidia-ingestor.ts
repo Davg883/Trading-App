@@ -1842,7 +1842,7 @@ const CASE_007B_NEW_INSTRUMENTS: GraphInstrument[] = [
 /**
  * Runs the separately versioned Case 007-B NVIDIA Post-Earnings Intelligence pipeline (`case-007-nvda-post-q3fy27-v2`):
  * - Preserves the immutable Case 007-A pre-earnings dataset (`20` relationships, `4` observations incl. `$108.0B` Q3 guidance, `7` sources).
- * - Validates and promotes `9` new primary SEC/IR disclosures, `17` new reported/forecast observations, and `10` new additive relationships.
+ * - Validates and promotes `9` new primary SEC/IR disclosures, `20` new reported/forecast observations, and `10` new additive relationships.
  * - Retains `0001045810-26-000078` and all 7 disputed G9 SEC/XBRL records on the active blocklist (representing pending Hugging Face M&A
  *   with `principalAmount: null`, `proposed` / `contingent_signed` solely from `0001045810-26-000088`).
  * - Keeps direct commitments (`$518B` / `$390B` supply), contingent obligations (`$32B` neocloud, `$10B` Anthropic Class N), and maximum
@@ -1975,15 +1975,19 @@ export function runCase007PostEarningsPipeline(options?: {
     !ex991.verbatimExcerpt.includes('74.8%') ||
     !ex991.verbatimExcerpt.includes('74.9%') ||
     !ex991.verbatimExcerpt.includes('$65,287 million') ||
+    !ex991.verbatimExcerpt.includes('$4,422 million') ||
     !ex991.verbatimExcerpt.includes('$43,777 million') ||
     !ex991.verbatimExcerpt.includes('$130.0 billion, plus or minus 3%') ||
     !ex991.verbatimExcerpt.includes('71.0% and 72.0%') ||
     !ex991.verbatimExcerpt.includes('$11.0 billion') ||
+    !ex991.verbatimExcerpt.includes('independent committee') ||
     !ex992.verbatimExcerpt.includes('$2.4 billion') ||
     !ex992.verbatimExcerpt.includes('$390 billion') ||
+    !ex992.verbatimExcerpt.includes('Total $518 billion') ||
     !ex992.verbatimExcerpt.includes('Total $32 billion') ||
     !ex992.verbatimExcerpt.includes('Total $118.0 billion') ||
     !ex993.verbatimExcerpt.includes('$81,033M') ||
+    !ex993.verbatimExcerpt.includes('14%, 11%, and 11%') ||
     !irTrend.verbatimExcerpt.includes('Data Center $107,610') ||
     !irTrend.verbatimExcerpt.includes('Hyperscale $60,136') ||
     !irTrend.verbatimExcerpt.includes('Enterprise $47,474') ||
@@ -2204,6 +2208,70 @@ export function runCase007PostEarningsPipeline(options?: {
       publishedAtMs: q3PubMs,
       receivedAtMs: ex991.receivedAtMs,
       sourceDocIds: ['doc-nvda-q3fy27-ex991-20261117'],
+    },
+    {
+      observationId: 'obs-nvda-q3fy27-capex',
+      subjectOrgId: 'org-nvda',
+      subjectProjectId: null,
+      counterpartyOrgId: null,
+      metricName: 'capital_expenditures_pp_and_e_and_intangibles_quarterly_actual',
+      metricValue: 4_422_000_000,
+      metricUnit: 'currency',
+      currencyCode: 'USD',
+      reportingPeriodLabel: 'FY2027 Q3 (Three Months Ended 2026-10-25)',
+      periodStartMs: q3StartMs,
+      periodEndMs: q3EndMs,
+      accountingBasis: 'US_GAAP_Cash_Flow_Statement_PP_And_E_And_Intangibles',
+      metricDefinition:
+        'Reported Q3 FY27 purchases related to property and equipment and intangible assets (USD 4,422M vs USD 2,677M in Q2 FY27 and USD 1,637M in Q3 FY26; 9M FY27 cumulative USD 8,856M; excludes USD 54M principal payments on PP&E)',
+      observationKind: 'reported',
+      publishedAtMs: q3PubMs,
+      receivedAtMs: ex991.receivedAtMs,
+      sourceDocIds: [
+        'doc-nvda-q3fy27-ex991-20261117',
+        'doc-nvda-q3fy27-ex992-20261117',
+        'doc-nvda-q3fy27-ex993-20261117',
+      ],
+    },
+    {
+      observationId: 'obs-nvda-q3fy27-top3-customer-rev-concentration',
+      subjectOrgId: 'org-nvda',
+      subjectProjectId: null,
+      counterpartyOrgId: null,
+      metricName: 'direct_customer_revenue_concentration_top3_ratio',
+      metricValue: 0.36,
+      metricUnit: 'ratio',
+      currencyCode: null,
+      reportingPeriodLabel: 'FY2027 Q3 (Three Months Ended 2026-10-25)',
+      periodStartMs: q3StartMs,
+      periodEndMs: q3EndMs,
+      accountingBasis: 'US_GAAP_Major_Customer_Concentration_Disclosure',
+      metricDefinition:
+        'Direct customer concentration in Q3 FY27: three unnamed direct customers represented 14%, 11%, and 11% (36.0% combined) of total Q3 revenue in Compute & Networking (9M FY27: four direct customers = 13%, 12%, 12%, 11%); two unnamed direct customers accounted for 18% and 17% (35.0% combined) of USD 81,033M accounts receivable as of Oct 25, 2026; specific customer names are not disclosed in SEC filings',
+      observationKind: 'reported',
+      publishedAtMs: q3PubMs,
+      receivedAtMs: ex993.receivedAtMs,
+      sourceDocIds: ['doc-nvda-q3fy27-ex993-20261117'],
+    },
+    {
+      observationId: 'obs-nvda-q3fy27-total-direct-commitments',
+      subjectOrgId: 'org-nvda',
+      subjectProjectId: null,
+      counterpartyOrgId: null,
+      metricName: 'direct_contractual_commitments_total',
+      metricValue: 518_000_000_000,
+      metricUnit: 'currency',
+      currencyCode: 'USD',
+      reportingPeriodLabel: 'As of 2026-10-25 (CFO Commentary Direct Commitments Schedule)',
+      periodStartMs: q3StartMs,
+      periodEndMs: q3EndMs,
+      accountingBasis: 'Direct_Contractual_Commitments_Schedule_Undiscounted_Separate_Class',
+      metricDefinition:
+        'Total direct contractual commitments as of Oct 25, 2026 (USD 518.0B = USD 390B supply & capacity + USD 74B uncommenced data-center leases + USD 28B cloud service agreements + USD 20B private equity investment commitments + USD 6B capital expenditures; FY27 rem USD 82B, FY28 USD 222B, FY29 USD 103B; classified separately from USD 32B contingent neocloud commitments and USD 118.0B max gross credit guarantees)',
+      observationKind: 'reported',
+      publishedAtMs: q3PubMs,
+      receivedAtMs: ex992.receivedAtMs,
+      sourceDocIds: ['doc-nvda-q3fy27-ex992-20261117'],
     },
     {
       observationId: 'obs-nvda-q3fy27-accounts-receivable',
@@ -2831,11 +2899,11 @@ export function runCase007PostEarningsPipeline(options?: {
 
   if (
     newPrimarySources.length !== 9 ||
-    newObservations.length !== 17 ||
+    newObservations.length !== 20 ||
     validatedNewRelationships.length !== 10
   ) {
     throw new Error(
-      `Case 007-B manifest count mismatch: expected 9 new sources, 17 new observations, 10 new relationships; got ${newPrimarySources.length}, ${newObservations.length}, ${validatedNewRelationships.length}`,
+      `Case 007-B manifest count mismatch: expected 9 new sources, 20 new observations, 10 new relationships; got ${newPrimarySources.length}, ${newObservations.length}, ${validatedNewRelationships.length}`,
     );
   }
 

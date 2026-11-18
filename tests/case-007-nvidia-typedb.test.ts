@@ -794,10 +794,10 @@ describe('Case 007: NVIDIA Primary SEC Ingestion, Governance, Live TypeDB Hydrat
     expect(postRun.bundleId).toBe(CASE_007_POST_RESULTS_BUNDLE_ID);
     expect(postRun.executionAuthority).toBe('none');
     expect(postRun.newPrimarySources).toHaveLength(9);
-    expect(postRun.newObservations).toHaveLength(17);
+    expect(postRun.newObservations).toHaveLength(20);
     expect(postRun.newRelationships).toHaveLength(10);
     expect(postRun.dataset.sources).toHaveLength(16);
-    expect(postRun.dataset.observations).toHaveLength(21);
+    expect(postRun.dataset.observations).toHaveLength(24);
     expect(postRun.dataset.relationships).toHaveLength(30);
     expect(postRun.outboxItems).toHaveLength(30);
     expect(postRun.additiveOutboxItems).toHaveLength(10);

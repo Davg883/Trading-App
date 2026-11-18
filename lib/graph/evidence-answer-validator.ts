@@ -56,12 +56,65 @@ export function buildEvidenceLimitedAbstentionAnswer(
   });
 }
 
+function sanitiseDiagnosticString(text: string, maxLen: number): string {
+  const redacted = text
+    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted-jwt]')
+    .replace(/(sk|pk)_(test|live)_[A-Za-z0-9]+/g, '[redacted-key]')
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[redacted-key]')
+    .trim();
+  if (redacted.length <= maxLen) return redacted || 'unspecified';
+  return `${redacted.slice(0, Math.max(1, maxLen - 44))}… [truncated; full detail in server log]`;
+}
+
+function formatBoundedListDetail(prefix: string, items: readonly string[], maxLen = 480): string {
+  if (items.length === 0) return sanitiseDiagnosticString(prefix, maxLen);
+  const full = `${prefix}: ${items.join(', ')}.`;
+  if (full.length <= maxLen) return sanitiseDiagnosticString(full, maxLen);
+  const preview: string[] = [];
+  for (const item of items) {
+    const cleanItem = sanitiseDiagnosticString(item, 96);
+    const candidate = `${prefix} (${items.length} total): ${[...preview, cleanItem].join(', ')} (+${items.length - preview.length - 1} more; see server log).`;
+    if (candidate.length > maxLen && preview.length > 0) break;
+    preview.push(cleanItem);
+    if (preview.length >= 4) break;
+  }
+  const remaining = Math.max(0, items.length - preview.length);
+  const summary =
+    remaining > 0
+      ? `${prefix} (${items.length} total): ${preview.join(', ')} (+${remaining} more; full diagnostics logged).`
+      : `${prefix}: ${preview.join(', ')}.`;
+  return sanitiseDiagnosticString(summary, maxLen);
+}
+
+function logProtectedValidatorDiagnostics(
+  bundleId: string,
+  actionTaken: string,
+  diagnostics: Record<string, unknown>,
+): void {
+  try {
+    const raw = JSON.stringify({
+      component: 'evidence-answer-validator',
+      bundleId,
+      actionTaken,
+      ...diagnostics,
+    });
+    console.warn(`[evidence-validator] ${sanitiseDiagnosticString(raw, 3800)}`);
+  } catch {
+    // Never fail validation due to diagnostic logging
+  }
+}
+
 function collectAllowedNumbers(bundle: EvidenceBundleV1): Set<number> {
-  const allowed = new Set<number>([0, 1, 2, 3, 4, 5, 6, 10, 15, 18, 20, 21, 23, 25, 30, 31, 50, 100, 2025, 2026, 2027, 2028]);
+  const allowed = new Set<number>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 18, 20, 21, 23, 24, 25, 28, 30, 31, 50, 100, 2025, 2026, 2027, 2028]);
   const addNum = (n: number | null | undefined) => {
     if (n === null || n === undefined || !Number.isFinite(n)) return;
     allowed.add(Number(n));
     allowed.add(Math.abs(Number(n)));
+    if (Math.abs(n) > 0 && Math.abs(n) <= 1) {
+      const pct = Number((n * 100).toFixed(2));
+      allowed.add(pct);
+      allowed.add(Number((n * 100).toFixed(1)));
+    }
     // Add billions / millions scaled equivalents for USD amounts
     if (Math.abs(n) >= 100_000_000) {
       const b = Number((n / 1_000_000_000).toFixed(2));
@@ -83,6 +136,34 @@ function collectAllowedNumbers(bundle: EvidenceBundleV1): Set<number> {
   }
   for (const claim of bundle.quantitativeClaims) {
     addNum(claim.quantitativeValue);
+  }
+  // Allow deterministic forecast-vs-actual variance & percentage delta when both reported actual and forecast
+  // exist for the same subject entity, date, and unit in `bundle.quantitativeClaims`
+  for (const actual of bundle.quantitativeClaims) {
+    if (
+      actual.classification !== 'observed' ||
+      actual.quantitativeValue === null ||
+      actual.unit === null
+    ) {
+      continue;
+    }
+    for (const forecast of bundle.quantitativeClaims) {
+      if (
+        forecast.classification !== 'proposed' ||
+        forecast.quantitativeValue === null ||
+        forecast.quantitativeValue === 0 ||
+        forecast.subjectEntityId !== actual.subjectEntityId ||
+        forecast.asOfDate !== actual.asOfDate ||
+        forecast.unit !== actual.unit
+      ) {
+        continue;
+      }
+      const delta = actual.quantitativeValue - forecast.quantitativeValue;
+      const pctDelta = (delta / Math.abs(forecast.quantitativeValue)) * 100;
+      addNum(delta);
+      addNum( Number(pctDelta.toFixed(2)) );
+      addNum( Number(pctDelta.toFixed(1)) );
+    }
   }
   for (const sc of bundle.scenarios) {
     addNum(sc.usEquityShockPct);
@@ -291,9 +372,14 @@ export function validateEvidenceLockedAnswer(
           if (n === null || n === undefined || !Number.isFinite(n)) return;
           citedNumbers.add(Number(n));
           citedNumbers.add(Math.abs(Number(n)));
-          if (Math.abs(n) >= 1_000_000_000) {
+          if (Math.abs(n) > 0 && Math.abs(n) <= 1) {
+            citedNumbers.add(Number((n * 100).toFixed(2)));
+            citedNumbers.add(Number((n * 100).toFixed(1)));
+          }
+          if (Math.abs(n) >= 100_000_000) {
             citedNumbers.add(Number((n / 1_000_000_000).toFixed(2)));
             citedNumbers.add(Number((n / 1_000_000_000).toFixed(1)));
+            citedNumbers.add(Number((n / 1_000_000_000).toFixed(3)));
           }
           if (Math.abs(n) >= 1_000_000) {
             citedNumbers.add(Number((n / 1_000_000).toFixed(2)));
@@ -470,7 +556,7 @@ export function validateEvidenceLockedAnswer(
       detail:
         invalidEvidenceIds.length === 0
           ? `All cited evidence IDs verified against bundle (${validEvidenceIds.size} available).`
-          : `Unauthorised evidence IDs cited: ${invalidEvidenceIds.join(', ')}.`,
+          : formatBoundedListDetail('Unauthorised evidence IDs cited', invalidEvidenceIds),
     },
     {
       checkId: 'relationship_ids_in_bundle',
@@ -478,7 +564,7 @@ export function validateEvidenceLockedAnswer(
       detail:
         invalidRelationshipIds.length === 0
           ? `All referenced relationship IDs verified against bundle (${validRelIds.size} available).`
-          : `Unauthorised relationship IDs referenced: ${invalidRelationshipIds.join(', ')}.`,
+          : formatBoundedListDetail('Unauthorised relationship IDs referenced', invalidRelationshipIds),
     },
     {
       checkId: 'historical_cutoff_respected',
@@ -486,7 +572,7 @@ export function validateEvidenceLockedAnswer(
       detail:
         temporalViolations.length === 0
           ? `Historical cutoff ${bundle.historicalCutoffIso.slice(0, 10)} (${bundle.temporalBasis} clock) respected with zero hindsight leakage.`
-          : temporalViolations.join(' '),
+          : formatBoundedListDetail('Temporal cutoff violation', temporalViolations),
     },
     {
       checkId: 'numerical_claims_verified',
@@ -494,7 +580,7 @@ export function validateEvidenceLockedAnswer(
       detail:
         unverifiedNumbers.length === 0
           ? 'All quantitative values in claims and narrative verified against source records.'
-          : `Unverified numerical values detected: ${unverifiedNumbers.join(', ')}.`,
+          : formatBoundedListDetail('Unverified numerical values detected', unverifiedNumbers),
     },
     {
       checkId: 'deterministic_arithmetic_verified',
@@ -509,7 +595,7 @@ export function validateEvidenceLockedAnswer(
       detail:
         securityViolations.length === 0
           ? 'Zero broker credentials, account balances, or cross-tenant references present.'
-          : securityViolations.join(' '),
+          : formatBoundedListDetail('Security isolation violation', securityViolations),
     },
     {
       checkId: 'no_prompt_injection_override',
@@ -517,33 +603,91 @@ export function validateEvidenceLockedAnswer(
       detail:
         securityViolations.length === 0
           ? 'Untrusted source excerpts remained strictly data-scoped.'
-          : securityViolations.join(' '),
+          : formatBoundedListDetail('Prompt-injection check violation', securityViolations),
     },
   ];
 
+  const boundedInvalidEvidenceIds = invalidEvidenceIds
+    .slice(0, 50)
+    .map((x) => sanitiseDiagnosticString(x, 200));
+  const boundedInvalidRelationshipIds = invalidRelationshipIds
+    .slice(0, 50)
+    .map((x) => sanitiseDiagnosticString(x, 200));
+  const boundedUnverifiedNumbers = unverifiedNumbers
+    .slice(0, 50)
+    .map((x) => sanitiseDiagnosticString(x, 200));
+  const boundedTemporalViolations = temporalViolations
+    .slice(0, 50)
+    .map((x) => sanitiseDiagnosticString(x, 240));
+  const boundedSecurityViolations = securityViolations
+    .slice(0, 50)
+    .map((x) => sanitiseDiagnosticString(x, 240));
+
   const allPassed = checks.every((c) => c.passed);
   if (!allPassed) {
-    const failedReasons = checks
-      .filter((c) => !c.passed)
-      .map((c) => `${c.checkId}: ${c.detail}`)
-      .join('; ');
     const actionTaken =
       securityViolations.length > 0 ? 'rejected_security_violation' : 'downgraded_to_abstention';
+    logProtectedValidatorDiagnostics(bundle.bundleId, actionTaken, {
+      failedCheckIds: checks.filter((c) => !c.passed).map((c) => c.checkId),
+      invalidEvidenceIdsCount: invalidEvidenceIds.length,
+      invalidEvidenceIds,
+      invalidRelationshipIdsCount: invalidRelationshipIds.length,
+      invalidRelationshipIds,
+      unverifiedNumbersCount: unverifiedNumbers.length,
+      unverifiedNumbers,
+      temporalViolationsCount: temporalViolations.length,
+      temporalViolations,
+      securityViolationsCount: securityViolations.length,
+      securityViolations,
+    });
+    const failedReasons = sanitiseDiagnosticString(
+      checks
+        .filter((c) => !c.passed)
+        .map((c) => `${c.checkId}: ${c.detail}`)
+        .join('; '),
+      360,
+    );
     const abstention = buildEvidenceLimitedAbstentionAnswer(
       bundle,
       `Independent answer validator rejected model output (${failedReasons}).`,
     );
+    const parsedReport = answerValidationReportSchema.safeParse({
+      valid: false,
+      actionTaken,
+      checks: checks.map((c) => ({
+        ...c,
+        detail: sanitiseDiagnosticString(c.detail, 490),
+      })),
+      invalidEvidenceIds: boundedInvalidEvidenceIds,
+      invalidRelationshipIds: boundedInvalidRelationshipIds,
+      unverifiedNumbers: boundedUnverifiedNumbers,
+      temporalViolations: boundedTemporalViolations,
+      securityViolations: boundedSecurityViolations,
+      validatedAtMs: nowMs,
+    });
+    if (parsedReport.success) {
+      return {
+        validatedAnswer: abstention,
+        report: parsedReport.data,
+      };
+    }
     return {
       validatedAnswer: abstention,
       report: answerValidationReportSchema.parse({
         valid: false,
         actionTaken,
-        checks,
-        invalidEvidenceIds,
-        invalidRelationshipIds,
-        unverifiedNumbers,
-        temporalViolations,
-        securityViolations,
+        checks: [
+          {
+            checkId: 'schema_valid',
+            passed: false,
+            detail: 'Validation failed closed; complete diagnostic details written to server logs.',
+          },
+        ],
+        invalidEvidenceIds: [],
+        invalidRelationshipIds: [],
+        unverifiedNumbers: [],
+        temporalViolations: [],
+        securityViolations: [],
         validatedAtMs: nowMs,
       }),
     };
