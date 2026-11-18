@@ -170,6 +170,15 @@ export function validateRelationshipGovernance(
     reasons.push('Proposed investments cannot be mapped to completed funded ownership.');
   }
 
+  if (
+    relationship.contractualStatus === 'reported_discussion' &&
+    relationship.epistemicStatus === 'confirmed'
+  ) {
+    reasons.push(
+      'Reported discussions cannot carry confirmed epistemic status without an executed or announced primary instrument.',
+    );
+  }
+
   if (relationship.supersedesRelationshipId !== null) {
     const prior = allRelationships.find(
       (r) => r.relationshipId === relationship.supersedesRelationshipId,

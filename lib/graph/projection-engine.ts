@@ -1,6 +1,16 @@
+import { z } from 'zod';
 import {
   MACRO_GRAPH_SCHEMA_VERSION,
+  energyAssetSchema,
+  executivePersonSchema,
+  financialInstrumentSchema,
+  financialObservationSchema,
+  infrastructureProjectSchema,
+  locationSchema,
   macroGraphDatasetSchema,
+  organisationSchema,
+  sectorSchema,
+  sourceDocumentSchema,
   type MacroGraphDataset,
   type MacroRelationship,
   type VisibilityScope,
@@ -196,6 +206,155 @@ export function compileDatasetEntityBootstrapStatements(dataset: MacroGraphDatas
         statements.push(compileObservationEvidentialSupportPutTypeQl(obs, srcId));
       }
     }
+  }
+
+  return statements;
+}
+
+export const projectionPrerequisiteBundleSchema = z
+  .object({
+    sectors: z.array(sectorSchema).max(50).default([]),
+    locations: z.array(locationSchema).max(50).default([]),
+    energyAssets: z.array(energyAssetSchema).max(50).default([]),
+    organisations: z.array(organisationSchema).max(100).default([]),
+    executives: z.array(executivePersonSchema).max(50).default([]),
+    projects: z.array(infrastructureProjectSchema).max(50).default([]),
+    instruments: z.array(financialInstrumentSchema).max(100).default([]),
+    sources: z.array(sourceDocumentSchema).max(100).default([]),
+    observations: z.array(financialObservationSchema).max(150).default([]),
+  })
+  .strict();
+
+export type ProjectionPrerequisiteBundle = z.infer<typeof projectionPrerequisiteBundleSchema>;
+
+/**
+ * RC002 Workstream C (B-004): Compiles an idempotent, prerequisite-complete TypeQL `put` bundle
+ * (`sector_classification`, `organisation`, `executive_person`, `financial_instrument`, `source_document`,
+ * `financial_observation`, `macro_relationship`, `evidential_support`, `supersession_link`) so newly
+ * discovered unseen filings can be projected into an empty or incremental TypeDB database without
+ * relying on pre-populated synthetic Macro Case 001 entities.
+ */
+export function compileSelfContainedProjectionStatements(params: {
+  relationship: MacroRelationship;
+  projectionKey: string;
+  owner: string;
+  visibility: VisibilityScope;
+  prerequisites?: ProjectionPrerequisiteBundle | null;
+}): string[] {
+  const statements: string[] = [];
+  const prereq = params.prerequisites
+    ? projectionPrerequisiteBundleSchema.parse(params.prerequisites)
+    : null;
+
+  if (prereq) {
+    const knownLocationIds = new Set(prereq.locations.map((l) => l.locationId));
+    const knownOrgIds = new Set(prereq.organisations.map((o) => o.orgId));
+    const knownProjectIds = new Set(prereq.projects.map((p) => p.projectId));
+    const knownSourceIds = new Set(prereq.sources.map((s) => s.sourceDocId));
+    const knownSectorIds = new Set(prereq.sectors.map((s) => s.sectorId));
+
+    for (const sector of prereq.sectors) {
+      statements.push(compileSectorPutTypeQl(sector));
+    }
+    for (const loc of prereq.locations) {
+      statements.push(compileLocationPutTypeQl(loc));
+    }
+    for (const asset of prereq.energyAssets) {
+      statements.push(compileEnergyAssetPutTypeQl(asset));
+      if (knownLocationIds.has(asset.locationId)) {
+        statements.push(
+          compileLocationPlacementPutTypeQl('energy_asset', asset.assetId, asset.locationId),
+        );
+      }
+    }
+    for (const org of prereq.organisations) {
+      statements.push(compileOrganisationPutTypeQl(org, params.owner, params.visibility));
+      for (const secId of org.sectorIds) {
+        if (!knownSectorIds.has(secId)) continue;
+        const partId = `secpart:${org.orgId}:${secId}`;
+        statements.push(
+          [
+            'match',
+            `  $org isa organisation, has org_id "${org.orgId}";`,
+            `  $sec isa sector_classification, has sector_id "${secId}";`,
+            'put',
+            `  $sp isa sector_participation,`,
+            `    links (participant_organisation: $org, target_sector: $sec),`,
+            `    has relationship_id "${partId}",`,
+            `    has relationship_version 1,`,
+            `    has epistemic_status "confirmed",`,
+            `    has published_at_ms ${params.relationship.publishedAtMs},`,
+            `    has received_at_ms ${params.relationship.receivedAtMs},`,
+            `    has tenant_owner "${params.owner}",`,
+            `    has visibility_scope "${params.visibility}";`,
+          ].join('\n'),
+        );
+      }
+    }
+    for (const exec of prereq.executives) {
+      statements.push(compileExecutivePersonPutTypeQl(exec, params.owner, params.visibility));
+    }
+    for (const proj of prereq.projects) {
+      statements.push(compileProjectPutTypeQl(proj, params.owner, params.visibility));
+      if (knownLocationIds.has(proj.locationId)) {
+        statements.push(
+          compileLocationPlacementPutTypeQl(
+            'infrastructure_project',
+            proj.projectId,
+            proj.locationId,
+          ),
+        );
+      }
+    }
+    for (const inst of prereq.instruments) {
+      statements.push(compileInstrumentPutTypeQl(inst));
+    }
+    for (const doc of prereq.sources) {
+      statements.push(compileSourceDocumentPutTypeQl(doc, params.owner, params.visibility));
+    }
+    for (const obs of prereq.observations) {
+      statements.push(compileObservationPutTypeQl(obs, params.owner, params.visibility));
+      if (
+        knownOrgIds.has(obs.subjectOrgId) &&
+        (!obs.subjectProjectId || knownProjectIds.has(obs.subjectProjectId)) &&
+        (!obs.counterpartyOrgId || knownOrgIds.has(obs.counterpartyOrgId))
+      ) {
+        statements.push(compileObservationAttributionPutTypeQl(obs));
+      }
+      for (const srcId of obs.sourceDocIds) {
+        if (knownSourceIds.has(srcId)) {
+          statements.push(compileObservationEvidentialSupportPutTypeQl(obs, srcId));
+        }
+      }
+    }
+  }
+
+  statements.push(
+    compileRelationshipInsertTypeQl(
+      params.relationship,
+      params.projectionKey,
+      params.owner,
+      params.visibility,
+    ),
+    ...params.relationship.sourceDocIds.map((docId) =>
+      compileEvidentialSupportInsertTypeQl(params.relationship, docId),
+    ),
+  );
+
+  if (params.relationship.supersedesRelationshipId) {
+    const supId = `suplink:${params.relationship.supersedesRelationshipId}:${params.relationship.relationshipId}`;
+    statements.push(
+      [
+        'match',
+        `  $prior isa macro_relationship, has relationship_id "${params.relationship.supersedesRelationshipId}";`,
+        `  $next isa macro_relationship, has relationship_id "${params.relationship.relationshipId}";`,
+        'put',
+        `  $sl isa supersession_link,`,
+        `    links (prior_assertion: $prior, superseding_assertion: $next),`,
+        `    has relationship_id "${supId}",`,
+        `    has effective_from_ms ${params.relationship.effectiveFromMs};`,
+      ].join('\n'),
+    );
   }
 
   return statements;

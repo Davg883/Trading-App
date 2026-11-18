@@ -25,6 +25,12 @@ import {
  selectCurrentSecXbrlFact,
  type SecCompanyFactsPayload,
 } from '../lib/remote-ops/sec-xbrl-fact-selector';
+import {
+ discoverSecFilingWindow,
+ type DiscoveredSecFilingHeader,
+ type EdgarSubmissionTabularBlock,
+ type EdgarSubmissionsPayload,
+} from '../lib/remote-ops/sec-filing-graph-extractor';
 
 const internalAction:ActionBuilder<DataModel,'internal'>=internalActionGeneric;
 
@@ -86,63 +92,51 @@ type SecSubmissionHeader={
 
 const CLOUD_SEC_TICKERS=['NVDA','MSFT','AMZN','GOOGL','INTC','AMD','CRWV'] as const;
 
+async function fetchSecSubmissionWindow(params:{
+ ticker:string;
+ cik:string;
+ name:string;
+ userAgent:string;
+ maxFilingsPerCik?:number;
+ seenAccessions?:ReadonlySet<string>;
+ seenUrls?:ReadonlySet<string>;
+}):Promise<DiscoveredSecFilingHeader[]>{
+ const cikPadded=params.cik.padStart(10,'0');
+ const subUrl=`https://data.sec.gov/submissions/CIK${cikPadded}.json`;
+ const subResp=await fetch(subUrl,{headers:{'User-Agent':params.userAgent,'Accept':'application/json'}});
+ if(!subResp.ok)throw new Error(`SEC submissions HTTP ${subResp.status} for ${params.ticker}`);
+ const sub=(await subResp.json()) as EdgarSubmissionsPayload;
+ const windowRes=await discoverSecFilingWindow({
+  ticker:params.ticker,
+  cik:params.cik,
+  entityName:params.name,
+  submissions:sub,
+  maxFilingsPerCik:params.maxFilingsPerCik??15,
+  seenAccessions:params.seenAccessions,
+  seenUrls:params.seenUrls,
+  maxOverflowPages:1,
+  fetchOverflowPage:async(fileName:string)=>{
+   const pageUrl=`https://data.sec.gov/submissions/${fileName}`;
+   const pageResp=await fetch(pageUrl,{headers:{'User-Agent':params.userAgent,'Accept':'application/json'}});
+   if(!pageResp.ok)return null;
+   return (await pageResp.json()) as EdgarSubmissionTabularBlock;
+  },
+ });
+ return windowRes.discovered;
+}
+
 async function fetchSecSubmissionHeader(params:{
  ticker:string;
  cik:string;
  name:string;
  userAgent:string;
 }):Promise<SecSubmissionHeader|null>{
- const cikPadded=params.cik.padStart(10,'0');
- const cikNumeric=String(Number(params.cik));
- const subUrl=`https://data.sec.gov/submissions/CIK${cikPadded}.json`;
- const subResp=await fetch(subUrl,{headers:{'User-Agent':params.userAgent,'Accept':'application/json'}});
- if(!subResp.ok)throw new Error(`SEC submissions HTTP ${subResp.status} for ${params.ticker}`);
- const sub=(await subResp.json()) as SecSubmissionsJson;
- const recent=sub.filings?.recent;
- if(!recent?.accessionNumber?.length||!recent.form?.length||!recent.filingDate?.length){
-  return null;
- }
- let filingIdx=-1;
- // Prefer periodic XBRL financial statement filings (10-Q, 10-K, 10-Q/A, 10-K/A) over 8-K notices
- for(let i=0;i<recent.form.length;i++){
-  const f=recent.form[i];
-  if(f==='10-Q'||f==='10-K'||f==='10-Q/A'||f==='10-K/A'){
-   filingIdx=i;
-   break;
-  }
- }
- if(filingIdx<0){
-  for(let i=0;i<recent.form.length;i++){
-   const f=recent.form[i];
-   if(f==='8-K'){
-    filingIdx=i;
-    break;
-   }
-  }
- }
- if(filingIdx<0)filingIdx=0;
- const accession=recent.accessionNumber[filingIdx]!;
- const accessionNoHyphens=accession.replace(/-/g,'');
- const form=recent.form[filingIdx]??'10-Q';
- const filed=recent.filingDate[filingIdx]??'2026-01-01';
- const reportDate=recent.reportDate?.[filingIdx]??null;
- const acceptanceDateTime=recent.acceptanceDateTime?.[filingIdx]??null;
- const primaryDoc=recent.primaryDocument?.[filingIdx]??`${accession}.txt`;
- const docUrl=`https://www.sec.gov/Archives/edgar/data/${cikNumeric}/${accessionNoHyphens}/${primaryDoc}`;
- const acceptedMs=acceptanceDateTime?Date.parse(acceptanceDateTime):NaN;
- const publishedMs=Number.isFinite(acceptedMs)?acceptedMs:Date.parse(`${filed}T16:00:00Z`);
- return {
-  ticker:params.ticker,
-  cik:params.cik,
-  name:params.name,
-  accession,
-  form,
-  filed,
-  reportDate,
-  acceptanceDateTime,
-  docUrl,
-  publishedMs,
- };
+ const discovered=await fetchSecSubmissionWindow({...params,maxFilingsPerCik:20});
+ if(discovered.length===0)return null;
+ const periodic=discovered.find(d=>d.form==='10-Q'||d.form==='10-K'||d.form==='10-Q/A'||d.form==='10-K/A');
+ const f13=discovered.find(d=>d.form==='13F-HR'||d.form==='13F-HR/A');
+ const f8k=discovered.find(d=>d.form==='8-K'||d.form==='8-K/A');
+ return periodic??f13??f8k??discovered[0]!;
 }
 
 async function fetchSecCompanyFactsCandidate(params:{
@@ -265,14 +259,18 @@ export const runScheduledCloudCycle=internalAction({
      const accessions:string[]=[];
      for(const t of targets){
       providerReqs+=1;
-      const hdr=await fetchSecSubmissionHeader({
+      const windowFilings=await fetchSecSubmissionWindow({
        ticker:t.ticker,
        cik:t.cik,
        name:t.name,
        userAgent,
+       maxFilingsPerCik:10,
       });
-      if(hdr){
-       sharedHeaders.set(t.ticker,hdr);
+      const preferred=windowFilings.find(d=>d.form==='10-Q'||d.form==='10-K'||d.form==='10-Q/A'||d.form==='10-K/A')??windowFilings[0]??null;
+      if(preferred){
+       sharedHeaders.set(t.ticker,preferred);
+      }
+      for(const hdr of windowFilings.slice(0,5)){
        accessions.push(`${t.ticker}:${hdr.form}:${hdr.accession}`);
       }
      }

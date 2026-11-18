@@ -15,12 +15,17 @@ import {
   ALLOWLISTED_QUERY_TYPES,
   MACRO_GRAPH_SCHEMA_VERSION,
   macroRelationshipSchema,
+  type GraphSourceDocument,
 } from '../lib/graph/contracts';
 import { validateRelationshipGovernance } from '../lib/graph/identity-governance';
 import {
+  compileSelfContainedProjectionStatements,
   computeDeterministicProjectionKey,
   computeRetryBackoffMs,
+  projectionPrerequisiteBundleSchema,
+  type ProjectionPrerequisiteBundle,
 } from '../lib/graph/projection-engine';
+import { isQuarantined } from '../lib/remote-ops/evidence-integrity';
 import {
   buildAllowlistedTypeQlQuery,
   compileEvidentialSupportInsertTypeQl,
@@ -36,10 +41,12 @@ import {
   CASE_007B_VERIFIED_DEV_DATABASE,
   TypeDbSchemaOrHydrationError,
   assertCanRecreateTypeDbDatabase,
+  assertExplicitTypeDbWriteTarget,
   assertIsolatedCase007BWriteTarget,
   assertIsolatedCase007WriteTarget,
   defaultTypeDbConfig,
   describeTypeDbTransport,
+  ensureTypeDbDatabaseAndSchemaOnLiveServer,
   executeReadOnlyTypeQlOnLiveServer,
   executeWriteStatementsOnLiveServer,
   hydrateMacroDatasetFromLiveTypeDb,
@@ -165,6 +172,7 @@ async function insertOrDeduplicateOutboxRelationship(
     sourceTable: string;
     sourceRecordId: string;
     parsedRel: ReturnType<typeof macroRelationshipSchema.parse>;
+    prerequisites?: ProjectionPrerequisiteBundle | null;
     maxAttempts?: number;
     reviewedAtMs?: number;
     reviewNote?: string;
@@ -199,28 +207,13 @@ async function insertOrDeduplicateOutboxRelationship(
       ? Math.max(...currentItems.map((i) => i.sequence)) + 1
       : 1;
 
-  const statements = [
-    compileRelationshipInsertTypeQl(parsedRel, projectionKey, effectiveKeyOwner, visibility),
-    ...parsedRel.sourceDocIds.map((docId) =>
-      compileEvidentialSupportInsertTypeQl(parsedRel, docId),
-    ),
-  ];
-
-  if (parsedRel.supersedesRelationshipId) {
-    const supId = `suplink:${parsedRel.supersedesRelationshipId}:${parsedRel.relationshipId}`;
-    statements.push(
-      [
-        'match',
-        `  $prior isa macro_relationship, has relationship_id "${parsedRel.supersedesRelationshipId}";`,
-        `  $next isa macro_relationship, has relationship_id "${parsedRel.relationshipId}";`,
-        'put',
-        `  $sl isa supersession_link,`,
-        `    links (prior_assertion: $prior, superseding_assertion: $next),`,
-        `    has relationship_id "${supId}",`,
-        `    has effective_from_ms ${parsedRel.effectiveFromMs};`,
-      ].join('\n'),
-    );
-  }
+  const statements = compileSelfContainedProjectionStatements({
+    relationship: parsedRel,
+    projectionKey,
+    owner: effectiveKeyOwner,
+    visibility,
+    prerequisites: params.prerequisites ?? null,
+  });
 
   const outboxId = await ctx.db.insert('graphProjectionOutbox', {
     owner,
@@ -273,6 +266,7 @@ export const enqueueApprovedRelationship = mutation({
     sourceTable: v.string(),
     sourceRecordId: v.string(),
     relationshipJson: v.string(),
+    prerequisiteBundleJson: v.optional(v.string()),
     maxAttempts: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -281,7 +275,13 @@ export const enqueueApprovedRelationship = mutation({
     const nowMs = Date.now();
 
     assertNoBrokerOrPrivateAccountData(args.relationshipJson);
+    if (args.prerequisiteBundleJson) {
+      assertNoBrokerOrPrivateAccountData(args.prerequisiteBundleJson);
+    }
     const parsedRel = macroRelationshipSchema.parse(JSON.parse(args.relationshipJson));
+    const prerequisites = args.prerequisiteBundleJson
+      ? projectionPrerequisiteBundleSchema.parse(JSON.parse(args.prerequisiteBundleJson))
+      : null;
 
     if (!['approved', 'conflicting_pending_review'].includes(parsedRel.reviewerStatus)) {
       throw new Error('Only reviewer-approved records may be promoted into the TypeDB outbox');
@@ -293,6 +293,7 @@ export const enqueueApprovedRelationship = mutation({
       sourceTable: args.sourceTable,
       sourceRecordId: args.sourceRecordId,
       parsedRel,
+      prerequisites,
       maxAttempts: args.maxAttempts,
       nowMs,
     });
@@ -300,11 +301,13 @@ export const enqueueApprovedRelationship = mutation({
 });
 
 /**
- * Stage 4 Human Review workflow mutation:
+ * Stage 4 Human Review workflow mutation (RC002 B-004 generalised):
  * - Reviews a relationship candidate (`approved` or `rejected`).
+ * - Resolves verified primary sources from BOTH dynamically staged `researchStagingItems`
+ *   (excluding quarantined items) and explicit `prerequisiteBundleJson` sources, not only static Case 001.
  * - Verifies that approving a source document does NOT automatically make all extracted relationships `confirmed`.
  * - Preserves reviewer identity, decision time, source provenance, and correction/supersession history.
- * - Optionally promotes an approved relationship into `graphProjectionOutbox`.
+ * - Optionally promotes an approved relationship + prerequisite entities/observations into `graphProjectionOutbox`.
  */
 export const reviewAndPromoteRelationship = mutation({
   args: {
@@ -316,6 +319,7 @@ export const reviewAndPromoteRelationship = mutation({
     sourceDocumentApproved: v.optional(v.boolean()),
     promoteToOutbox: v.optional(v.boolean()),
     relationshipJson: v.string(),
+    prerequisiteBundleJson: v.optional(v.string()),
     correctionNote: v.optional(v.string()),
     maxAttempts: v.optional(v.number()),
   },
@@ -329,6 +333,13 @@ export const reviewAndPromoteRelationship = mutation({
     }
 
     assertNoBrokerOrPrivateAccountData(args.relationshipJson);
+    if (args.prerequisiteBundleJson) {
+      assertNoBrokerOrPrivateAccountData(args.prerequisiteBundleJson);
+    }
+    const prerequisites = args.prerequisiteBundleJson
+      ? projectionPrerequisiteBundleSchema.parse(JSON.parse(args.prerequisiteBundleJson))
+      : null;
+
     const rawRel = JSON.parse(args.relationshipJson) as Record<string, unknown>;
     const updatedRelInput = {
       ...rawRel,
@@ -338,10 +349,82 @@ export const reviewAndPromoteRelationship = mutation({
 
     const parsedRel = macroRelationshipSchema.parse(updatedRelInput);
 
-    // Stage 4 Rule: An approved document must NOT automatically make all relationships extracted from it confirmed.
-    // Validate against source governance in the acceptance dataset + any provided sources.
+    // Stage 4 + RC002 B-004 Rule: Build `sourcesById` from baseline sources + verified non-quarantined
+    // `researchStagingItems` + explicit `prerequisiteBundleJson` sources.
     const dataset = loadInitialAcceptanceDataset();
-    const sourcesById = new Map(dataset.sources.map((s) => [s.sourceDocId, s]));
+    const sourcesById = new Map<string, GraphSourceDocument>(
+      dataset.sources.map((s) => [s.sourceDocId, s]),
+    );
+
+    const stagedRows = await ctx.db
+      .query('researchStagingItems')
+      .withIndex('by_owner', (q) => q.eq('owner', owner))
+      .collect();
+    for (const row of stagedRows) {
+      if (isQuarantined(row)) continue;
+      if (
+        row.validationStatus === 'quarantined_injection' ||
+        row.validationStatus === 'rejected_invalid'
+      ) {
+        continue;
+      }
+      if (!row.sourceUrl.startsWith('https://') || !/^[a-f0-9]{64}$/.test(row.contentSha256)) {
+        continue;
+      }
+      const pubMs = row.publishedAt ?? row.receivedAt;
+      const recMs = Math.max(row.receivedAt, pubMs);
+      const dynamicDoc: GraphSourceDocument = {
+        sourceDocId: row.externalId,
+        title: row.title,
+        url: row.sourceUrl,
+        kind: row.sourceDomain.includes('sec.gov') ? 'filing' : 'news',
+        authority: row.isPrimarySource ? 'primary' : 'secondary',
+        contentSha256: row.contentSha256,
+        publicationBasis: row.sourceDomain.includes('sec.gov')
+          ? 'sec_edgar_acceptance'
+          : 'exact_utc',
+        publishedAtMs: pubMs,
+        receivedAtMs: recMs,
+        ingestedAtMs: Math.max(row.ingestedAt, recMs),
+      };
+      sourcesById.set(row.externalId, dynamicDoc);
+      sourcesById.set(String(row._id), { ...dynamicDoc, sourceDocId: String(row._id) });
+    }
+
+    if (prerequisites) {
+      for (const s of prerequisites.sources) {
+        sourcesById.set(s.sourceDocId, s);
+      }
+    }
+
+    // Ensure prerequisite bundle sent to TypeDB includes any dynamically staged `source_document` referenced by `parsedRel`
+    const effectivePrerequisites: ProjectionPrerequisiteBundle = prerequisites
+      ? {
+          ...prerequisites,
+          sources: Array.from(
+            new Map([
+              ...prerequisites.sources.map((s) => [s.sourceDocId, s] as const),
+              ...parsedRel.sourceDocIds
+                .map((id) => sourcesById.get(id))
+                .filter((s): s is GraphSourceDocument => Boolean(s))
+                .map((s) => [s.sourceDocId, s] as const),
+            ]).values(),
+          ),
+        }
+      : {
+          sectors: [],
+          locations: [],
+          energyAssets: [],
+          organisations: [],
+          executives: [],
+          projects: [],
+          instruments: [],
+          sources: parsedRel.sourceDocIds
+            .map((id) => sourcesById.get(id))
+            .filter((s): s is GraphSourceDocument => Boolean(s)),
+          observations: [],
+        };
+
     const allRels = [...dataset.relationships];
     const existingReviews = await ctx.db
       .query('graphRelationshipReviews')
@@ -405,6 +488,7 @@ export const reviewAndPromoteRelationship = mutation({
         sourceTable: args.sourceTable,
         sourceRecordId: args.sourceRecordId,
         parsedRel,
+        prerequisites: effectivePrerequisites,
         maxAttempts: args.maxAttempts,
         reviewedAtMs: nowMs,
         reviewNote: args.reviewNote.trim(),
@@ -849,25 +933,28 @@ export const getProjectionStateInternal = internalQuery({
 });
 
 /**
- * Cloud projection & verification action running inside Convex Cloud where
- * `TYPEDB_HTTP_ADDRESS`, `TYPEDB_USERNAME`, `TYPEDB_PASSWORD`, and `TYPEDB_DATABASE`
- * are securely injected via server-side environment secrets.
+ * Cloud projection & verification action running inside Convex Cloud (RC002 B-004 hardened):
+ * - REMOVED synthetic Macro Case 001 bootstrap (`bootstrapAcceptanceOutboxInternal` / `loadInitialAcceptanceDataset()`).
+ * - Requires an explicit configured `TYPEDB_DATABASE` (or `expectedTargetDatabase`) and asserts target identity
+ *   before every schema ensure or outbox write, never defaulting silently to `aci_macro_intelligence_staging`.
  */
 export const syncAndVerifyTypeDbCloud = internalAction({
   args: {
     owner: v.optional(v.string()),
+    expectedTargetDatabase: v.optional(v.string()),
     recreateDatabase: v.optional(v.boolean()),
     runAllAllowlistedQueries: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const startedAtMs = Date.now();
     const owner = requireExplicitOwner(args.owner);
-    const config = defaultTypeDbConfig(STAGING_TYPEDB_DATABASE);
+    const configuredTarget = (args.expectedTargetDatabase ?? process.env.TYPEDB_DATABASE ?? '').trim();
+    const config = defaultTypeDbConfig(configuredTarget || STAGING_TYPEDB_DATABASE);
     if (args.recreateDatabase) {
       assertCanRecreateTypeDbDatabase(config.databaseName);
     }
 
-    // 1. Probe TypeDB Cloud Explore server & verify authentication
+    // 1. Probe TypeDB server & verify authentication
     const probe = await probeTypeDbServer(config);
     if (!probe.reachable || !probe.authenticated) {
       return {
@@ -878,38 +965,26 @@ export const syncAndVerifyTypeDbCloud = internalAction({
       };
     }
 
-    // 2. Ensure Convex outbox is bootstrapped with the 13 acceptance relationships
-    const outboxBootstrap = await ctx.runMutation(
-      graphMRef('bootstrapAcceptanceOutboxInternal'),
-      { owner },
-    );
-
-    // 3. Project schema + foundational entities + dataset into TypeDB Cloud (`aci_macro_intelligence_staging`)
-    const dataset = loadInitialAcceptanceDataset();
-    let datasetProjectionReport = null;
-    if (!probe.databaseExists || args.recreateDatabase) {
-      const proj = await projectDatasetIntoLiveTypeDb(dataset, {
-        config,
-        recreateDatabase: Boolean(args.recreateDatabase),
-      });
-      datasetProjectionReport = proj.report;
-    } else {
-      const countsCheck = await inspectLiveTypeDbGraphCounts(config);
-      if (
-        !countsCheck.ok ||
-        !countsCheck.counts ||
-        countsCheck.counts.organisations < dataset.organisations.length ||
-        countsCheck.counts.macroRelationships < dataset.relationships.length
-      ) {
-        const proj = await projectDatasetIntoLiveTypeDb(dataset, {
-          config,
-          recreateDatabase: false,
-        });
-        datasetProjectionReport = proj.report;
-      }
+    // 2. Enforce explicit configured TypeDB target BEFORE any write or schema ensure
+    if (!configuredTarget) {
+      return {
+        ok: false,
+        stage: 'missing_explicit_target_database',
+        error:
+          'TYPEDB_DATABASE (or expectedTargetDatabase) must be explicitly configured before projecting outbox records.',
+        probe,
+        executionAuthority: 'none' as const,
+      };
     }
+    assertExplicitTypeDbWriteTarget(config, configuredTarget);
 
-    // 4. Claim and project any pending/retrying Convex outbox items into TypeDB Cloud
+    // 3. Ensure pinned TypeQL 3.14 schema exists WITHOUT injecting synthetic Macro Case 001 records
+    const schemaEnsureReport = await ensureTypeDbDatabaseAndSchemaOnLiveServer(config, {
+      expectedTargetDatabase: configuredTarget,
+      recreateDatabase: Boolean(args.recreateDatabase),
+    });
+
+    // 4. Claim and project ONLY reviewer-approved Convex outbox items into the verified target database
     const claimedBatch = (await ctx.runMutation(
       graphMRef('claimPendingOutboxBatchInternal'),
       {
@@ -939,7 +1014,9 @@ export const syncAndVerifyTypeDbCloud = internalAction({
 
     for (const item of claimedBatch.claimed) {
       const statements = JSON.parse(item.typeqlJson) as string[];
-      const writeRes = await executeWriteStatementsOnLiveServer(statements, config);
+      const writeRes = await executeWriteStatementsOnLiveServer(statements, config, {
+        expectedTargetDatabase: configuredTarget,
+      });
       const outcome = (await ctx.runMutation(
         graphMRef('recordProjectionOutcomeInternal'),
         {
@@ -959,10 +1036,10 @@ export const syncAndVerifyTypeDbCloud = internalAction({
       });
     }
 
-    // 5. Inspect live TypeDB Cloud graph concept counts
+    // 5. Inspect live TypeDB graph concept counts
     const graphCounts = await inspectLiveTypeDbGraphCounts(config);
 
-    // 6. Optionally run all 6 allowlisted graph query types against live TypeDB Cloud
+    // 6. Optionally run allowlisted graph queries hydrated strictly from the live TypeDB target
     const queryResults: Array<{
       queryType: string;
       backendMode: string;
@@ -975,18 +1052,22 @@ export const syncAndVerifyTypeDbCloud = internalAction({
       tldrWhatChangedCount: number;
     }> = [];
 
-    if (args.runAllAllowlistedQueries ?? true) {
+    if (args.runAllAllowlistedQueries ?? false) {
+      const hydrated = await hydrateMacroDatasetFromLiveTypeDb(config, {
+        callerOwner: owner,
+      });
+      const liveDatasets = hydrated.ok && hydrated.dataset ? [hydrated.dataset] : [];
       for (const queryType of ALLOWLISTED_QUERY_TYPES) {
         const res = await executeAllowlistedGraphQuery(
           {
             queryType,
-            asOfMs: 1794146400000,
+            asOfMs: Date.now(),
             temporalBasis: 'receipt',
             maxDepth: 2,
           },
           {
             callerId: owner,
-            datasets: [dataset],
+            datasets: liveDatasets,
             preferLiveTypeDb: true,
           },
         );
@@ -1026,8 +1107,7 @@ export const syncAndVerifyTypeDbCloud = internalAction({
       databaseName: config.databaseName,
       tlsEnabled: describeTypeDbTransport(config).tlsEnabled,
       probe,
-      outboxBootstrap,
-      datasetProjectionReport,
+      schemaEnsureReport,
       outboxResults,
       graphCounts,
       queryResults,
@@ -1039,12 +1119,12 @@ export const syncAndVerifyTypeDbCloud = internalAction({
 
 /**
  * Reviewer-only action to trigger an immediate outbox projection sync into hosted TypeDB Cloud.
- * Security (MVP hardening WP4): this previously accepted any signed-in identity, including model actors and
- * tokens that fail issuer/audience checks, although it writes to the graph database.
  */
 export const projectPendingOutboxNow = action({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    expectedTargetDatabase: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     const rawIdentity = await ctx.auth.getUserIdentity();
     if (!rawIdentity) {
       throw new Error('Authentication required');
@@ -1065,6 +1145,7 @@ export const projectPendingOutboxNow = action({
     );
     return await ctx.runAction(syncActionRef, {
       owner,
+      ...(args.expectedTargetDatabase ? { expectedTargetDatabase: args.expectedTargetDatabase } : {}),
       recreateDatabase: false,
       runAllAllowlistedQueries: false,
     });

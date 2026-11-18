@@ -304,12 +304,22 @@ export function synthesizeQuestionAwareEvidenceAnswer(
     });
   };
 
+  // Topics 1–6 below apply when the retrieved bundle is anchored on NVIDIA Case 007 records;
+  // for any unseen issuer or non-NVIDIA focal entity (e.g. ANET, AVGO, etc.), skip directly to
+  // the 100% data-driven General Ranked Observation + Relationship Synthesis block below!
+  const isNvidiaFocalBundle =
+    (bundle.selectedQuery.focalEntityId === 'org-nvda' ||
+      bundle.selectedQuery.focalEntityId === null) &&
+    (bundle.quantitativeClaims.some((c) => c.claimId.includes('obs-nvda-')) ||
+      bundle.relationships.some((r) => r.relationshipId.includes('case007')));
+
   // =========================================================================
   // TOPIC 1: Forecast vs Reported Financial Performance & Pre/Post Temporal Control (Q1, Q1b)
   // =========================================================================
   if (
-    signals.asksForecastVsActual ||
-    bundle.selectedQuery.intentCategory === 'historical_cutoff_knowledge'
+    isNvidiaFocalBundle &&
+    (signals.asksForecastVsActual ||
+      bundle.selectedQuery.intentCategory === 'historical_cutoff_knowledge')
   ) {
     const q2Actual = findClaim('obs-nvda-q2fy27-actual-rev');
     const q3Guide = findClaim('obs-nvda-q3fy27-guidance-rev');
@@ -419,7 +429,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
   // =========================================================================
   // TOPIC 2: Infrastructure Spending, CapEx, Supply Obligations & Concentration (Q2)
   // =========================================================================
-  if (signals.asksInfraAndConcentration) {
+  if (isNvidiaFocalBundle && signals.asksInfraAndConcentration) {
     const q3Capex = findClaim('obs-nvda-q3fy27-capex');
     const directTotal = findClaim('obs-nvda-q3fy27-total-direct-commitments');
     const supplyTotal = findClaim('obs-nvda-q3fy27-supply-commitments');
@@ -491,7 +501,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
   // =========================================================================
   // TOPIC 3: Direct Commitments vs Contingent Obligations & Credit Guarantees (Q3)
   // =========================================================================
-  if (signals.asksCommitmentsVsGuarantees) {
+  if (isNvidiaFocalBundle && signals.asksCommitmentsVsGuarantees) {
     const directTotal = findClaim('obs-nvda-q3fy27-total-direct-commitments');
     const supplyTotal = findClaim('obs-nvda-q3fy27-supply-commitments');
     const neocloudObs = findClaim('obs-nvda-q3fy27-neocloud-contingent-commitments');
@@ -571,7 +581,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
   // =========================================================================
   // TOPIC 4: Leadership Transitions & Governance Risks (Q4)
   // =========================================================================
-  if (signals.asksLeadershipGovernance) {
+  if (isNvidiaFocalBundle && signals.asksLeadershipGovernance) {
     const huangRel = findRel('rel-case007-nvda-huang-resignation-r1');
     const kressRel = findRel('rel-case007-nvda-kress-interim-ceo-r1');
     const jonesRel = findRel('rel-case007-nvda-jones-chair-r1');
@@ -651,7 +661,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
   // =========================================================================
   // TOPIC 5: Counterparty Ecosystem & Shared Financial Counterparties (Q5, Q5b)
   // =========================================================================
-  if (signals.asksCounterparties || signals.asksSharedCounterparties) {
+  if (isNvidiaFocalBundle && (signals.asksCounterparties || signals.asksSharedCounterparties)) {
     const anthropicHw =
       findRel('rel-case007b-nvda-anthropic-hw-partnership-r2') ??
       findRel('rel-case007-nvda-anthropic-hw-partnership-r1');
@@ -781,7 +791,7 @@ export function synthesizeQuestionAwareEvidenceAnswer(
   // =========================================================================
   // TOPIC 6: Bullish vs Bearish Analytical Interpretations (Q6)
   // =========================================================================
-  if (signals.asksBullBearInterpretation) {
+  if (isNvidiaFocalBundle && signals.asksBullBearInterpretation) {
     const q3Actual = findClaim('obs-nvda-q3fy27-actual-rev');
     const q3Fcf = findClaim('obs-nvda-q3fy27-fcf');
     const q4GuideRev = findClaim('obs-nvda-q4fy27-guidance-rev');

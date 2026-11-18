@@ -94,6 +94,37 @@ export function assertCanRecreateTypeDbDatabase(databaseName: string): void {
   }
 }
 
+/**
+ * RC002 Workstream C (B-004): Asserts an explicit configured TypeDB target before every write
+ * so live projection workers can NEVER silently default to `aci_macro_intelligence_staging`
+ * or write into `aci_macro_intelligence_prod` by accident.
+ */
+export function assertExplicitTypeDbWriteTarget(
+  config: TypeDbConnectionConfig,
+  expectedTargetDatabase: string | null | undefined,
+  options?: { allowProductionWrite?: boolean },
+): void {
+  const expected = (expectedTargetDatabase ?? '').trim();
+  if (!expected) {
+    throw new Error(
+      'Security/isolation violation: TypeDB write requires an explicit configured target database (TYPEDB_DATABASE or expectedTargetDatabase cannot be unset).',
+    );
+  }
+  if (config.databaseName !== expected) {
+    throw new Error(
+      `Security/isolation violation: TypeDB write target mismatch (config="${config.databaseName}" !== expected="${expected}").`,
+    );
+  }
+  if (
+    (config.databaseName === PRODUCTION_TYPEDB_DATABASE || config.databaseName.endsWith('_prod')) &&
+    options?.allowProductionWrite !== true
+  ) {
+    throw new Error(
+      `Security/isolation violation: writes to production TypeDB database "${config.databaseName}" are blocked without explicit production write authorisation.`,
+    );
+  }
+}
+
 export type TypeDbConnectionConfig = {
   httpAddress: string;
   username: string;
@@ -810,11 +841,122 @@ export async function projectDatasetIntoLiveTypeDb(
 }
 
 /**
+ * RC002 Workstream C (B-004): Ensures a target TypeDB database and pinned TypeQL 3.14 schema
+ * (including additive `executive_person` leadership extension) exist WITHOUT bootstrapping
+ * synthetic Macro Case 001 entities or relationships. Asserts explicit target before any write.
+ */
+export async function ensureTypeDbDatabaseAndSchemaOnLiveServer(
+  config: TypeDbConnectionConfig,
+  options: {
+    expectedTargetDatabase: string;
+    recreateDatabase?: boolean;
+    allowProductionWrite?: boolean;
+  },
+): Promise<{
+  createdDatabase: boolean;
+  appliedAdditiveSchema: boolean;
+}> {
+  assertExplicitTypeDbWriteTarget(config, options.expectedTargetDatabase, {
+    allowProductionWrite: options.allowProductionWrite,
+  });
+  if (options.recreateDatabase) {
+    assertCanRecreateTypeDbDatabase(config.databaseName);
+  }
+
+  const driver = createTypeDbDriver(config);
+  const dbsRes = await driver.getDatabases();
+  if (isApiErrorResponse(dbsRes)) {
+    throw new Error(
+      sanitizeTypeDbError(`Failed to list TypeDB databases: ${dbsRes.err.message}`, config),
+    );
+  }
+  let exists = dbsRes.ok.databases.some((d) => d.name === config.databaseName);
+  if (exists && options.recreateDatabase) {
+    const delRes = await driver.deleteDatabase(config.databaseName);
+    if (isApiErrorResponse(delRes)) {
+      throw new Error(
+        sanitizeTypeDbError(`Failed to recreate TypeDB database: ${delRes.err.message}`, config),
+      );
+    }
+    exists = false;
+  }
+
+  let createdDatabase = false;
+  let appliedAdditiveSchema = false;
+
+  if (!exists) {
+    const createRes = await driver.createDatabase(config.databaseName);
+    if (isApiErrorResponse(createRes)) {
+      throw new Error(
+        sanitizeTypeDbError(`Failed to create TypeDB database: ${createRes.err.message}`, config),
+      );
+    }
+    createdDatabase = true;
+
+    const schemaTx = await driver.openTransaction(config.databaseName, 'schema', {
+      schemaLockAcquireTimeoutMillis: 15000,
+      transactionTimeoutMillis: 30000,
+    });
+    if (isApiErrorResponse(schemaTx)) {
+      throw new Error(
+        sanitizeTypeDbError(`Failed to open TypeDB schema transaction: ${schemaTx.err.message}`, config),
+      );
+    }
+    const baseSchemaRes = await driver.query(schemaTx.ok.transactionId, loadPinnedTypeQlSchema());
+    if (isApiErrorResponse(baseSchemaRes)) {
+      await driver.closeTransaction(schemaTx.ok.transactionId).catch(() => {});
+      throw new Error(
+        sanitizeTypeDbError(`TypeQL 3 schema definition failed: ${baseSchemaRes.err.message}`, config),
+      );
+    }
+    const schemaCommit = await driver.commitTransaction(schemaTx.ok.transactionId);
+    if (isApiErrorResponse(schemaCommit)) {
+      throw new Error(
+        sanitizeTypeDbError(`TypeQL 3 schema commit failed: ${schemaCommit.err.message}`, config),
+      );
+    }
+  }
+
+  const existingSchemaRes = await driver.getDatabaseSchema(config.databaseName);
+  if (
+    !isApiErrorResponse(existingSchemaRes) &&
+    !(existingSchemaRes.ok ?? '').includes('executive_person')
+  ) {
+    const migTx = await driver.openTransaction(config.databaseName, 'schema', {
+      schemaLockAcquireTimeoutMillis: 15000,
+      transactionTimeoutMillis: 30000,
+    });
+    if (isApiErrorResponse(migTx)) {
+      throw new Error(
+        sanitizeTypeDbError(`Failed to open TypeDB additive schema transaction: ${migTx.err.message}`, config),
+      );
+    }
+    const migRes = await driver.query(migTx.ok.transactionId, ADDITIVE_CASE_007_SCHEMA_EXTENSION);
+    if (isApiErrorResponse(migRes)) {
+      await driver.closeTransaction(migTx.ok.transactionId).catch(() => {});
+      throw new Error(
+        sanitizeTypeDbError(`TypeQL 3 additive schema migration failed: ${migRes.err.message}`, config),
+      );
+    }
+    const migCommit = await driver.commitTransaction(migTx.ok.transactionId);
+    if (isApiErrorResponse(migCommit)) {
+      throw new Error(
+        sanitizeTypeDbError(`TypeQL 3 additive schema commit failed: ${migCommit.err.message}`, config),
+      );
+    }
+    appliedAdditiveSchema = true;
+  }
+
+  return { createdDatabase, appliedAdditiveSchema };
+}
+
+/**
  * Executes a batch of TypeQL write statements in an atomic `write` transaction on TypeDB.
  */
 export async function executeWriteStatementsOnLiveServer(
   typeqlStatements: string[],
   config = defaultTypeDbConfig(),
+  options?: { expectedTargetDatabase?: string; allowProductionWrite?: boolean },
 ): Promise<{
   ok: boolean;
   statementsExecuted: number;
@@ -823,6 +965,11 @@ export async function executeWriteStatementsOnLiveServer(
 }> {
   const startedAt = Date.now();
   try {
+    if (options?.expectedTargetDatabase !== undefined) {
+      assertExplicitTypeDbWriteTarget(config, options.expectedTargetDatabase, {
+        allowProductionWrite: options.allowProductionWrite,
+      });
+    }
     const driver = createTypeDbDriver(config);
     const tx = await driver.openTransaction(config.databaseName, 'write', {
       transactionTimeoutMillis: 20000,
