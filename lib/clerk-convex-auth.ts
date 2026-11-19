@@ -1,7 +1,11 @@
 'use client';
 import { useAuth } from '@clerk/nextjs';
 import { useCallback } from 'react';
-import { validateClerkConvexJwtClaims, type JwtClaimValidationOptions } from './auth/clerk-jwt-claims';
+import {
+  jwtHasAuthorizedPartyClaim,
+  validateClerkConvexJwtClaims,
+  type JwtClaimValidationOptions,
+} from './auth/clerk-jwt-claims';
 
 // Browser-only module. Server code (route handlers, server components, `server-only` libraries) must import claim
 // validation from `lib/auth/clerk-jwt-claims` instead: a server import of this `'use client'` module resolves to a
@@ -18,10 +22,13 @@ type RawGetToken = (options?: GetTokenOptions) => Promise<string | null>;
 let convexTemplateUnavailableForSession: string | null = null;
 
 /**
- * Resolves a Clerk JWT accepted by Convex (`auth.config.ts`).
- * Prefers the `convex` JWT template when configured on the Clerk instance, and
- * falls back to the default Clerk RS256 session token (`customJwt` provider on
- * the same Clerk issuer domain) when the Production instance has no `convex` template.
+ * Resolves a Clerk JWT accepted by Convex (`auth.config.ts`) and `convex/authz.ts` (`verifyIdentityClaims`).
+ *
+ * RC002.4.1 hotfix: Prefer Clerk's default RS256 session token (`getToken()` without `template`) whenever it is
+ * available, valid, and carries an origin-bound `azp` claim. Convex's OIDC verifier (`applicationID: "convex"`)
+ * strips standard RFC 7519 `aud` from `ctx.auth.getUserIdentity()`, which caused `convex/authz.ts` to throw
+ * `Missing token application context` on Production Clerk `convex` template JWTs that omit `azp`.
+ * Falls back to `getToken({ template: "convex" })` only if the default session token is unavailable or invalid.
  */
 export async function resolveClerkConvexToken(
   getToken: RawGetToken,
@@ -30,25 +37,30 @@ export async function resolveClerkConvexToken(
   claimOptions?: JwtClaimValidationOptions,
 ): Promise<string | null> {
   const skipCache = options?.skipCache;
+  try {
+    const defaultToken = await getToken(skipCache !== undefined ? { skipCache } : undefined);
+    if (
+      defaultToken &&
+      validateClerkConvexJwtClaims(defaultToken, claimOptions) &&
+      jwtHasAuthorizedPartyClaim(defaultToken)
+    ) {
+      return defaultToken;
+    }
+  } catch {
+    // Fall through to templated token lookup if default session token retrieval fails.
+  }
   if (!options?.template || (sessionId && convexTemplateUnavailableForSession === sessionId)) {
-    const raw = await getToken(skipCache !== undefined ? { skipCache } : undefined);
-    return raw && validateClerkConvexJwtClaims(raw, claimOptions) ? raw : null;
+    return null;
   }
   try {
     const templated = await getToken({ template: options.template, skipCache });
     if (templated && validateClerkConvexJwtClaims(templated, claimOptions)) return templated;
   } catch {
-    // Fall through to the default Clerk session token when the `convex` template is absent (404).
+    if (sessionId) {
+      convexTemplateUnavailableForSession = sessionId;
+    }
   }
-  if (sessionId) {
-    convexTemplateUnavailableForSession = sessionId;
-  }
-  try {
-    const fallback = await getToken(skipCache !== undefined ? { skipCache } : undefined);
-    return fallback && validateClerkConvexJwtClaims(fallback, claimOptions) ? fallback : null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export function resetConvexTemplateCacheForTests() {

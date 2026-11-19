@@ -88,17 +88,21 @@ async function resolveAuthenticatedCaller(req: NextRequest): Promise<ResolvedCal
   if (!clerkConfigured()) return null;
   const session = await auth();
   if (!session?.userId) return null;
+  // RC002.4.1: Validate any present templated token fail-closed (never masking an invalid token),
+  // then prefer Clerk's default RS256 session token (carries `azp` preserved by Convex `customJwt`)
+  // over `template: 'convex'` (whose `aud` is stripped from `UserIdentity` by Convex OIDC).
   const templated = await session.getToken({ template: 'convex' }).catch(() => null);
   if (templated) {
     const check = checkServerClerkToken(templated);
     if (check !== 'valid') return { callerId: session.userId, convexToken: null, invalidToken: check };
   }
-  const token = templated ?? (await session.getToken().catch(() => null));
-  if (token) {
-    const check = checkServerClerkToken(token);
+  const defaultToken = await session.getToken().catch(() => null);
+  if (defaultToken) {
+    const check = checkServerClerkToken(defaultToken);
     if (check !== 'valid') return { callerId: session.userId, convexToken: null, invalidToken: check };
+    return { callerId: session.userId, convexToken: defaultToken };
   }
-  return { callerId: session.userId, convexToken: token };
+  return { callerId: session.userId, convexToken: templated };
 }
 
 /** Safe server-side diagnostics: error class and a JWT-redacted, truncated message only. Never a token or stack. */

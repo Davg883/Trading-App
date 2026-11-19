@@ -23,14 +23,19 @@ afterEach(() => {
 });
 
 describe('Clerk Production → Convex token resolution & proxy hardening', () => {
-  it('uses the convex JWT template when available on the Clerk instance', async () => {
+  it('prefers the default Clerk RS256 session token carrying azp over an azp-less convex template token (RC002.4.1)', async () => {
     const oidcJwt = makeJwt({
       iss: 'https://clerk.capital.aiguides.co.uk',
       sub: 'user_prod_owner',
       aud: 'convex',
     });
+    const sessionJwt = makeJwt({
+      iss: 'https://clerk.capital.aiguides.co.uk',
+      sub: 'user_prod_owner',
+      azp: 'https://capital.aiguides.co.uk',
+    });
     const getToken = vi.fn(async (opts?: { template?: 'convex'; skipCache?: boolean }) =>
-      opts?.template === 'convex' ? oidcJwt : 'default-session-jwt',
+      opts?.template === 'convex' ? oidcJwt : sessionJwt,
     );
     const token = await resolveClerkConvexToken(
       getToken,
@@ -38,43 +43,59 @@ describe('Clerk Production → Convex token resolution & proxy hardening', () =>
       'sess_1',
       { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
     );
-    expect(token).toBe(oidcJwt);
+    expect(token).toBe(sessionJwt);
     expect(getToken).toHaveBeenCalledTimes(1);
-    expect(getToken).toHaveBeenCalledWith({ template: 'convex', skipCache: false });
+    expect(getToken).toHaveBeenCalledWith({ skipCache: false });
   });
 
-  it('falls back to the default Clerk RS256 session token when the convex JWT template returns 404 and caches per session', async () => {
-    const customSessionJwt = makeJwt({
+  it('falls back to the convex JWT template when default session token is unavailable and caches 404 per session', async () => {
+    const oidcJwt = makeJwt({
       iss: 'https://clerk.capital.aiguides.co.uk',
       sub: 'user_prod_owner',
-      azp: 'https://capital.aiguides.co.uk',
+      aud: 'convex',
     });
     const getToken = vi.fn(async (opts?: { template?: 'convex'; skipCache?: boolean }) => {
+      if (!opts?.template) return null;
+      return oidcJwt;
+    });
+
+    const resolved = await resolveClerkConvexToken(
+      getToken,
+      { template: 'convex', skipCache: false },
+      'sess_prod_fallback',
+      { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
+    );
+    expect(resolved).toBe(oidcJwt);
+    expect(getToken).toHaveBeenCalledTimes(2);
+
+    // When both default token is null and template throws 404, caches template unavailability per session
+    const failingGetToken = vi.fn(async (opts?: { template?: 'convex'; skipCache?: boolean }) => {
       if (opts?.template === 'convex') {
         throw new Error('ClerkJS: JWT template "convex" not found (404)');
       }
-      return customSessionJwt;
+      return null;
     });
-
-    const first = await resolveClerkConvexToken(
-      getToken,
-      { template: 'convex', skipCache: false },
-      'sess_prod_1',
-      { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
-    );
-    expect(first).toBe(customSessionJwt);
-    expect(getToken).toHaveBeenCalledTimes(2);
+    expect(
+      await resolveClerkConvexToken(
+        failingGetToken,
+        { template: 'convex', skipCache: false },
+        'sess_prod_404',
+        { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
+      ),
+    ).toBeNull();
+    expect(failingGetToken).toHaveBeenCalledTimes(2);
 
     // Subsequent calls for the same session skip the 404 template request
-    const second = await resolveClerkConvexToken(
-      getToken,
-      { template: 'convex', skipCache: true },
-      'sess_prod_1',
-      { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
-    );
-    expect(second).toBe(customSessionJwt);
-    expect(getToken).toHaveBeenCalledTimes(3);
-    expect(getToken).toHaveBeenLastCalledWith({ skipCache: true });
+    expect(
+      await resolveClerkConvexToken(
+        failingGetToken,
+        { template: 'convex', skipCache: true },
+        'sess_prod_404',
+        { expectedIssuers: ['https://clerk.capital.aiguides.co.uk'] },
+      ),
+    ).toBeNull();
+    expect(failingGetToken).toHaveBeenCalledTimes(3);
+    expect(failingGetToken).toHaveBeenLastCalledWith({ skipCache: true });
   });
 
   it('validates issuer, audience, and authorized party (azp) application binding on both client and Convex server', () => {

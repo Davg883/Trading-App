@@ -136,6 +136,20 @@ export function validateClerkConvexJwtClaims(
   return true;
 }
 
+/**
+ * Returns true when a 3-segment JWT carries a non-empty `azp` (authorized party) claim.
+ * Real Convex Cloud OIDC verification (`{ domain, applicationID: 'convex' }`) strips standard RFC 7519 `aud`
+ * from `ctx.auth.getUserIdentity()`, whereas Clerk's default RS256 session token (`customJwt`) preserves `azp`
+ * on `UserIdentity` so `convex/authz.ts:verifyIdentityClaims` can verify application binding fail-closed.
+ */
+export function jwtHasAuthorizedPartyClaim(token: string): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 3) return true;
+  const payload = decodeBase64UrlJson(parts[1]!);
+  if (!payload) return false;
+  return typeof payload.azp === 'string' && payload.azp.trim().length > 0;
+}
+
 export type ServerTokenCheck = 'valid' | 'invalid_claims' | 'expired';
 
 /**

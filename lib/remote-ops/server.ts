@@ -475,7 +475,7 @@ export async function updateOperationsSettings(request:Request){
   }
   const session=await auth();
   if(!session.userId)throw new RemoteOpsError('sign_in_required',401);
-  const token=(await session.getToken({template:'convex'}).catch(()=>null))??(await session.getToken().catch(()=>null));
+  const token=(await session.getToken().catch(()=>null))??(await session.getToken({template:'convex'}).catch(()=>null));
   if(!token)throw new RemoteOpsError('sign_in_required',401);
   const body=ownerSettingsActionSchema.parse(await boundedJsonBody(request,MAX_SETTINGS_PAYLOAD_BYTES));
   const user=userConvexClient(token);
