@@ -317,4 +317,186 @@ describe('RC002.4 — Dedicated Market-Data-Only Recurring Scheduler (Mode B)',(
   expect(cronsSrc).toContain("'30 22 * * 1-5'");
   expect(cronsSrc).toContain("triggerSource:'scheduled_market_data_cron'");
  });
+
+ it('handles DST spring-forward and fall-back transitions, 15-minute post-close buffer, holiday skip, and 13:00 ET early close end-to-end',async()=>{
+  // 15-minute post-close buffer boundary on regular EST day (2026-11-19)
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-19T21:14:00Z')).skippedReason).toBe('us_regular_session_not_yet_closed');
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-19T21:15:00Z')).eligible).toBe(true);
+
+  // Spring-forward DST transition (2026-03-08): Fri before (EST) vs Mon after (EDT)
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-03-06T21:30:00Z')).eligible).toBe(true); // 16:30 EST
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-03-09T19:59:00Z')).skippedReason).toBe('us_regular_session_not_yet_closed'); // 15:59 EDT
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-03-09T20:30:00Z')).eligible).toBe(true); // 16:30 EDT
+
+  // Fall-back DST transition (2026-11-01): Fri before (EDT) vs Mon after (EST)
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-10-30T20:30:00Z')).eligible).toBe(true); // 16:30 EDT
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-02T20:30:00Z')).skippedReason).toBe('us_regular_session_not_yet_closed'); // 15:30 EST!
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-02T21:30:00Z')).eligible).toBe(true); // 16:30 EST
+
+  // 13:00 ET early-close boundary (Black Friday 2026-11-27)
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-27T18:14:00Z')).skippedReason).toBe('us_regular_session_not_yet_closed');
+  expect(evaluateUsMarketEodWindow(Date.parse('2026-11-27T18:15:00Z')).eligible).toBe(true);
+
+  // End-to-end Thanksgiving holiday invocation (2026-11-26 21:30 UTC): 0 fetches, 0 DB writes
+  process.env.MARKET_DATA_SCHEDULER_ENV='enabled';
+  const t=convexTest(schema,modules);
+  const calledUrls:string[]=[];
+  vi.stubGlobal('fetch',mockMarketFetch(calledUrls));
+  vi.setSystemTime(Date.parse('2026-11-26T21:30:00Z'));
+
+  const holidayRes=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {skippedReason:string;typedbProjectionInvoked:boolean};
+  expect(holidayRes.skippedReason).toBe('us_market_closed_holiday');
+  expect(holidayRes.typedbProjectionInvoked).toBe(false);
+  expect(calledUrls.length).toBe(0);
+
+  // End-to-end Black Friday early-close invocation (2026-11-27 18:15 UTC = 13:15 EST)
+  vi.setSystemTime(Date.parse('2026-11-27T18:15:00Z'));
+  const earlyRes=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string};marketWindow:{isEarlyClose:boolean}};
+  expect(earlyRes.marketWindow.isEarlyClose).toBe(true);
+  expect(earlyRes.result.status).toBe('succeeded');
+ });
+
+ it('handles delayed provider publication at Slot 1 without fabricating closes, recovers at Slot 2, blocks active in-flight lease, and pauses cleanly when disabled',async()=>{
+  process.env.MARKET_DATA_SCHEDULER_ENV='enabled';
+  process.env.RESEARCH_SCHEDULER_ENV='disabled';
+  const t=convexTest(schema,modules);
+
+  // Seed pending graphProjectionOutbox row to prove 0 TypeDB/outbox writes across all phases
+  const outboxId=await t.run((ctx)=>ctx.db.insert('graphProjectionOutbox',{
+   owner:OWNER,
+   visibility:'public_research',
+   sequence:1,
+   projectionKey:'proj-rc0024-pending-001',
+   sourceTable:'evidence',
+   sourceRecordId:'ev-rc0024-001',
+   sourceEvidenceIds:['ev-rc0024-001'],
+   graphSchemaVersion:'macro-intelligence-graph-3.14-v1',
+   relationshipId:'rel-rc0024-001',
+   payloadJson:'{}',
+   typeqlJson:'[]',
+   reviewer:'rc0024-test',
+   status:'pending',
+   attemptCount:0,
+   maxAttempts:3,
+   nextAttemptAtMs:POST_CLOSE_EST-60_000,
+   lastError:null,
+   projectedAtMs:null,
+   createdAtMs:POST_CLOSE_EST-120_000,
+   updatedAtMs:POST_CLOSE_EST-120_000,
+   executionAuthority:'none',
+  }));
+
+  // Slot 1 (21:30 UTC): delayed provider only returns 2026-11-18 (2026-11-19 not published yet)
+  let includeNov19=false;
+  const calledUrls:string[]=[];
+  vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
+   const url=typeof input==='string'?input:input instanceof URL?input.toString():input.url;
+   calledUrls.push(url);
+   if(url.includes('typedb')||url.includes('sec.gov')||url.includes('trading212')){
+    throw new Error(`FORBIDDEN_CALL: ${url}`);
+   }
+   if(url.startsWith('https://api.frankfurter.app/')){
+    return new Response(JSON.stringify({amount:1,base:'USD',rates:{'2026-11-18':{GBP:0.75939},'2026-11-19':{GBP:0.76038}}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   const rows=includeNov19
+    ?[
+      {date:'11/19/2026',close:'$152.10',volume:'15,000,000',open:'$151.00',high:'$153.20',low:'$150.40'},
+      {date:'11/18/2026',close:'$150.96',volume:'12,345,678',open:'$149.50',high:'$152.10',low:'$148.90'},
+     ]
+    :[{date:'11/18/2026',close:'$150.96',volume:'12,345,678',open:'$149.50',high:'$152.10',low:'$148.90'}];
+   return new Response(JSON.stringify({data:{tradesTable:{rows}}}),{status:200,headers:{'Content-Type':'application/json'}});
+  }));
+
+  const slot1=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string;detail:string}};
+  expect(slot1.result.status).toBe('succeeded');
+  expect(slot1.result.detail).toContain('inserted=8, total=8');
+
+  // Public status must honestly report stale (2026-11-18 lags expected 2026-11-19) — never fabricated!
+  const pubAfterSlot1=await t.query(publicOpsRef,{}) as {marketDataScheduler:{status:string;latestCompletedSessionDate:string;staleDataWarning:string|null}};
+  expect(pubAfterSlot1.marketDataScheduler.status).toBe('stale');
+  expect(pubAfterSlot1.marketDataScheduler.latestCompletedSessionDate).toBe('2026-11-18');
+  expect(pubAfterSlot1.marketDataScheduler.staleDataWarning).toContain('lags expected completed US session (2026-11-19)');
+
+  // Simulate active in-flight lease on market_data_collect -> overlapping invocation blocked as lease_active (0 fetches)
+  vi.setSystemTime(POST_CLOSE_EST+60*60_000);
+  await t.run(async(ctx)=>{
+   const job=await ctx.db.query('researchJobs').filter((q)=>q.eq(q.field('jobKey'),'market_data_collect')).first();
+   if(job){
+    await ctx.db.patch(job._id,{leaseToken:'in-flight-lease-001',leaseUntil:POST_CLOSE_EST+60*60_000+30_000});
+   }
+  });
+  calledUrls.length=0;
+  const inFlightOverlap=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string}};
+  expect(inFlightOverlap.result.status).toBe('lease_held');
+  expect(calledUrls.length).toBe(0);
+
+  // Release lease; Slot 2 (22:30 UTC) now sees delayed 2026-11-19 close -> inserts 8 new bars and clears stale warning
+  await t.run(async(ctx)=>{
+   const job=await ctx.db.query('researchJobs').filter((q)=>q.eq(q.field('jobKey'),'market_data_collect')).first();
+   if(job){
+    await ctx.db.patch(job._id,{leaseToken:null,leaseUntil:0});
+   }
+  });
+  includeNov19=true;
+  const slot2=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string;detail:string}};
+  expect(slot2.result.status).toBe('succeeded');
+  expect(slot2.result.detail).toContain('inserted=8, total=16');
+
+  const pubAfterSlot2=await t.query(publicOpsRef,{}) as {marketDataScheduler:{status:string;latestCompletedSessionDate:string;staleDataWarning:string|null}};
+  expect(pubAfterSlot2.marketDataScheduler.status).toBe('active');
+  expect(pubAfterSlot2.marketDataScheduler.latestCompletedSessionDate).toBe('2026-11-19');
+  expect(pubAfterSlot2.marketDataScheduler.staleDataWarning).toBeNull();
+
+  // Disable MARKET_DATA_SCHEDULER_ENV -> next scheduled tick skips without affecting RESEARCH_SCHEDULER_ENV
+  process.env.MARKET_DATA_SCHEDULER_ENV='disabled';
+  vi.setSystemTime(POST_CLOSE_EST+120*60_000);
+  calledUrls.length=0;
+  const pausedTick=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {skippedReason:string};
+  expect(pausedTick.skippedReason).toBe('market_data_scheduler_disabled');
+  expect(calledUrls.length).toBe(0);
+  expect(process.env.RESEARCH_SCHEDULER_ENV).toBe('disabled');
+
+  // Verify zero unauthorized writes across all protected tables + pending outbox row untouched
+  const finalState=await t.run(async(ctx)=>({
+   obs:(await ctx.db.query('marketObservations').collect()).length,
+   quotes:(await ctx.db.query('quotes').collect()).length,
+   runs:(await ctx.db.query('researchJobRuns').collect()).map((r)=>r.jobKey),
+   staging:(await ctx.db.query('researchStagingItems').collect()).length,
+   evidence:(await ctx.db.query('evidence').collect()).length,
+   quarantines:(await ctx.db.query('evidenceQuarantines').collect()).length,
+   briefings:(await ctx.db.query('morningBriefings').collect()).length,
+   orders:(await ctx.db.query('tradeOrders').collect()).length,
+   brokers:(await ctx.db.query('brokerConnections').collect()).length,
+   outboxRow:await ctx.db.get(outboxId),
+  }));
+  expect(finalState.obs).toBe(16);
+  expect(finalState.quotes).toBe(16);
+  expect(finalState.runs).toEqual(['market_data_collect','market_data_collect']);
+  expect(finalState.staging).toBe(0);
+  expect(finalState.evidence).toBe(0);
+  expect(finalState.quarantines).toBe(0);
+  expect(finalState.briefings).toBe(0);
+  expect(finalState.orders).toBe(0);
+  expect(finalState.brokers).toBe(0);
+  expect(finalState.outboxRow?.status).toBe('pending');
+  expect(finalState.outboxRow?.attemptCount).toBe(0);
+ });
 });
