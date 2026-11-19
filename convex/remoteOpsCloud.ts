@@ -31,6 +31,10 @@ import {
  type EdgarSubmissionTabularBlock,
  type EdgarSubmissionsPayload,
 } from '../lib/remote-ops/sec-filing-graph-extractor';
+import {
+ evaluateUsMarketEodWindow,
+ resolveMarketDataSchedulerEnv,
+} from '../lib/remote-ops/market-data-scheduler';
 
 const internalAction:ActionBuilder<DataModel,'internal'>=internalActionGeneric;
 
@@ -244,6 +248,11 @@ async function executeMarketDataCollectJob(
    symbols:MARKET_DATA_SYMBOLS,
   });
 
+  if(mktRes.observations.length===0&&mktRes.errors.length>0){
+   const sampleErr=mktRes.errors.slice(0,3).map(e=>`${e.symbol}: ${e.error}`).join('; ');
+   throw new Error(`All ${mktRes.errors.length} symbol fetch(es) failed (${sampleErr})`);
+  }
+
   const storeRes=await ctx.runMutation(mRef('storeMarketObservationsInternal'),{
    owner,
    observationsJson:JSON.stringify(mktRes.observations),
@@ -332,23 +341,90 @@ type ActionCtxLike={
 };
 
 /**
- * RC002.3 — Isolated internal-only market-data & FX collection action (Mode A).
+ * RC002.3 / RC002.4 — Isolated internal-only market-data & FX collection action (Mode A + Mode B).
  * Structurally incapable of invoking TypeDB projection (`graph:syncAndVerifyTypeDbCloud`),
  * SEC ingestion, news discovery, morning briefing generation, portfolio refresh, or broker execution.
+ *
+ * Dual-gate separation:
+ * - `triggerSource === 'scheduled_market_data_cron'` (Mode B): governed strictly by `MARKET_DATA_SCHEDULER_ENV=enabled`
+ *   (cannot be bypassed via `forceOnDemand`), enforces US weekday/holiday/DST EOD session window, and preserves
+ *   `RESEARCH_SCHEDULER_ENV=disabled` for all general research jobs.
+ * - `triggerSource === 'manual_on_demand'` (Mode A, default): preserves existing `RESEARCH_SCHEDULER_ENV=disabled`
+ *   guard unless `forceOnDemand: true` is explicitly passed by an admin; never activates recurring collection.
  */
 export const runMarketDataOnlyInternal=internalAction({
  args:{
   environment:v.optional(v.union(v.literal('remote'),v.literal('local'))),
   forceOnDemand:v.optional(v.boolean()),
+  triggerSource:v.optional(v.union(v.literal('manual_on_demand'),v.literal('scheduled_market_data_cron'))),
  },
  handler:async(ctx,args)=>{
   const owner=process.env.RESEARCH_OWNER_ID;
   if(!owner)throw new Error('RESEARCH_OWNER_ID is not configured in the Convex cloud environment');
+  const triggerSource=args.triggerSource??'manual_on_demand';
+  const marketDataSchedulerEnv=resolveMarketDataSchedulerEnv(process.env.MARKET_DATA_SCHEDULER_ENV);
+  const now=Date.now();
+
+  if(triggerSource==='scheduled_market_data_cron'){
+   // Scheduled Mode B path cannot bypass its own dedicated administrative gate via forceOnDemand.
+   if(marketDataSchedulerEnv!=='enabled'){
+    return {
+     executedAt:now,
+     environment:'disabled' as const,
+     triggerSource,
+     marketDataSchedulerEnv,
+     result:null,
+     coveredSymbols:[...MARKET_DATA_SYMBOLS],
+     skippedReason:'market_data_scheduler_disabled',
+     typedbProjectionInvoked:false as const,
+     executionAuthority:'none' as const,
+    };
+   }
+   const marketWindow=evaluateUsMarketEodWindow(now);
+   if(!marketWindow.eligible){
+    return {
+     executedAt:now,
+     environment:'remote' as const,
+     triggerSource,
+     marketDataSchedulerEnv,
+     marketWindow,
+     result:null,
+     coveredSymbols:[...MARKET_DATA_SYMBOLS],
+     skippedReason:marketWindow.skippedReason??'us_market_window_ineligible',
+     typedbProjectionInvoked:false as const,
+     executionAuthority:'none' as const,
+    };
+   }
+   const env=args.environment??'remote';
+   // Scheduled cron always passes forceOnDemand: false so lease & cooldown protection remain enforced.
+   const {result}=await executeMarketDataCollectJob(ctx,{
+    owner,
+    env,
+    now,
+    forceOnDemand:false,
+   });
+   return {
+    executedAt:now,
+    environment:env,
+    triggerSource,
+    marketDataSchedulerEnv,
+    marketWindow,
+    result,
+    coveredSymbols:[...MARKET_DATA_SYMBOLS],
+    typedbProjectionInvoked:false as const,
+    executionAuthority:'none' as const,
+   };
+  }
+
+  // Manual Mode A path: respects RESEARCH_SCHEDULER_ENV=disabled unless forceOnDemand: true,
+  // and never mutates or enables MARKET_DATA_SCHEDULER_ENV.
   const schedulerEnv=(process.env.RESEARCH_SCHEDULER_ENV||'remote').trim();
   if(schedulerEnv==='disabled'&&!args.forceOnDemand){
    return {
-    executedAt:Date.now(),
+    executedAt:now,
     environment:'disabled' as const,
+    triggerSource,
+    marketDataSchedulerEnv,
     result:null,
     coveredSymbols:[...MARKET_DATA_SYMBOLS],
     skippedReason:'scheduler_env_disabled_to_prevent_duplicate_dev_prod_collection',
@@ -357,7 +433,6 @@ export const runMarketDataOnlyInternal=internalAction({
    };
   }
   const env=args.environment??(schedulerEnv==='local'?'local':'remote');
-  const now=Date.now();
   const {result}=await executeMarketDataCollectJob(ctx,{
    owner,
    env,
@@ -367,6 +442,8 @@ export const runMarketDataOnlyInternal=internalAction({
   return {
    executedAt:now,
    environment:env,
+   triggerSource,
+   marketDataSchedulerEnv,
    result,
    coveredSymbols:[...MARKET_DATA_SYMBOLS],
    typedbProjectionInvoked:false as const,

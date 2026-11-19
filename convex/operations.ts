@@ -29,6 +29,7 @@ import {
  type ProviderCredentialState,
 } from '../lib/remote-ops/health-monitor';
 import {generateMorningBriefing,londonBriefingDate,nextLondonMorningBriefAt} from '../lib/remote-ops/morning-briefing';
+import {buildMarketDataOperationalStatus,resolveMarketDataSchedulerEnv} from '../lib/remote-ops/market-data-scheduler';
 import {assessPipelineStages} from '../lib/remote-ops/pipeline-stages';
 import {isAttestedLiveTurn} from '../lib/graph/chat-turn-audit-validation';
 import {
@@ -758,6 +759,18 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
   };
  };
 
+ const recentMarketRuns=await ctx.db
+  .query('researchJobRuns')
+  .withIndex('by_owner_job',q=>q.eq('owner',owner).eq('jobKey','market_data_collect'))
+  .order('desc')
+  .take(5);
+ const marketDataScheduler=buildMarketDataOperationalStatus({
+  marketDataSchedulerEnv:resolveMarketDataSchedulerEnv(process.env.MARKET_DATA_SCHEDULER_ENV),
+  nowMs:now,
+  recentMarketRuns:recentMarketRuns.map(r=>({startedAt:r.startedAt,status:r.status})),
+  latestBySymbol:[...latestBySymbol.values()].map(s=>({symbol:s.symbol,sessionDate:s.sessionDate})),
+ });
+
  return {
   health,
   ...(privateRead?{remediationState:contaminationGuard.remediationState,pendingQuarantineCount:contaminationGuard.pendingQuarantineCount}:{}),
@@ -767,6 +780,7 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
    coveredSymbols:MARKET_DATA_SYMBOLS,
    latestBySymbol:[...latestBySymbol.values()],
   },
+  marketDataScheduler,
   missingEvidenceResolution,
   forwardResearchEvents:forwardEventsFormatted,
   recentRuns:formattedRecentRuns,
@@ -927,6 +941,7 @@ function toPublicOperationsStatus(full:Awaited<ReturnType<typeof buildOperations
    externalNewsIngestion:h.externalNewsIngestion,
   },
   marketData:full.marketData,
+  marketDataScheduler:full.marketDataScheduler,
   missingEvidenceResolution:full.missingEvidenceResolution,
   latestBriefing:null,
   executionAuthority:'none' as const,

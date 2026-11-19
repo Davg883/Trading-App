@@ -103,7 +103,9 @@ describe('WP1 — anonymous callers never inherit an owner or reach private reco
  it('publicOperationsOverview: only allowlisted top-level and health fields are present',async()=>{
   const {t}=await setup(A);
   const res=await t.query(opsQ('publicOperationsOverview'),{}) as NonNullable<PublicOverview>;
-  expect(Object.keys(res).sort()).toEqual(['audience','executionAuthority','health','latestBriefing','marketData','missingEvidenceResolution']);
+  // RC002.4: marketDataScheduler added deliberately — non-PII operational telemetry for the dedicated weekday EOD
+  // market-data scheduler (status, session coverage, stale warning, pause note).
+  expect(Object.keys(res).sort()).toEqual(['audience','executionAuthority','health','latestBriefing','marketData','marketDataScheduler','missingEvidenceResolution']);
   // Sprint G9.3.1: externalNewsIngestion added deliberately — a fixed status/label/detail with no user data, needed so the
   // signed-out panel states that external news ingestion is not implemented.
   expect(Object.keys(res.health).sort()).toEqual(['activeEnvironment','aiResearchHealthy','alerts','dailyCostGbp','deterministicCollectionHealthy','environmentAudit','evaluatedAt','executionPaths','externalNewsIngestion','graphProjection','jobs','modelFailureIsolated','monthlyCostGbp','operationalLayers','pendingVerificationCount','providers','systemEnabled']);
