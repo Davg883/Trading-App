@@ -195,6 +195,186 @@ async function fetchSecCompanyFactsCandidate(params:{
  };
 }
 
+type MarketDataCollectJobOutcome={
+ result:{jobKey:string;status:string;runId?:string;detail:string};
+ fxFact?:{
+  id:string;
+  entity:string;
+  metric:string;
+  valueDisplay:string;
+  period:string;
+  sourceUrl:string;
+  sourceKind:'central_bank';
+  publishedAt:number;
+  receivedAt:number;
+  classification:'observed';
+ };
+};
+
+/**
+ * Shared deterministic Market & FX Data Collector (`market_data_collect`).
+ * Collects authorised daily closes across the 8 approved MARKET_DATA_SYMBOLS + ECB USD/GBP FX,
+ * enforces lease/deduplication/Trading 212 exclusion controls, and never triggers TypeDB projection
+ * or unrelated research jobs.
+ */
+async function executeMarketDataCollectJob(
+ ctx:{runMutation:ActionCtxLike['runMutation']},
+ params:{owner:string;env:'remote'|'local';now:number;forceOnDemand?:boolean},
+):Promise<MarketDataCollectJobOutcome>{
+ const {owner,env,now,forceOnDemand}=params;
+ const jobStart=Date.now();
+ const lease=await ctx.runMutation(mRef('acquireJobLeaseInternal'),{
+  owner,
+  jobKey:'market_data_collect',
+  environment:env,
+  ...(forceOnDemand?{forceOnDemand:true}:{}),
+ }) as {ok:boolean;code?:string;leaseToken?:string;cursor?:string|null};
+ if(!lease.ok){
+  return {
+   result:{jobKey:'market_data_collect',status:lease.code??'skipped',detail:`Skipped (${lease.code})`},
+  };
+ }
+ const runId=`cloud-market_data_collect-${now}`;
+ try{
+  const mktRes=await collectUniverseMarketObservations({
+   now,
+   lookbackDays:12,
+   maxBarsPerSymbol:4,
+   cursorBefore:lease.cursor,
+   symbols:MARKET_DATA_SYMBOLS,
+  });
+
+  const storeRes=await ctx.runMutation(mRef('storeMarketObservationsInternal'),{
+   owner,
+   observationsJson:JSON.stringify(mktRes.observations),
+   nowOverride:now,
+  }) as {
+   insertedCount:number;
+   duplicateCount:number;
+   totalStoredCount:number;
+   scoredWindows:number;
+   blockedIncompleteWindows:number;
+   pendingFutureWindows:number;
+   forwardEvaluatedCount:number;
+  };
+
+  const fxFact={
+   id:`fact-fx-${mktRes.latestFxDate}`,
+   entity:'GBP/USD',
+   metric:'ecb_usd_to_gbp_reference',
+   valueDisplay:`${mktRes.latestUsdToGbp.toFixed(5)} GBP per USD (ECB reference date ${mktRes.latestFxDate})`,
+   period:mktRes.latestFxDate,
+   sourceUrl:'https://api.frankfurter.app/latest?from=USD&to=GBP',
+   sourceKind:'central_bank' as const,
+   publishedAt:now-3600_000,
+   receivedAt:now,
+   classification:'observed' as const,
+  };
+
+  const durationMs=Math.max(1,Date.now()-jobStart);
+  const isUnchanged=mktRes.conditionalSkip&&storeRes.insertedCount===0;
+  const summary=isUnchanged
+   ?`Market & FX cursor unchanged (${mktRes.latestSessionDate??'latest'} across 8 symbols, USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)}); ${storeRes.scoredWindows} completed window(s) scored, ${storeRes.blockedIncompleteWindows} incomplete window(s) blocked (${mktRes.providerRequestsCount} provider reqs in ${durationMs}ms).`
+   :`Collected ${mktRes.observations.length} price observation(s) across ${MARKET_DATA_SYMBOLS.join(', ')} (${storeRes.insertedCount} new, ${storeRes.duplicateCount} deduplicated; latest session ${mktRes.latestSessionDate}) + USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)} (${mktRes.providerConfig.label}); resolved ${storeRes.scoredWindows} completed window(s) in ${durationMs}ms.`;
+
+  await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
+   owner,
+   runId,
+   jobKey:'market_data_collect',
+   environment:env,
+   leaseToken:lease.leaseToken,
+   status:'succeeded',
+   cursorAfter:mktRes.cursorAfter,
+   sourcesDiscovered:MARKET_DATA_SYMBOLS.length+1,
+   evidencePromoted:storeRes.insertedCount,
+   duplicatesSkipped:storeRes.duplicateCount,
+   providerRequestsCount:mktRes.providerRequestsCount,
+   processingDurationMs:durationMs,
+   conditionalSkip:isUnchanged,
+   summary,
+  });
+  return {
+   result:{
+    jobKey:'market_data_collect',
+    status:'succeeded',
+    runId,
+    detail:`inserted=${storeRes.insertedCount}, total=${storeRes.totalStoredCount}, scoredWindows=${storeRes.scoredWindows}, reqs=${mktRes.providerRequestsCount}`,
+   },
+   fxFact,
+  };
+ }catch(err){
+  const msg=err instanceof Error?err.message:'market_data_collection_error';
+  const durationMs=Math.max(1,Date.now()-jobStart);
+  await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
+   owner,
+   runId,
+   jobKey:'market_data_collect',
+   environment:env,
+   leaseToken:lease.leaseToken,
+   status:'failed',
+   sourcesDiscovered:0,
+   evidencePromoted:0,
+   duplicatesSkipped:0,
+   providerRequestsCount:1,
+   processingDurationMs:durationMs,
+   conditionalSkip:false,
+   errorCode:'market_provider_unavailable',
+   summary:`Market data collection failed: ${msg}`,
+  });
+  return {
+   result:{jobKey:'market_data_collect',status:'failed',runId,detail:msg},
+  };
+ }
+}
+
+type ActionCtxLike={
+ runMutation:(ref:ReturnType<typeof mRef>,args:Record<string,unknown>)=>Promise<unknown>;
+};
+
+/**
+ * RC002.3 — Isolated internal-only market-data & FX collection action (Mode A).
+ * Structurally incapable of invoking TypeDB projection (`graph:syncAndVerifyTypeDbCloud`),
+ * SEC ingestion, news discovery, morning briefing generation, portfolio refresh, or broker execution.
+ */
+export const runMarketDataOnlyInternal=internalAction({
+ args:{
+  environment:v.optional(v.union(v.literal('remote'),v.literal('local'))),
+  forceOnDemand:v.optional(v.boolean()),
+ },
+ handler:async(ctx,args)=>{
+  const owner=process.env.RESEARCH_OWNER_ID;
+  if(!owner)throw new Error('RESEARCH_OWNER_ID is not configured in the Convex cloud environment');
+  const schedulerEnv=(process.env.RESEARCH_SCHEDULER_ENV||'remote').trim();
+  if(schedulerEnv==='disabled'&&!args.forceOnDemand){
+   return {
+    executedAt:Date.now(),
+    environment:'disabled' as const,
+    result:null,
+    coveredSymbols:[...MARKET_DATA_SYMBOLS],
+    skippedReason:'scheduler_env_disabled_to_prevent_duplicate_dev_prod_collection',
+    typedbProjectionInvoked:false as const,
+    executionAuthority:'none' as const,
+   };
+  }
+  const env=args.environment??(schedulerEnv==='local'?'local':'remote');
+  const now=Date.now();
+  const {result}=await executeMarketDataCollectJob(ctx,{
+   owner,
+   env,
+   now,
+   forceOnDemand:args.forceOnDemand,
+  });
+  return {
+   executedAt:now,
+   environment:env,
+   result,
+   coveredSymbols:[...MARKET_DATA_SYMBOLS],
+   typedbProjectionInvoked:false as const,
+   executionAuthority:'none' as const,
+  };
+ },
+});
+
 /**
  * Cloud-hosted unattended research & collection cycle running on Convex (`prestigious-dragon-8.eu-west-1.convex.cloud`).
  * Executes independently of the local laptop, uses source cursors and change detection to avoid redundant XBRL/model work,
@@ -333,103 +513,14 @@ export const runScheduledCloudCycle=internalAction({
   // enforces provider request budgets & cursor change detection, runs the Missing Evidence Resolver,
   // and never substitutes Trading 212 position prices for a market feed.
   if(targetJobs.includes('market_data_collect')){
-   const jobStart=Date.now();
-   const lease=await ctx.runMutation(mRef('acquireJobLeaseInternal'),{
+   const mktOutcome=await executeMarketDataCollectJob(ctx,{
     owner,
-    jobKey:'market_data_collect',
-    environment:env,
-    ...(args.forceOnDemand?{forceOnDemand:true}:{}),
-   }) as {ok:boolean;code?:string;leaseToken?:string;cursor?:string|null};
-   if(!lease.ok){
-    results.push({jobKey:'market_data_collect',status:lease.code??'skipped',detail:`Skipped (${lease.code})`});
-   }else{
-    const runId=`cloud-market_data_collect-${now}`;
-    try{
-     const mktRes=await collectUniverseMarketObservations({
-      now,
-      lookbackDays:12,
-      maxBarsPerSymbol:4,
-      cursorBefore:lease.cursor,
-      symbols:MARKET_DATA_SYMBOLS,
-     });
-
-     const storeRes=await ctx.runMutation(mRef('storeMarketObservationsInternal'),{
-      owner,
-      observationsJson:JSON.stringify(mktRes.observations),
-      nowOverride:now,
-     }) as {
-      insertedCount:number;
-      duplicateCount:number;
-      totalStoredCount:number;
-      scoredWindows:number;
-      blockedIncompleteWindows:number;
-      pendingFutureWindows:number;
-      forwardEvaluatedCount:number;
-     };
-
-     discoveredFacts.push({
-      id:`fact-fx-${mktRes.latestFxDate}`,
-      entity:'GBP/USD',
-      metric:'ecb_usd_to_gbp_reference',
-      valueDisplay:`${mktRes.latestUsdToGbp.toFixed(5)} GBP per USD (ECB reference date ${mktRes.latestFxDate})`,
-      period:mktRes.latestFxDate,
-      sourceUrl:'https://api.frankfurter.app/latest?from=USD&to=GBP',
-      sourceKind:'central_bank',
-      publishedAt:now-3600_000,
-      receivedAt:now,
-      classification:'observed',
-     });
-
-     const durationMs=Math.max(1,Date.now()-jobStart);
-     const isUnchanged=mktRes.conditionalSkip&&storeRes.insertedCount===0;
-     const summary=isUnchanged
-      ?`Market & FX cursor unchanged (${mktRes.latestSessionDate??'latest'} across 8 symbols, USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)}); ${storeRes.scoredWindows} completed window(s) scored, ${storeRes.blockedIncompleteWindows} incomplete window(s) blocked (${mktRes.providerRequestsCount} provider reqs in ${durationMs}ms).`
-      :`Collected ${mktRes.observations.length} price observation(s) across ${MARKET_DATA_SYMBOLS.join(', ')} (${storeRes.insertedCount} new, ${storeRes.duplicateCount} deduplicated; latest session ${mktRes.latestSessionDate}) + USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)} (${mktRes.providerConfig.label}); resolved ${storeRes.scoredWindows} completed window(s) in ${durationMs}ms.`;
-
-     await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
-      owner,
-      runId,
-      jobKey:'market_data_collect',
-      environment:env,
-      leaseToken:lease.leaseToken,
-      status:'succeeded',
-      cursorAfter:mktRes.cursorAfter,
-      sourcesDiscovered:MARKET_DATA_SYMBOLS.length+1,
-      evidencePromoted:storeRes.insertedCount,
-      duplicatesSkipped:storeRes.duplicateCount,
-      providerRequestsCount:mktRes.providerRequestsCount,
-      processingDurationMs:durationMs,
-      conditionalSkip:isUnchanged,
-      summary,
-     });
-     results.push({
-      jobKey:'market_data_collect',
-      status:'succeeded',
-      runId,
-      detail:`inserted=${storeRes.insertedCount}, total=${storeRes.totalStoredCount}, scoredWindows=${storeRes.scoredWindows}, reqs=${mktRes.providerRequestsCount}`,
-     });
-    }catch(err){
-     const msg=err instanceof Error?err.message:'market_data_collection_error';
-     const durationMs=Math.max(1,Date.now()-jobStart);
-     await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
-      owner,
-      runId,
-      jobKey:'market_data_collect',
-      environment:env,
-      leaseToken:lease.leaseToken,
-      status:'failed',
-      sourcesDiscovered:0,
-      evidencePromoted:0,
-      duplicatesSkipped:0,
-      providerRequestsCount:1,
-      processingDurationMs:durationMs,
-      conditionalSkip:false,
-      errorCode:'market_provider_unavailable',
-      summary:`Market data collection failed: ${msg}`,
-     });
-     results.push({jobKey:'market_data_collect',status:'failed',runId,detail:msg});
-    }
-   }
+    env,
+    now,
+    forceOnDemand:args.forceOnDemand,
+   });
+   if(mktOutcome.fxFact)discoveredFacts.push(mktOutcome.fxFact);
+   results.push(mktOutcome.result);
   }
 
   // 3. Remote Financial News & Filing Research Agent (`news_discovery_agent`)
@@ -898,7 +989,9 @@ export const runScheduledCloudCycle=internalAction({
 
   // 6. Non-blocking TypeDB Cloud Outbox Projection (`typedb_outbox_project`)
   // Isolated in try/catch so a TypeDB Cloud outage never interrupts Convex evidence ingestion.
-  if(process.env.TYPEDB_HTTP_ADDRESS){
+  // RC002.3 defense-in-depth: skip when caller passes an explicit `jobs` allowlist that omits `typedb_outbox_project`.
+  const shouldProjectTypeDb=!args.jobs||args.jobs.includes('typedb_outbox_project');
+  if(shouldProjectTypeDb&&process.env.TYPEDB_HTTP_ADDRESS){
    try{
     const syncRes=await ctx.runAction(graphARef('syncAndVerifyTypeDbCloud'),{
      owner,
