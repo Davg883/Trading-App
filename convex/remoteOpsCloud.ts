@@ -281,10 +281,17 @@ async function executeMarketDataCollectJob(
   };
 
   const durationMs=Math.max(1,Date.now()-jobStart);
-  const isUnchanged=mktRes.conditionalSkip&&storeRes.insertedCount===0;
-  const summary=isUnchanged
-   ?`Market & FX cursor unchanged (${mktRes.latestSessionDate??'latest'} across 8 symbols, USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)}); ${storeRes.scoredWindows} completed window(s) scored, ${storeRes.blockedIncompleteWindows} incomplete window(s) blocked (${mktRes.providerRequestsCount} provider reqs in ${durationMs}ms).`
-   :`Collected ${mktRes.observations.length} price observation(s) across ${MARKET_DATA_SYMBOLS.join(', ')} (${storeRes.insertedCount} new, ${storeRes.duplicateCount} deduplicated; latest session ${mktRes.latestSessionDate}) + USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)} (${mktRes.providerConfig.label}); resolved ${storeRes.scoredWindows} completed window(s) in ${durationMs}ms.`;
+  const isUnchanged=mktRes.conditionalSkip&&storeRes.insertedCount===0&&mktRes.errors.length===0;
+  const partialErrors=mktRes.errors;
+  const partialSuffix=
+   partialErrors.length>0
+    ?` [PARTIAL_PROVIDER_ERROR: ${partialErrors.length} symbol(s) failed: ${partialErrors.map(e=>`${e.symbol} (${e.error})`).join('; ')}]`
+    :'';
+  const summary=(
+   isUnchanged
+    ?`Market & FX cursor unchanged (${mktRes.latestSessionDate??'latest'} across 8 symbols, USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)}); ${storeRes.scoredWindows} completed window(s) scored, ${storeRes.blockedIncompleteWindows} incomplete window(s) blocked (${mktRes.providerRequestsCount} provider reqs in ${durationMs}ms).`
+    :`Collected ${mktRes.observations.length} price observation(s) across ${MARKET_DATA_SYMBOLS.join(', ')} (${storeRes.insertedCount} new, ${storeRes.duplicateCount} deduplicated; latest session ${mktRes.latestSessionDate}) + USD/GBP ${mktRes.latestUsdToGbp.toFixed(4)} (${mktRes.providerConfig.label}); resolved ${storeRes.scoredWindows} completed window(s) in ${durationMs}ms.`
+  )+partialSuffix;
 
   await ctx.runMutation(mRef('recordDeterministicRunInternal'),{
    owner,
@@ -293,6 +300,7 @@ async function executeMarketDataCollectJob(
    environment:env,
    leaseToken:lease.leaseToken,
    status:'succeeded',
+   ...(partialErrors.length>0?{errorCode:'partial_symbol_provider_error'}:{}),
    cursorAfter:mktRes.cursorAfter,
    sourcesDiscovered:MARKET_DATA_SYMBOLS.length+1,
    evidencePromoted:storeRes.insertedCount,

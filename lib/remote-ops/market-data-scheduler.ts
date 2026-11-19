@@ -217,18 +217,59 @@ export function evaluateUsMarketEodWindow(nowMs: number): UsMarketEodWindowAsses
   };
 }
 
+function stepForwardOneCalendarDay(dateIso: string): string {
+  const [y, m, d] = dateIso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d!));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Computes the next scheduled UTC collection slot (`21:30 UTC` or `22:30 UTC` on a non-holiday US trading weekday).
+ * Returns `null` when `schedulerEnv !== 'enabled'`.
+ */
+export function computeNextExpectedMarketDataWindowUtc(
+  nowMs: number,
+  schedulerEnv: MarketDataSchedulerEnv,
+): string | null {
+  if (schedulerEnv !== 'enabled') return null;
+  const nowDate = new Date(nowMs);
+  let cursorDate = nowDate.toISOString().slice(0, 10);
+  for (let dayOffset = 0; dayOffset < 14; dayOffset += 1) {
+    if (isUsTradingDay(cursorDate)) {
+      for (const slotTime of ['21:30:00Z', '22:30:00Z']) {
+        const candidateIso = `${cursorDate}T${slotTime}`;
+        const candidateMs = Date.parse(candidateIso);
+        if (candidateMs > nowMs && evaluateUsMarketEodWindow(candidateMs).eligible) {
+          return candidateIso;
+        }
+      }
+    }
+    cursorDate = stepForwardOneCalendarDay(cursorDate);
+  }
+  return null;
+}
+
 export interface MarketDataOperationalStatus {
   schedulerEnv: MarketDataSchedulerEnv;
   status: 'active' | 'paused' | 'degraded' | 'stale';
+  schedulerActive: boolean;
+  lastCollectionSucceeded: boolean;
+  dataFresh: boolean;
+  dataIncomplete: boolean;
   lastAttemptedRunAt: number | null;
   lastAttemptedStatus: string | null;
   lastSuccessfulRunAt: number | null;
+  lastErrorCode: string | null;
+  lastErrorDetail: string | null;
   latestCompletedSessionDate: string | null;
   expectedLatestSessionDate: string;
   coveredSymbolsCount: number;
   expectedSymbolsCount: number;
   missingSymbols: string[];
+  laggingSymbols: string[];
   staleDataWarning: string | null;
+  nextExpectedCollectionAtUtc: string | null;
   scheduleUtcSlots: readonly string[];
   maxMonthlyScheduledAttempts: number;
   maxMonthlyProviderRequests: number;
@@ -239,7 +280,7 @@ export interface MarketDataOperationalStatus {
 export function buildMarketDataOperationalStatus(params: {
   marketDataSchedulerEnv: MarketDataSchedulerEnv;
   nowMs: number;
-  recentMarketRuns: Array<{ startedAt: number; status: string }>;
+  recentMarketRuns: Array<{ startedAt: number; status: string; errorCode?: string | null; summary?: string | null }>;
   latestBySymbol: Array<{ symbol: string; sessionDate: string }>;
 }): MarketDataOperationalStatus {
   const expectedLatestSessionDate = expectedLatestCompletedUsSessionDate(params.nowMs);
@@ -249,6 +290,10 @@ export function buildMarketDataOperationalStatus(params: {
 
   const bySymbol = new Map(params.latestBySymbol.map((s) => [s.symbol, s.sessionDate]));
   const missingSymbols = MARKET_DATA_SYMBOLS.filter((sym) => !bySymbol.has(sym));
+  const laggingSymbols = MARKET_DATA_SYMBOLS.filter((sym) => {
+    const dt = bySymbol.get(sym);
+    return dt !== undefined && dt < expectedLatestSessionDate;
+  });
   const coveredSymbolsCount = MARKET_DATA_SYMBOLS.length - missingSymbols.length;
 
   const symbolDates = [...bySymbol.values()].sort();
@@ -259,27 +304,46 @@ export function buildMarketDataOperationalStatus(params: {
       ? (symbolDates[0] ?? null)
       : (symbolDates[symbolDates.length - 1] ?? null);
 
+  const lastErrorCode = lastAttempted?.errorCode ?? null;
+  const lastErrorDetail = lastErrorCode ? (lastAttempted?.summary ?? lastErrorCode) : null;
+
   const warnings: string[] = [];
   if (missingSymbols.length > 0) {
     warnings.push(`Missing market observations for ${missingSymbols.length} symbol(s): ${missingSymbols.join(', ')}.`);
   }
+  if (laggingSymbols.length > 0) {
+    warnings.push(
+      `Lagging EOD observations for ${laggingSymbols.length} symbol(s) (${laggingSymbols.join(', ')}) behind expected US session (${expectedLatestSessionDate}).`,
+    );
+  }
   if (!latestCompletedSessionDate) {
     warnings.push(`No completed US EOD market sessions stored (expected ${expectedLatestSessionDate}).`);
-  } else if (latestCompletedSessionDate < expectedLatestSessionDate) {
+  } else if (latestCompletedSessionDate < expectedLatestSessionDate && laggingSymbols.length === 0) {
     warnings.push(
       `Latest stored EOD session (${latestCompletedSessionDate}) lags expected completed US session (${expectedLatestSessionDate}).`,
     );
   }
   if (lastAttempted && lastAttempted.status === 'failed') {
     warnings.push('Most recent market_data_collect attempt failed; delayed public EOD closes are never fabricated.');
+  } else if (lastErrorCode) {
+    warnings.push(`Most recent market_data_collect run recorded provider warning (${lastErrorCode}).`);
   }
 
+  const schedulerActive = params.marketDataSchedulerEnv === 'enabled';
+  const lastCollectionSucceeded = lastAttempted?.status === 'succeeded' && !lastErrorCode;
+  const dataIncomplete = missingSymbols.length > 0 || laggingSymbols.length > 0;
+  const dataFresh =
+    coveredSymbolsCount === MARKET_DATA_SYMBOLS.length &&
+    laggingSymbols.length === 0 &&
+    latestCompletedSessionDate !== null &&
+    latestCompletedSessionDate >= expectedLatestSessionDate;
+
   let status: MarketDataOperationalStatus['status'];
-  if (lastAttempted?.status === 'failed') {
+  if (lastAttempted?.status === 'failed' || lastErrorCode !== null) {
     status = 'degraded';
-  } else if (params.marketDataSchedulerEnv !== 'enabled') {
+  } else if (!schedulerActive) {
     status = 'paused';
-  } else if (warnings.length > 0) {
+  } else if (!dataFresh || dataIncomplete || warnings.length > 0) {
     status = 'stale';
   } else {
     status = 'active';
@@ -288,15 +352,26 @@ export function buildMarketDataOperationalStatus(params: {
   return {
     schedulerEnv: params.marketDataSchedulerEnv,
     status,
+    schedulerActive,
+    lastCollectionSucceeded,
+    dataFresh,
+    dataIncomplete,
     lastAttemptedRunAt: lastAttempted?.startedAt ?? null,
     lastAttemptedStatus: lastAttempted?.status ?? null,
     lastSuccessfulRunAt: lastSuccessful?.startedAt ?? null,
+    lastErrorCode,
+    lastErrorDetail,
     latestCompletedSessionDate,
     expectedLatestSessionDate,
     coveredSymbolsCount,
     expectedSymbolsCount: MARKET_DATA_SYMBOLS.length,
     missingSymbols: [...missingSymbols],
+    laggingSymbols: [...laggingSymbols],
     staleDataWarning: warnings.length > 0 ? warnings.join(' ') : null,
+    nextExpectedCollectionAtUtc: computeNextExpectedMarketDataWindowUtc(
+      params.nowMs,
+      params.marketDataSchedulerEnv,
+    ),
     scheduleUtcSlots: MARKET_DATA_WEEKDAY_SLOTS_UTC,
     maxMonthlyScheduledAttempts: MARKET_DATA_MAX_MONTHLY_SCHEDULED_ATTEMPTS,
     maxMonthlyProviderRequests: MARKET_DATA_MAX_MONTHLY_PROVIDER_REQUESTS,

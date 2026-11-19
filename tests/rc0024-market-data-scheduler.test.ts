@@ -424,7 +424,7 @@ describe('RC002.4 — Dedicated Market-Data-Only Recurring Scheduler (Mode B)',(
   const pubAfterSlot1=await t.query(publicOpsRef,{}) as {marketDataScheduler:{status:string;latestCompletedSessionDate:string;staleDataWarning:string|null}};
   expect(pubAfterSlot1.marketDataScheduler.status).toBe('stale');
   expect(pubAfterSlot1.marketDataScheduler.latestCompletedSessionDate).toBe('2026-11-18');
-  expect(pubAfterSlot1.marketDataScheduler.staleDataWarning).toContain('lags expected completed US session (2026-11-19)');
+  expect(pubAfterSlot1.marketDataScheduler.staleDataWarning).toContain('behind expected US session (2026-11-19)');
 
   // Simulate active in-flight lease on market_data_collect -> overlapping invocation blocked as lease_active (0 fetches)
   vi.setSystemTime(POST_CLOSE_EST+60*60_000);
@@ -498,5 +498,159 @@ describe('RC002.4 — Dedicated Market-Data-Only Recurring Scheduler (Mode B)',(
   expect(finalState.brokers).toBe(0);
   expect(finalState.outboxRow?.status).toBe('pending');
   expect(finalState.outboxRow?.attemptCount).toBe(0);
+ });
+
+ it('recovers at Slot 2 even after 3+ consecutive failures (45m backoff cap) and handles double-slot outage without fabricating data',async()=>{
+  process.env.MARKET_DATA_SCHEDULER_ENV='enabled';
+  const t=convexTest(schema,modules);
+  const calledUrls:string[]=[];
+
+  // Scenario A: Both Slot 1 (21:30Z) and Slot 2 (22:30Z) fail on outage -> 0 fabricated rows
+  vi.stubGlobal('fetch',mockMarketFetch(calledUrls,{failNasdaq:true}));
+  const day1Slot1=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string}};
+  expect(day1Slot1.result.status).toBe('failed');
+
+  vi.setSystemTime(POST_CLOSE_EST+60*60_000); // 22:30 UTC
+  const day1Slot2=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string}};
+  expect(day1Slot2.result.status).toBe('failed');
+
+  // Next trading day Slot 1 (2026-11-20 21:30 UTC): 3rd consecutive failure!
+  const day2Slot1Ms=Date.parse('2026-11-20T21:30:00Z');
+  vi.setSystemTime(day2Slot1Ms);
+  const day2Slot1=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string}};
+  expect(day2Slot1.result.status).toBe('failed');
+
+  // Still 0 fabricated observations after 3 consecutive failures
+  const obsAfter3Fails=await t.run(async(ctx)=>(await ctx.db.query('marketObservations').collect()).length);
+  expect(obsAfter3Fails).toBe(0);
+
+  // 10 minutes later (21:40 UTC): cooldown still blocks rapid overlap (within 45m cap)
+  vi.setSystemTime(day2Slot1Ms+10*60_000);
+  calledUrls.length=0;
+  const tooEarly=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string}};
+  expect(tooEarly.result.status).toBe('not_due');
+  expect(calledUrls.length).toBe(0);
+
+  // Day 2 Slot 2 (22:30 UTC, +60m after 3rd failure): provider recovers -> MUST NOT be blocked by backoff!
+  vi.setSystemTime(day2Slot1Ms+60*60_000);
+  vi.stubGlobal('fetch',mockMarketFetch(calledUrls,{failNasdaq:false}));
+  const day2Slot2=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string;detail:string}};
+  expect(day2Slot2.result.status).toBe('succeeded');
+  expect(day2Slot2.result.detail).toContain('inserted=16');
+
+  const runs=await t.run(async(ctx)=>await ctx.db.query('researchJobRuns').collect());
+  expect(runs.map((r)=>r.status)).toEqual(['failed','failed','failed','succeeded']);
+  expect(runs.slice(0,3).every((r)=>r.errorCode==='market_provider_unavailable')).toBe(true);
+ });
+
+ it('surfaces partial symbol coverage as degraded/incomplete (never healthy) and computes nextExpectedCollectionAtUtc',async()=>{
+  process.env.MARKET_DATA_SCHEDULER_ENV='enabled';
+  const t=convexTest(schema,modules);
+  const failingSymbols=new Set(['AMD','CRWV','QQQ']);
+  const calledUrls:string[]=[];
+
+  vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
+   const url=typeof input==='string'?input:input instanceof URL?input.toString():input.url;
+   calledUrls.push(url);
+   if(url.startsWith('https://api.frankfurter.app/')){
+    return new Response(JSON.stringify({amount:1,base:'USD',rates:{'2026-11-18':{GBP:0.75939},'2026-11-19':{GBP:0.76038}}}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   for(const sym of failingSymbols){
+    if(url.includes(`/quote/${sym}/`)){
+     return new Response('Upstream partial error',{status:503});
+    }
+   }
+   return new Response(
+    JSON.stringify({
+     data:{
+      tradesTable:{
+       rows:[{date:'11/19/2026',close:'$152.10',volume:'15,000,000',open:'$151.00',high:'$153.20',low:'$150.40'}],
+      },
+     },
+    }),
+    {status:200,headers:{'Content-Type':'application/json'}},
+   );
+  }));
+
+  // Slot 1 (21:30Z): 5 symbols succeed, 3 fail -> stores 5 valid rows, marks degraded/incomplete
+  const slot1=await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  }) as {result:{status:string;detail:string}};
+  expect(slot1.result.status).toBe('succeeded');
+  expect(slot1.result.detail).toContain('inserted=5');
+
+  const pubPartial=await t.query(publicOpsRef,{}) as {
+   marketDataScheduler:{
+    status:string;
+    schedulerActive:boolean;
+    lastCollectionSucceeded:boolean;
+    dataFresh:boolean;
+    dataIncomplete:boolean;
+    coveredSymbolsCount:number;
+    missingSymbols:string[];
+    lastErrorCode:string|null;
+    nextExpectedCollectionAtUtc:string|null;
+    staleDataWarning:string|null;
+   };
+  };
+  expect(pubPartial.marketDataScheduler.status).toBe('degraded');
+  expect(pubPartial.marketDataScheduler.schedulerActive).toBe(true);
+  expect(pubPartial.marketDataScheduler.lastCollectionSucceeded).toBe(false);
+  expect(pubPartial.marketDataScheduler.dataFresh).toBe(false);
+  expect(pubPartial.marketDataScheduler.dataIncomplete).toBe(true);
+  expect(pubPartial.marketDataScheduler.coveredSymbolsCount).toBe(5);
+  expect(pubPartial.marketDataScheduler.missingSymbols).toEqual(['AMD','CRWV','QQQ']);
+  expect(pubPartial.marketDataScheduler.lastErrorCode).toBe('partial_symbol_provider_error');
+  expect(pubPartial.marketDataScheduler.nextExpectedCollectionAtUtc).toBe('2026-11-19T22:30:00Z');
+  expect(pubPartial.marketDataScheduler.staleDataWarning).toContain('AMD, CRWV, QQQ');
+
+  // Slot 2 (22:30Z): all 8 symbols succeed -> recovers missing 3, clears degraded/stale, advances next window to Fri 21:30Z
+  failingSymbols.clear();
+  vi.setSystemTime(POST_CLOSE_EST+60*60_000);
+  await t.action(runMarketDataOnlyRef,{
+   environment:'remote',
+   triggerSource:'scheduled_market_data_cron',
+  });
+
+  const pubRecovered=await t.query(publicOpsRef,{}) as {
+   marketDataScheduler:{
+    status:string;
+    schedulerActive:boolean;
+    lastCollectionSucceeded:boolean;
+    dataFresh:boolean;
+    dataIncomplete:boolean;
+    coveredSymbolsCount:number;
+    missingSymbols:string[];
+    lastErrorCode:string|null;
+    nextExpectedCollectionAtUtc:string|null;
+    staleDataWarning:string|null;
+   };
+  };
+  expect(pubRecovered.marketDataScheduler.status).toBe('active');
+  expect(pubRecovered.marketDataScheduler.schedulerActive).toBe(true);
+  expect(pubRecovered.marketDataScheduler.lastCollectionSucceeded).toBe(true);
+  expect(pubRecovered.marketDataScheduler.dataFresh).toBe(true);
+  expect(pubRecovered.marketDataScheduler.dataIncomplete).toBe(false);
+  expect(pubRecovered.marketDataScheduler.coveredSymbolsCount).toBe(8);
+  expect(pubRecovered.marketDataScheduler.missingSymbols).toEqual([]);
+  expect(pubRecovered.marketDataScheduler.lastErrorCode).toBeNull();
+  expect(pubRecovered.marketDataScheduler.nextExpectedCollectionAtUtc).toBe('2026-11-20T21:30:00Z');
+  expect(pubRecovered.marketDataScheduler.staleDataWarning).toBeNull();
  });
 });

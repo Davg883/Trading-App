@@ -767,7 +767,12 @@ async function buildOperationsOverview(ctx:Ctx,owner:string,now:number,audience:
  const marketDataScheduler=buildMarketDataOperationalStatus({
   marketDataSchedulerEnv:resolveMarketDataSchedulerEnv(process.env.MARKET_DATA_SCHEDULER_ENV),
   nowMs:now,
-  recentMarketRuns:recentMarketRuns.map(r=>({startedAt:r.startedAt,status:r.status})),
+  recentMarketRuns:recentMarketRuns.map(r=>({
+   startedAt:r.startedAt,
+   status:r.status,
+   errorCode:r.errorCode??null,
+   summary:r.summary??null,
+  })),
   latestBySymbol:[...latestBySymbol.values()].map(s=>({symbol:s.symbol,sessionDate:s.sessionDate})),
  });
 
@@ -1576,7 +1581,10 @@ export const recordDeterministicRunInternal=internalMutation({
    const code=args.errorCode??'provider_unavailable';
    const failures=job.consecutiveFailures+1;
    const shouldPause=PAUSE_ON_ERRORS.has(code);
-   const backoffMs=Math.min(intervalMs*2**Math.min(failures,6),MAX_BACKOFF_MS);
+   // RC002.4: cap market_data_collect failure backoff at 45m so a failed Slot 1 (21:30 UTC)
+   // never blocks bounded Slot 2 recovery (22:30 UTC, +60m), even after 3+ consecutive failures.
+   const rawBackoffMs=Math.min(intervalMs*2**Math.min(failures,6),MAX_BACKOFF_MS);
+   const backoffMs=args.jobKey==='market_data_collect'?Math.min(rawBackoffMs,45*60_000):rawBackoffMs;
    await ctx.db.patch(job._id,{
     lastRunAt:now,
     lastFailureAt:now,
